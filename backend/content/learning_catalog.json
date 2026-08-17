@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "scope": "A2-B1 everyday social and emotional English",
+  "targets": [
+    {"id":"intent.follow_up","kind":"intent","name":"Ask follow-up questions","can_do":"I can ask for useful details naturally."},
+    {"id":"intent.empathy","kind":"intent","name":"Express empathy","can_do":"I can acknowledge another person's feelings."},
+    {"id":"intent.advice","kind":"intent","name":"Give gentle advice","can_do":"I can offer suggestions without sounding commanding."},
+    {"id":"intent.past_story","kind":"intent","name":"Describe past events","can_do":"I can tell what happened in a clear order."},
+    {"id":"grammar.past_simple","kind":"grammar","name":"Past simple","can_do":"I can use common regular and irregular past forms."},
+    {"id":"grammar.questions","kind":"grammar","name":"Natural questions","can_do":"I can form wh- and yes/no questions."},
+    {"id":"grammar.soft_advice","kind":"grammar","name":"Soft advice forms","can_do":"I can use could, might, and maybe to soften advice."},
+    {"id":"grammar.sequence","kind":"grammar","name":"Story sequence","can_do":"I can connect events with time and sequence words."}
+  ],
+  "expressions": {
+    "intent.follow_up": ["What happened?","What happened next?","Why did they say that?","How did that happen?","When did it start?","Who was there?","What did you do?","How did you feel?","Are you okay now?","Can you tell me more?","What do you mean?","Did anything else happen?"],
+    "intent.empathy": ["I'm sorry to hear that.","That sounds difficult.","That must have been hard.","I can understand why you're upset.","I'd feel the same way.","You didn't deserve that.","I'm here for you.","Take your time.","That sounds really frustrating.","I'm glad you told me.","I hope things get better.","You must be exhausted."],
+    "intent.advice": ["Maybe you could talk to them.","You might want to take a break.","Have you tried asking for help?","I think you should be honest.","Why don't you write it down?","It might help to sleep on it.","If I were you, I'd wait.","Perhaps you can try again tomorrow.","You could explain how you feel.","How about calling a friend?","There's no harm in asking.","Whatever you choose, I'll support you."],
+    "intent.past_story": ["Yesterday, I had a difficult day.","First, I spoke to my manager.","Then, we discussed the problem.","After that, I went home.","Finally, I decided to try again.","It happened last week.","I didn't know what to say.","She told me the news.","We met after work.","I felt better later.","At first, everything was fine.","In the end, it worked out."]
+  },
+  "vocabulary": {
+    "feelings": ["happy","sad","upset","angry","worried","nervous","excited","proud","lonely","calm","confused","surprised","disappointed","embarrassed","frustrated","grateful","relieved","jealous","hopeful","exhausted"],
+    "work_school": ["manager","coworker","client","meeting","deadline","project","idea","feedback","mistake","interview","job","office","class","teacher","assignment","exam","team","schedule","promotion","design"],
+    "relationships": ["friend","partner","family","roommate","neighbor","colleague","argument","support","trust","promise","apology","advice","secret","invitation","message","conversation","misunderstanding","relationship","choice","feeling"],
+    "daily_life": ["morning","afternoon","evening","weekend","home","trip","party","appointment","plan","problem","chance","change","break","rest","hobby","pet","call","email","news","decision"],
+    "story_actions": ["happen","feel","say","tell","ask","answer","meet","leave","forget","remember","decide","try","help","wait","explain","invite","cancel","agree","disagree","finish"]
+  },
+  "llm_evidence_contract": {
+    "description": "The evaluator selects only known target ids and reports observable evidence; the rule engine owns scoring.",
+    "example": [{"target_id":"intent.empathy","outcome":"success","confidence":0.9,"source":"chat"},{"target_id":"grammar.questions","outcome":"error","confidence":0.8,"source":"chat"}]
+  }
+}

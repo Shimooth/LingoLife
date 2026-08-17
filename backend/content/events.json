@@ -1,0 +1,174 @@
+{
+  "version": 1,
+  "events": [
+    {
+      "id": "daily_burnt_breakfast", "category": "daily", "title": "The Experimental Breakfast", "base_weight": 4,
+      "tags": {"traits": ["playful", "creative"], "interests": ["cooking"], "moods": ["happy", "neutral"], "needs": ["food"]},
+      "cooldown_days": 10, "repeatable": true, "learning_targets": ["intent.follow_up", "grammar.past_simple"],
+      "stages": [
+        {"id": "smoke", "prompt": "I tried a new breakfast recipe, but the smoke alarm became my food critic.", "objective": "Ask what happened.", "any_signals": ["curiosity", "empathy"]},
+        {"id": "taste", "prompt": "The toast is black, but the fruit is still safe. Would you try my second attempt?", "objective": "Respond to the invitation.", "any_signals": ["accept", "decline", "encouragement"]},
+        {"id": "retry", "prompt": "Maybe I should start with something easier. What would you make?", "objective": "Offer an idea.", "any_signals": ["advice", "practical_help"]}
+      ],
+      "outcomes": [
+        {"id": "cook_together", "trigger_signals": ["accept", "practical_help"], "relationship_change": 4, "mood_change": 5, "memory": "The player laughed kindly about my failed breakfast and helped me try again."},
+        {"id": "cheered_up", "trigger_signals": ["encouragement"], "relationship_change": 2, "mood_change": 3, "memory": "The player encouraged me after my breakfast disaster."}
+      ], "default_outcome": "cheered_up"
+    },
+    {
+      "id": "daily_rainy_walk", "category": "daily", "title": "A Walk in the Rain", "base_weight": 4,
+      "tags": {"traits": ["calm", "introverted"], "interests": ["nature", "photography"], "moods": ["tired", "lonely"], "needs": ["rest", "social"]},
+      "cooldown_days": 8, "repeatable": true, "learning_targets": ["intent.advice", "grammar.soft_advice"],
+      "stages": [
+        {"id": "window", "prompt": "It has been raining all afternoon. The street looks strangely peaceful.", "objective": "Notice Emma's mood.", "any_signals": ["curiosity", "empathy"]},
+        {"id": "choice", "prompt": "I want to go outside, but I also want to stay under this blanket forever.", "objective": "Make a gentle suggestion.", "any_signals": ["advice", "encouragement"]},
+        {"id": "invite", "prompt": "Would you walk with me if we both brought umbrellas?", "objective": "Accept or decline honestly.", "any_signals": ["accept", "decline", "honesty"]}
+      ],
+      "outcomes": [
+        {"id": "shared_walk", "trigger_signals": ["accept", "empathy"], "relationship_change": 5, "mood_change": 4, "memory": "We took a quiet rainy walk together when I felt low."},
+        {"id": "rested", "trigger_signals": ["advice"], "relationship_change": 2, "mood_change": 2, "memory": "The player helped me choose what I needed on a rainy day."}
+      ], "default_outcome": "rested"
+    },
+    {
+      "id": "daily_mystery_package", "category": "daily", "title": "The Mystery Package", "base_weight": 3.5,
+      "tags": {"traits": ["curious", "playful"], "interests": ["books", "technology"], "moods": ["excited"]},
+      "cooldown_days": 20, "repeatable": false, "learning_targets": ["intent.follow_up", "grammar.questions"],
+      "stages": [
+        {"id": "arrival", "prompt": "A package arrived with my name on it, but I don't remember ordering anything.", "objective": "Ask for details.", "any_signals": ["curiosity", "reassurance"]},
+        {"id": "clue", "prompt": "The label says it came from my old college town. What do you think is inside?", "objective": "Make a prediction.", "any_signals": ["curiosity", "advice"]},
+        {"id": "open", "prompt": "It's my lost sketchbook! My old roommate found it after five years.", "objective": "Share Emma's excitement.", "any_signals": ["celebration", "encouragement", "empathy"]}
+      ],
+      "outcomes": [
+        {"id": "memory_shared", "trigger_signals": ["curiosity", "celebration"], "relationship_change": 4, "mood_change": 6, "memory": "The player was with me when my lost college sketchbook unexpectedly returned."},
+        {"id": "package_opened", "trigger_signals": [], "relationship_change": 1, "mood_change": 4, "memory": "My lost college sketchbook came back in a mystery package."}
+      ], "default_outcome": "package_opened"
+    },
+    {
+      "id": "growth_rejected_design", "category": "growth", "title": "The Rejected Design", "base_weight": 4,
+      "tags": {"traits": ["creative", "ambitious"], "interests": ["art", "design"], "occupations": ["designer"], "moods": ["sad", "angry"], "needs": ["achievement"], "goals": ["portfolio", "designer", "promotion"]},
+      "cooldown_days": 30, "repeatable": false, "learning_targets": ["intent.empathy", "intent.advice"],
+      "stages": [
+        {"id": "rejection", "prompt": "My manager rejected the design I worked on all week. He only said it felt wrong.", "objective": "Show empathy and ask what happened.", "required_signals": ["empathy"], "any_signals": ["curiosity", "reassurance"]},
+        {"id": "doubt", "prompt": "Maybe I'm not good enough for this job. Should I throw the whole idea away?", "objective": "Respond to Emma's self-doubt.", "any_signals": ["encouragement", "advice", "honesty"]},
+        {"id": "plan", "prompt": "I could ask for specific feedback tomorrow, but that conversation scares me.", "objective": "Help make a practical plan.", "any_signals": ["practical_help", "encouragement"]}
+      ],
+      "outcomes": [
+        {"id": "asks_feedback", "trigger_signals": ["empathy", "practical_help"], "relationship_change": 6, "mood_change": 6, "memory": "When my design was rejected, the player helped me prepare to ask for useful feedback."},
+        {"id": "tries_again", "trigger_signals": ["empathy", "encouragement"], "relationship_change": 5, "mood_change": 4, "memory": "The player believed in me after my design was rejected."},
+        {"id": "still_unsure", "trigger_signals": [], "relationship_change": 1, "mood_change": 0, "memory": "I was unsure what to do after my design was rejected."}
+      ], "default_outcome": "still_unsure"
+    },
+    {
+      "id": "growth_first_exhibition", "category": "growth", "title": "One Empty Wall", "base_weight": 2.8,
+      "tags": {"traits": ["creative", "introverted"], "interests": ["art", "photography"], "occupations": ["designer", "artist"], "moods": ["excited", "anxious"], "needs": ["achievement"], "goals": ["exhibition", "portfolio", "artist"]},
+      "relationship_range": [25, 100], "cooldown_days": 45, "repeatable": false, "learning_targets": ["intent.empathy", "intent.advice"],
+      "stages": [
+        {"id": "invitation", "prompt": "The neighborhood café offered me one wall for a tiny exhibition.", "objective": "React and ask about the opportunity.", "any_signals": ["celebration", "curiosity", "encouragement"]},
+        {"id": "fear", "prompt": "What if people look at my work and feel nothing?", "objective": "Address Emma's fear.", "any_signals": ["empathy", "reassurance", "honesty"]},
+        {"id": "selection", "prompt": "I need to choose three pieces tonight. Will you help me decide what story they should tell?", "objective": "Offer help or a theme.", "any_signals": ["accept", "advice", "practical_help"]}
+      ],
+      "outcomes": [
+        {"id": "show_planned", "trigger_signals": ["encouragement", "practical_help"], "relationship_change": 7, "mood_change": 7, "memory": "The player helped me find the courage and story for my first small exhibition."},
+        {"id": "accepts_offer", "trigger_signals": ["reassurance"], "relationship_change": 4, "mood_change": 5, "memory": "The player reassured me when I was afraid to show my work."}
+      ], "default_outcome": "accepts_offer"
+    },
+    {
+      "id": "growth_interview_tomorrow", "category": "growth", "title": "The Interview Tomorrow", "base_weight": 3.2,
+      "tags": {"traits": ["ambitious", "anxious"], "moods": ["tired", "anxious"], "needs": ["achievement", "security"], "goals": ["job", "career", "promotion"]},
+      "cooldown_days": 40, "repeatable": false, "learning_targets": ["intent.advice", "grammar.soft_advice"],
+      "stages": [
+        {"id": "news", "prompt": "I have an interview tomorrow, and my stomach has been doing acrobatics all day.", "objective": "Ask about the interview.", "any_signals": ["curiosity", "empathy"]},
+        {"id": "weakness", "prompt": "They always ask about weaknesses. I never know how to answer without sounding terrible.", "objective": "Suggest an approach.", "any_signals": ["advice", "practical_help"]},
+        {"id": "practice", "prompt": "Could I practice my introduction with you once?", "objective": "Agree to help or encourage Emma.", "any_signals": ["accept", "encouragement", "reassurance"]}
+      ],
+      "outcomes": [
+        {"id": "well_prepared", "trigger_signals": ["practical_help", "accept"], "relationship_change": 6, "mood_change": 6, "memory": "The player practiced with me before an important interview."},
+        {"id": "more_confident", "trigger_signals": ["encouragement"], "relationship_change": 3, "mood_change": 4, "memory": "The player gave me confidence before my interview."}
+      ], "default_outcome": "more_confident"
+    },
+    {
+      "id": "relationship_forgot_birthday", "category": "relationship", "title": "The Forgotten Birthday", "base_weight": 3.5,
+      "tags": {"traits": ["kind", "anxious"], "moods": ["guilty", "sad"], "needs": ["social", "love"]},
+      "cooldown_days": 45, "repeatable": false, "learning_targets": ["intent.empathy", "grammar.past_simple"],
+      "stages": [
+        {"id": "mistake", "prompt": "I just realized I forgot my best friend's birthday yesterday.", "objective": "Respond empathetically.", "any_signals": ["empathy", "reassurance"]},
+        {"id": "avoidance", "prompt": "I'm embarrassed. Part of me wants to pretend I didn't notice.", "objective": "Give honest advice.", "any_signals": ["advice", "honesty"]},
+        {"id": "message", "prompt": "I want to apologize without making excuses. How should I begin?", "objective": "Help form an apology.", "any_signals": ["apology", "practical_help"]}
+      ],
+      "outcomes": [
+        {"id": "honest_apology", "trigger_signals": ["honesty", "apology"], "relationship_change": 5, "mood_change": 4, "memory": "The player helped me make an honest apology after I forgot a friend's birthday."},
+        {"id": "sends_message", "trigger_signals": ["advice"], "relationship_change": 2, "mood_change": 2, "memory": "I decided to message my friend after forgetting their birthday."}
+      ], "default_outcome": "sends_message"
+    },
+    {
+      "id": "relationship_roommate_conflict", "category": "relationship", "title": "The Sink Full of Dishes", "base_weight": 3.4,
+      "tags": {"traits": ["direct", "tidy"], "moods": ["angry", "tired"], "needs": ["rest", "security"]},
+      "cooldown_days": 30, "repeatable": true, "learning_targets": ["intent.advice", "grammar.soft_advice"],
+      "stages": [
+        {"id": "complaint", "prompt": "My roommate left every dish in the sink again. I'm trying not to send an angry message.", "objective": "Ask what has happened before.", "any_signals": ["curiosity", "empathy"]},
+        {"id": "draft", "prompt": "My first draft says, 'Do you think dishes wash themselves?' Too much?", "objective": "Evaluate the message honestly.", "any_signals": ["honesty", "advice"]},
+        {"id": "request", "prompt": "How can I ask clearly without starting a fight?", "objective": "Suggest a polite request.", "any_signals": ["practical_help", "advice"]}
+      ],
+      "outcomes": [
+        {"id": "calm_conversation", "trigger_signals": ["honesty", "practical_help"], "relationship_change": 5, "mood_change": 5, "memory": "The player helped me turn an angry complaint into a calm request."},
+        {"id": "waits_to_cool", "trigger_signals": ["advice"], "relationship_change": 2, "mood_change": 2, "memory": "I waited until I was calmer before talking to my roommate."}
+      ], "default_outcome": "waits_to_cool"
+    },
+    {
+      "id": "relationship_old_friend_message", "category": "relationship", "title": "A Message After Years", "base_weight": 2.8,
+      "tags": {"traits": ["introverted", "nostalgic"], "moods": ["lonely", "anxious"], "needs": ["social", "love"]},
+      "relationship_range": [40, 100], "cooldown_days": 60, "repeatable": false, "learning_targets": ["intent.past_story", "intent.follow_up"],
+      "stages": [
+        {"id": "notification", "prompt": "An old friend messaged me after four years. I stared at the notification for ten minutes.", "objective": "Invite Emma to explain.", "any_signals": ["curiosity", "empathy"]},
+        {"id": "history", "prompt": "We didn't have a fight. We just stopped trying, which somehow feels worse.", "objective": "Acknowledge the complicated feeling.", "any_signals": ["empathy", "honesty", "reassurance"]},
+        {"id": "reply", "prompt": "Would replying now be strange, or is late better than never?", "objective": "Help Emma decide.", "any_signals": ["advice", "encouragement"]}
+      ],
+      "outcomes": [
+        {"id": "reconnects", "trigger_signals": ["empathy", "encouragement"], "relationship_change": 6, "mood_change": 5, "memory": "I trusted the player with the story of an old friendship and decided to reconnect."},
+        {"id": "thinks_it_over", "trigger_signals": ["honesty"], "relationship_change": 3, "mood_change": 1, "memory": "I told the player about an old friend who contacted me after years."}
+      ], "default_outcome": "thinks_it_over"
+    },
+    {
+      "id": "surprise_lost_dog", "category": "surprise", "title": "The Dog at the Door", "base_weight": 3.2,
+      "tags": {"traits": ["kind", "adventurous"], "interests": ["animals", "walking"], "moods": ["excited"], "needs": ["social"]},
+      "cooldown_days": 90, "repeatable": false, "learning_targets": ["intent.advice", "grammar.sequence"],
+      "stages": [
+        {"id": "visitor", "prompt": "There is a wet little dog sitting outside my door. No owner, just one red collar.", "objective": "Ask for identifying details.", "any_signals": ["curiosity", "empathy"]},
+        {"id": "safe", "prompt": "He's friendly but shaking. What should I do first?", "objective": "Prioritize the dog's safety.", "any_signals": ["advice", "practical_help"]},
+        {"id": "poster", "prompt": "The collar has no number. I could make a neighborhood post with his photo.", "objective": "Help with a plan.", "any_signals": ["encouragement", "practical_help"]}
+      ],
+      "outcomes": [
+        {"id": "owner_found", "trigger_signals": ["empathy", "practical_help"], "relationship_change": 6, "mood_change": 7, "memory": "The player helped me keep a lost dog safe and find its owner."},
+        {"id": "dog_safe", "trigger_signals": ["advice"], "relationship_change": 3, "mood_change": 3, "memory": "A lost dog stayed safely with me while I searched for its owner."}
+      ], "default_outcome": "dog_safe"
+    },
+    {
+      "id": "surprise_power_cut", "category": "surprise", "title": "Lights Out", "base_weight": 3.5,
+      "tags": {"traits": ["anxious", "resourceful"], "interests": ["technology"], "moods": ["tired", "anxious"], "needs": ["security"]},
+      "cooldown_days": 35, "repeatable": true, "learning_targets": ["intent.advice", "grammar.sequence"],
+      "stages": [
+        {"id": "dark", "prompt": "The power just went out, and the whole street is dark.", "objective": "Check whether Emma is safe.", "any_signals": ["empathy", "reassurance", "curiosity"]},
+        {"id": "battery", "prompt": "My phone is at twelve percent. I found a candle, but no matches.", "objective": "Offer practical priorities.", "any_signals": ["advice", "practical_help"]},
+        {"id": "neighbor", "prompt": "My elderly neighbor lives alone. Should I check on her before my battery dies?", "objective": "Balance safety and helping someone.", "any_signals": ["advice", "encouragement", "practical_help"]}
+      ],
+      "outcomes": [
+        {"id": "neighbors_help", "trigger_signals": ["reassurance", "practical_help"], "relationship_change": 5, "mood_change": 5, "memory": "During a power cut, the player helped me stay calm and safely check on my neighbor."},
+        {"id": "waits_safely", "trigger_signals": ["advice"], "relationship_change": 2, "mood_change": 2, "memory": "The player helped me think clearly during a power cut."}
+      ], "default_outcome": "waits_safely"
+    },
+    {
+      "id": "surprise_found_wallet", "category": "surprise", "title": "The Wallet on the Bench", "base_weight": 3,
+      "tags": {"traits": ["honest", "kind"], "interests": ["walking"], "moods": ["neutral"]},
+      "cooldown_days": 80, "repeatable": false, "learning_targets": ["intent.advice", "grammar.soft_advice"],
+      "stages": [
+        {"id": "find", "prompt": "I found a wallet on a park bench. There is cash and an ID inside.", "objective": "Ask for relevant details.", "any_signals": ["curiosity", "practical_help"]},
+        {"id": "options", "prompt": "The address is nearby, but I'm not sure whether visiting a stranger is safe.", "objective": "Discuss safe options.", "any_signals": ["advice", "reassurance"]},
+        {"id": "decision", "prompt": "The police station is farther away, but that feels safer. What would you do?", "objective": "Give and explain an opinion.", "any_signals": ["honesty", "advice", "practical_help"]}
+      ],
+      "outcomes": [
+        {"id": "returned_safely", "trigger_signals": ["reassurance", "practical_help"], "relationship_change": 4, "mood_change": 4, "memory": "The player helped me return a lost wallet without taking an unsafe risk."},
+        {"id": "taken_to_police", "trigger_signals": ["advice"], "relationship_change": 2, "mood_change": 3, "memory": "I took a lost wallet to the police station."}
+      ], "default_outcome": "taken_to_police"
+    }
+  ]
+}

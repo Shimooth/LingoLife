@@ -12,6 +12,7 @@ WORKDIR /app/backend
 COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 COPY --chown=10001:10001 backend/lingolife ./lingolife
+COPY --chown=10001:10001 backend/content ./content
 COPY --chown=10001:10001 config /app/config
 COPY --from=web-builder --chown=10001:10001 /build/web/dist /app/web/dist
 USER 10001:10001

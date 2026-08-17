@@ -8,6 +8,8 @@ import secrets
 import uuid
 from pathlib import Path
 
+from .events import ActiveEvent, EventHistory, event_to_dict
+from .learning import LearningState
 from .models import Stats
 
 
@@ -54,6 +56,34 @@ class Database:
               id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, request_id TEXT,
               event_type TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
             CREATE INDEX IF NOT EXISTS idx_usage_user_time ON usage_events(user_id, created_at);
+            CREATE TABLE IF NOT EXISTS npc_profiles (
+              player_id TEXT NOT NULL, npc_id TEXT NOT NULL, profile_json TEXT NOT NULL,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(player_id, npc_id));
+            CREATE TABLE IF NOT EXISTS npc_memories (
+              id INTEGER PRIMARY KEY AUTOINCREMENT, player_id TEXT NOT NULL, npc_id TEXT NOT NULL,
+              kind TEXT NOT NULL, content TEXT NOT NULL, source_event_id TEXT,
+              importance INTEGER NOT NULL DEFAULT 1 CHECK(importance BETWEEN 1 AND 5),
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+            CREATE INDEX IF NOT EXISTS idx_npc_memories_owner
+              ON npc_memories(player_id, npc_id, importance DESC, id DESC);
+            CREATE TABLE IF NOT EXISTS active_events (
+              player_id TEXT NOT NULL, npc_id TEXT NOT NULL, event_json TEXT NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(player_id, npc_id));
+            CREATE TABLE IF NOT EXISTS event_history (
+              id INTEGER PRIMARY KEY AUTOINCREMENT, player_id TEXT NOT NULL, npc_id TEXT NOT NULL,
+              template_id TEXT NOT NULL, category TEXT NOT NULL, started_on TEXT NOT NULL,
+              completed_at TEXT NOT NULL, outcome_id TEXT NOT NULL,
+              relationship_change INTEGER NOT NULL, mood_change INTEGER NOT NULL,
+              memory TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS idx_event_history_owner
+              ON event_history(player_id, npc_id, id DESC);
+            CREATE TABLE IF NOT EXISTS learning_states (
+              player_id TEXT PRIMARY KEY, state_json TEXT NOT NULL,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
             """)
 
     @staticmethod
@@ -210,3 +240,145 @@ class Database:
             self._connection.execute("INSERT INTO messages(player_id,speaker,text) VALUES (?,'npc',?)", (player_id, response["npc_reply"]))
             self._connection.execute("INSERT INTO chat_requests(idempotency_key,player_id,response_json) VALUES (?,?,?)", (key, player_id, json.dumps(response)))
             return response
+
+    # NPC Agent persistence -------------------------------------------------
+
+    @staticmethod
+    def _json(value: dict) -> str:
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+    def get_npc_profile(self, player_id: str, npc_id: str) -> dict | None:
+        row = self._connection.execute(
+            "SELECT profile_json FROM npc_profiles WHERE player_id=? AND npc_id=?", (player_id, npc_id)
+        ).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def get_or_create_npc_profile(self, player_id: str, npc_id: str, default_profile: dict) -> dict:
+        """Persist the caller-owned default once; never silently replace customization."""
+        with self._lock, self._connection:
+            self.ensure_player(player_id)
+            self._connection.execute(
+                "INSERT OR IGNORE INTO npc_profiles(player_id,npc_id,profile_json) VALUES (?,?,?)",
+                (player_id, npc_id, self._json(default_profile)),
+            )
+            return self.get_npc_profile(player_id, npc_id)  # type: ignore[return-value]
+
+    def save_npc_profile(self, player_id: str, npc_id: str, profile: dict) -> dict:
+        with self._lock, self._connection:
+            self.ensure_player(player_id)
+            self._connection.execute(
+                """INSERT INTO npc_profiles(player_id,npc_id,profile_json) VALUES (?,?,?)
+                   ON CONFLICT(player_id,npc_id) DO UPDATE SET
+                     profile_json=excluded.profile_json,updated_at=CURRENT_TIMESTAMP""",
+                (player_id, npc_id, self._json(profile)),
+            )
+        return profile
+
+    def add_npc_memory(self, player_id: str, npc_id: str, kind: str, content: str,
+                       source_event_id: str | None = None, importance: int = 1) -> dict:
+        importance = max(1, min(5, int(importance)))
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                """INSERT INTO npc_memories(player_id,npc_id,kind,content,source_event_id,importance)
+                   VALUES (?,?,?,?,?,?)""",
+                (player_id, npc_id, kind, content, source_event_id, importance),
+            )
+            row = self._connection.execute("SELECT * FROM npc_memories WHERE id=?", (cursor.lastrowid,)).fetchone()
+        return dict(row)
+
+    def list_npc_memories(self, player_id: str, npc_id: str, limit: int = 20,
+                          kind: str | None = None) -> list[dict]:
+        limit = max(0, min(200, int(limit)))
+        if kind is None:
+            rows = self._connection.execute(
+                """SELECT * FROM npc_memories WHERE player_id=? AND npc_id=?
+                   ORDER BY importance DESC,id DESC LIMIT ?""", (player_id, npc_id, limit)
+            ).fetchall()
+        else:
+            rows = self._connection.execute(
+                """SELECT * FROM npc_memories WHERE player_id=? AND npc_id=? AND kind=?
+                   ORDER BY importance DESC,id DESC LIMIT ?""", (player_id, npc_id, kind, limit)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_npc_memory(self, player_id: str, npc_id: str, memory_id: int) -> bool:
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                "DELETE FROM npc_memories WHERE id=? AND player_id=? AND npc_id=?",
+                (memory_id, player_id, npc_id),
+            )
+        return cursor.rowcount > 0
+
+    # EventRepository implementation ---------------------------------------
+
+    def get_active_event(self, player_id: str, npc_id: str) -> ActiveEvent | None:
+        row = self._connection.execute(
+            "SELECT event_json FROM active_events WHERE player_id=? AND npc_id=?", (player_id, npc_id)
+        ).fetchone()
+        return ActiveEvent(**json.loads(row[0])) if row else None
+
+    def save_active_event(self, event: ActiveEvent) -> None:
+        with self._lock, self._connection:
+            self._connection.execute(
+                """INSERT INTO active_events(player_id,npc_id,event_json) VALUES (?,?,?)
+                   ON CONFLICT(player_id,npc_id) DO UPDATE SET
+                     event_json=excluded.event_json,updated_at=CURRENT_TIMESTAMP""",
+                (event.player_id, event.npc_id, self._json(event_to_dict(event))),
+            )
+
+    def clear_active_event(self, player_id: str, npc_id: str) -> None:
+        with self._lock, self._connection:
+            self._connection.execute(
+                "DELETE FROM active_events WHERE player_id=? AND npc_id=?", (player_id, npc_id)
+            )
+
+    def list_event_history(self, player_id: str, npc_id: str, limit: int = 50) -> list[EventHistory]:
+        rows = self._connection.execute(
+            """SELECT player_id,npc_id,template_id,category,started_on,completed_at,outcome_id,
+                      relationship_change,mood_change,memory
+               FROM event_history WHERE player_id=? AND npc_id=? ORDER BY id DESC LIMIT ?""",
+            (player_id, npc_id, max(0, min(500, int(limit)))),
+        ).fetchall()
+        return [EventHistory(**dict(row)) for row in rows]
+
+    def append_event_history(self, history: EventHistory) -> None:
+        with self._lock, self._connection:
+            self._insert_event_history(history)
+
+    def _insert_event_history(self, history: EventHistory) -> None:
+        self._connection.execute(
+            """INSERT INTO event_history(
+                 player_id,npc_id,template_id,category,started_on,completed_at,outcome_id,
+                 relationship_change,mood_change,memory) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (history.player_id, history.npc_id, history.template_id, history.category,
+             history.started_on, history.completed_at, history.outcome_id,
+             history.relationship_change, history.mood_change, history.memory),
+        )
+
+    def complete_event(self, history: EventHistory) -> None:
+        """Preferred integration path: history append and active removal are atomic."""
+        with self._lock, self._connection:
+            self._insert_event_history(history)
+            self._connection.execute(
+                "DELETE FROM active_events WHERE player_id=? AND npc_id=?",
+                (history.player_id, history.npc_id),
+            )
+
+    # Learning persistence -------------------------------------------------
+
+    def get_learning_state(self, player_id: str) -> LearningState:
+        row = self._connection.execute(
+            "SELECT state_json FROM learning_states WHERE player_id=?", (player_id,)
+        ).fetchone()
+        return LearningState.from_dict(json.loads(row[0])) if row else LearningState()
+
+    def save_learning_state(self, player_id: str, state: LearningState) -> LearningState:
+        with self._lock, self._connection:
+            self.ensure_player(player_id)
+            self._connection.execute(
+                """INSERT INTO learning_states(player_id,state_json) VALUES (?,?)
+                   ON CONFLICT(player_id) DO UPDATE SET
+                     state_json=excluded.state_json,updated_at=CURRENT_TIMESTAMP""",
+                (player_id, self._json(state.to_dict())),
+            )
+        return state
