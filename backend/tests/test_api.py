@@ -13,9 +13,33 @@ class Stub:
             english_feedback=EnglishFeedback(is_understandable=True, corrected_text=message, tip="Natural and caring question.", tags=[]))
 
 
-def client(tmp_path, provider=None):
-    settings = Settings(database_url=f"sqlite:///{tmp_path / 'test.db'}")
+def client(tmp_path, provider=None, web_root=None):
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'test.db'}", web_root=str(web_root or tmp_path / "missing-web"))
     return TestClient(create_app(settings, provider or Stub()))
+
+
+def test_serves_web_root_and_static_assets_without_shadowing_api(tmp_path):
+    web_root = tmp_path / "web" / "dist"
+    web_root.mkdir(parents=True)
+    (web_root / "index.html").write_text('<script src="/app.js"></script><main>LingoLife</main>', encoding="utf-8")
+    (web_root / "app.js").write_text('document.title = "LingoLife";', encoding="utf-8")
+
+    c = client(tmp_path, web_root=web_root)
+    root = c.get("/")
+    asset = c.get("/app.js")
+
+    assert root.status_code == 200
+    assert "LingoLife" in root.text
+    assert root.headers["content-type"].startswith("text/html")
+    assert asset.status_code == 200
+    assert asset.text == 'document.title = "LingoLife";'
+    assert c.get("/api/v1/health").json() == {"status": "ok", "version": "0.1.0"}
+
+
+def test_missing_web_root_leaves_api_available(tmp_path):
+    c = client(tmp_path)
+    assert c.get("/").status_code == 404
+    assert c.get("/api/v1/health").status_code == 200
 
 
 def test_health_and_new_room(tmp_path):

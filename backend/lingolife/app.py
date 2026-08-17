@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import re
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from .ai import DeepSeekProvider, DialogueProvider, ResilientProvider
 from .config import Settings, load_settings
@@ -67,6 +69,13 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         stats = {"relationship": max(0, min(100, old.relationship + rel)), "mood": max(0, min(100, old.mood + mood)), "english_xp": max(0, min(100, old.english_xp + xp))}
         response = {**result.model_dump(), "relationship_change": rel, "mood_change": mood, "english_xp_change": xp, "stats": stats, "animation": "happy" if mood > 0 else "sad" if mood < 0 else "idle"}
         return db.commit_chat(player_id, idempotency_key, message, response)
+
+    # Keep this catch-all mount after every API route so the web UI can never
+    # shadow the JSON endpoints. Starlette's StaticFiles rejects paths that
+    # escape this directory and serves index.html for the root request.
+    web_root = Path(settings.web_root).resolve()
+    if web_root.is_dir():
+        app.mount("/", StaticFiles(directory=web_root, html=True), name="web")
 
     app.state.db = db
     return app

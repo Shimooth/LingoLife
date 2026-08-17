@@ -30,7 +30,7 @@
 `config/lingolife.example.yaml` 记录：
 
 - 应用环境、API 路径和版本
-- VPS 的 SSH alias、部署目录、systemd 服务名
+- VPS 的 SSH alias、部署目录、Docker Compose 项目
 - 域名、HTTPS 与 CORS 来源
 - Git remote、默认分支、部署分支
 - DeepSeek base URL、模型名、超时和 token 上限
@@ -44,7 +44,7 @@
 
 ## 5. 运行环境建议
 
-Demo 推荐 Ubuntu LTS、Python 3.12、FastAPI/Uvicorn、SQLite、Caddy 或 Nginx、systemd。数据库和备份目录不放进 Git。公网入口只代理 `/api/`，Uvicorn 监听 `127.0.0.1`。
+Demo 推荐 Ubuntu LTS、Docker Compose、FastAPI/Uvicorn、SQLite，以及宿主机 Nginx。数据库和备份目录不放进 Git。公网入口由 Nginx 提供 HTTPS，API 容器端口只绑定 `127.0.0.1`；具体命令以 `deploy/README.md` 为准。
 
 首版部署建议保留简单可审计的结构：
 
@@ -52,12 +52,13 @@ Demo 推荐 Ubuntu LTS、Python 3.12、FastAPI/Uvicorn、SQLite、Caddy 或 Ngin
 /opt/lingolife/app       应用代码
 /opt/lingolife/data      SQLite 数据
 /etc/lingolife           环境变量（秘密）
-/var/log/lingolife       日志（或使用 journald）
+Docker Compose           API 构建、健康检查与日志
+宿主机 Nginx             HTTPS 与反向代理
 ```
 
 ## 6. DeepSeek 配置
 
-`DEEPSEEK_API_KEY` 仅存在于本机 `.env` 或 VPS 的 env 文件。后端调用 DeepSeek，Unity 永远只调用 LingoLife API。
+`DEEPSEEK_API_KEY` 仅存在于本机 `.env` 或 VPS 的 env 文件。后端调用 DeepSeek，Web 与暂停中的 Unity 客户端都只能调用 LingoLife API。
 
 官方资料：
 

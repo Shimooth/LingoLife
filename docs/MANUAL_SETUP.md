@@ -12,7 +12,7 @@
    DEEPSEEK_API_KEY=你的真实Key
    ```
 
-4. 不要运行 `git add -f .env`，也不要把 Key 填入 Unity。
+4. 不要运行 `git add -f .env`，也不要把 Key 填入 Web 或 Unity 客户端。
 
 完成后只告诉我：“DeepSeek 已配置”，不要发送 Key。
 
@@ -92,7 +92,7 @@ VPS SSH：ssh lingolife-vps 可连接
 VPS：Ubuntu <版本> / <架构> / <内存>
 API 域名：api.<你的域名>
 Git SSH URL：git@<平台>:<owner>/<repo>.git
-Unity 版本：<版本，未安装也可写未安装>
+Web 测试设备：<主要浏览器与设备>
 ```
 
-收到这些信息后，我会先做只读连通性检查，再给出实施计划，并按你的要求使用子代理分别推进后端、Unity Demo 和部署/验收。任何需要公网写入、安装软件或修改系统服务的动作都会在范围明确后执行。
+收到这些信息后，先做只读连通性检查，再推进后端、Web Demo 和部署/验收。Unity 当前暂停，无需安装。任何需要公网写入、安装软件或修改系统服务的动作都会在范围明确后执行。

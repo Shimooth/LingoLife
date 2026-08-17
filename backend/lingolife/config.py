@@ -14,6 +14,7 @@ class Settings:
     database_url: str = "sqlite:///./data/lingolife.db"
     max_message_characters: int = 500
     recent_message_limit: int = 10
+    web_root: str = str(Path(__file__).resolve().parents[2] / "web" / "dist")
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-chat"
@@ -40,6 +41,7 @@ def load_settings(path: str | None = None) -> Settings:
         database_url=database_url,
         max_message_characters=int(server.get("max_message_characters", Settings.max_message_characters)),
         recent_message_limit=int(demo.get("recent_message_limit", Settings.recent_message_limit)),
+        web_root=os.getenv("LINGOLIFE_WEB_ROOT", str(server.get("web_root", Settings.web_root))),
         deepseek_api_key=key,
         deepseek_base_url=str(ai.get("base_url", Settings.deepseek_base_url)),
         deepseek_model=str(ai.get("model", Settings.deepseek_model)),
