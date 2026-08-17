@@ -52,14 +52,16 @@
 
 ## C. 准备域名和 DNS
 
-1. 选择 API 子域名，例如 `api.example.com`。
-2. 在 DNS 控制台创建 `A` 记录指向 VPS 的公网 IPv4；有 IPv6 时再创建 `AAAA`。
+1. 为玩家端与管理端各选择一个名称；当前使用 `lingolife.shimooth.me` 和
+   `lingolife.admin.shimooth.me`。
+2. 在 DNS 控制台为两个名称创建 `A` 记录指向 VPS 的公网 IPv4；有 IPv6 时再创建 `AAAA`。
 3. 若使用 Cloudflare，首次签发证书或排障时可先设为 DNS only；确认 HTTPS 后再决定是否代理。
 4. 在 VPS 安全组/防火墙开放 TCP `22`（最好限制为你的来源 IP）、`80`、`443`，不要开放 Uvicorn 端口。
 5. 等待解析后执行：
 
    ```bash
-   dig +short api.example.com
+   dig +short lingolife.shimooth.me
+   dig +short lingolife.admin.shimooth.me
    ```
 
 完成后告诉我 API 域名即可；域名不是秘密。

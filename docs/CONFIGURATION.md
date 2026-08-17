@@ -8,7 +8,8 @@
 
 1. `config/lingolife.example.yaml`：可提交的结构模板。
 2. `config/lingolife.local.yaml`：本机非秘密覆盖，可包含主机名与用户名，但默认被 Git 忽略。
-3. 服务端 `/etc/lingolife/lingolife.env`：真实秘密，仅 VPS root 与服务进程可读，权限 `600`。
+3. 服务端 `/etc/lingolife/lingolife.env`：真实秘密，仅 VPS root、部署组与容器可用，所有者
+   `root:lingolife-deploy`、权限 `0640`。
 
 本地开发使用 `.env`，也被 Git 忽略。`config/server.env.example` 只列变量名。
 
@@ -31,7 +32,7 @@
 
 - 应用环境、API 路径和版本
 - VPS 的 SSH alias、部署目录、Docker Compose 项目
-- 域名、HTTPS 与 CORS 来源
+- 玩家/管理域名、HTTPS 与 CORS 来源
 - Git remote、默认分支、部署分支
 - DeepSeek base URL、模型名、超时和 token 上限
 - 数据库路径、日志与备份策略
@@ -59,6 +60,10 @@ Docker Compose           API 构建、健康检查与日志
 ## 6. DeepSeek 配置
 
 `DEEPSEEK_API_KEY` 仅存在于本机 `.env` 或 VPS 的 env 文件。后端调用 DeepSeek，Web 与暂停中的 Unity 客户端都只能调用 LingoLife API。
+
+`ADMIN_PASSWORD` 保护管理界面，`SESSION_SECRET_KEY` 只用于签名登录会话。两者必须使用不同的
+高熵随机值，只存于同一秘密 env 文件；域名本身不是访问控制。玩家端与管理端使用不同 Host，
+但由同一容器服务并各自同源调用 API。
 
 官方资料：
 

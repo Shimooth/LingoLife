@@ -12,11 +12,14 @@ demo:
   initial_mood: 35
   initial_english_xp: 0
   recent_message_limit: 10
+  default_daily_quota: 30
+  chat_per_minute: 5
 
 server:
   host: 127.0.0.1
   port: 8010
   public_base_url: https://lingolife.shimooth.me
+  admin_base_url: https://lingolife.admin.shimooth.me
   cors_origins:
     - http://localhost
   request_timeout_seconds: 30
@@ -31,7 +34,8 @@ vps:
   systemd_service: lingolife-api.service
 
 domain:
-  api_hostname: lingolife.shimooth.me
+  app_hostname: lingolife.shimooth.me
+  admin_hostname: lingolife.admin.shimooth.me
   tls: true
   reverse_proxy: nginx
 

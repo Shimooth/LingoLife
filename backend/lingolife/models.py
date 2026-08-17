@@ -1,4 +1,6 @@
-from typing import Literal
+from __future__ import annotations
+
+from typing import Dict, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -31,3 +33,23 @@ class ChatRequest(BaseModel):
 class ChatResponse(AIResult):
     stats: Stats
     animation: Literal["idle", "sad", "happy"]
+    quota: Dict[str, int]
+
+
+class RegisterRequest(BaseModel):
+    username: str
+    invite_code: str
+
+
+class AdminLoginRequest(BaseModel):
+    password: str
+
+
+class AdminUserPatch(BaseModel):
+    disabled: Optional[bool] = None
+    quota_delta: Optional[int] = Field(default=None, ge=-10000, le=10000)
+
+
+class InviteCreateRequest(BaseModel):
+    count: int = Field(default=1, ge=1, le=100)
+    daily_quota: Optional[int] = Field(default=None, ge=1, le=10000)

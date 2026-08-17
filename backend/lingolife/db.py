@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+import hashlib
+import secrets
+import uuid
 from pathlib import Path
 
 from .models import Stats
@@ -35,7 +38,132 @@ class Database:
             CREATE TABLE IF NOT EXISTS chat_requests (
               idempotency_key TEXT NOT NULL, player_id TEXT NOT NULL, response_json TEXT NOT NULL,
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(idempotency_key, player_id));
+            CREATE TABLE IF NOT EXISTS users (
+              id TEXT PRIMARY KEY, username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+              player_id TEXT NOT NULL UNIQUE, disabled INTEGER NOT NULL DEFAULT 0,
+              daily_quota INTEGER NOT NULL DEFAULT 30, bonus_credits INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, last_active_at TEXT);
+            CREATE TABLE IF NOT EXISTS invitations (
+              code_hash TEXT PRIMARY KEY, daily_quota INTEGER NOT NULL,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, used_at TEXT, used_by TEXT);
+            CREATE TABLE IF NOT EXISTS sessions (
+              token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, last_used_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              revoked_at TEXT);
+            CREATE TABLE IF NOT EXISTS usage_events (
+              id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, request_id TEXT,
+              event_type TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+            CREATE INDEX IF NOT EXISTS idx_usage_user_time ON usage_events(user_id, created_at);
             """)
+
+    @staticmethod
+    def token_hash(value: str) -> str:
+        return hashlib.sha256(value.encode()).hexdigest()
+
+    def create_invites(self, count: int, daily_quota: int) -> list[str]:
+        codes = []
+        with self._lock, self._connection:
+            for _ in range(count):
+                code = "LL-" + secrets.token_urlsafe(12).replace("_", "").replace("-", "")
+                self._connection.execute("INSERT INTO invitations(code_hash,daily_quota) VALUES (?,?)", (self.token_hash(code), daily_quota))
+                codes.append(code)
+        return codes
+
+    def register(self, username: str, invite_code: str) -> tuple[dict, str] | None:
+        token = secrets.token_urlsafe(32)
+        user_id, player_id = str(uuid.uuid4()), str(uuid.uuid4())
+        try:
+            with self._lock, self._connection:
+                invite = self._connection.execute(
+                    "SELECT daily_quota FROM invitations WHERE code_hash=? AND used_at IS NULL", (self.token_hash(invite_code),)
+                ).fetchone()
+                if not invite:
+                    return None
+                self.ensure_player(player_id)
+                self._connection.execute(
+                    "INSERT INTO users(id,username,player_id,daily_quota,last_active_at) VALUES (?,?,?,?,CURRENT_TIMESTAMP)",
+                    (user_id, username, player_id, invite[0]),
+                )
+                self._connection.execute("UPDATE invitations SET used_at=CURRENT_TIMESTAMP,used_by=? WHERE code_hash=?", (user_id, self.token_hash(invite_code)))
+                self._connection.execute("INSERT INTO sessions(token_hash,user_id) VALUES (?,?)", (self.token_hash(token), user_id))
+            return self.user_by_id(user_id), token
+        except sqlite3.IntegrityError as exc:
+            if "username" in str(exc).lower():
+                raise ValueError("USERNAME_TAKEN") from exc
+            raise
+
+    def authenticate(self, token: str) -> dict | None:
+        row = self._connection.execute(
+            "SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.revoked_at IS NULL",
+            (self.token_hash(token),),
+        ).fetchone()
+        if not row:
+            return None
+        user = dict(row)
+        if user["disabled"]:
+            return {**user, "disabled": True}
+        with self._lock, self._connection:
+            self._connection.execute("UPDATE sessions SET last_used_at=CURRENT_TIMESTAMP WHERE token_hash=?", (self.token_hash(token),))
+            self._connection.execute("UPDATE users SET last_active_at=CURRENT_TIMESTAMP WHERE id=?", (user["id"],))
+        return user
+
+    def revoke_session(self, token: str):
+        with self._connection:
+            self._connection.execute("UPDATE sessions SET revoked_at=CURRENT_TIMESTAMP WHERE token_hash=?", (self.token_hash(token),))
+
+    def user_by_id(self, user_id: str) -> dict:
+        return dict(self._connection.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone())
+
+    def quota(self, user_id: str) -> dict:
+        u = self.user_by_id(user_id)
+        used = self._connection.execute(
+            "SELECT count(*) FROM usage_events WHERE user_id=? AND event_type='chat' AND date(created_at)=date('now')", (user_id,)
+        ).fetchone()[0]
+        daily_remaining = max(0, u["daily_quota"] - used)
+        return {"daily_limit": u["daily_quota"], "used_today": used,
+                "bonus_credits": u["bonus_credits"], "remaining": daily_remaining + u["bonus_credits"]}
+
+    def consume_chat(self, user_id: str, request_id: str, per_minute: int) -> str | None:
+        """Atomically reserves quota. Returns DAILY_QUOTA or RATE_LIMIT, else None."""
+        with self._lock, self._connection:
+            # Idempotent retries never reserve twice.
+            if self._connection.execute("SELECT 1 FROM usage_events WHERE user_id=? AND request_id=? AND event_type='chat'", (user_id, request_id)).fetchone():
+                return None
+            q = self.quota(user_id)
+            if q["remaining"] <= 0:
+                return "DAILY_QUOTA_EXCEEDED"
+            minute = self._connection.execute(
+                "SELECT count(*) FROM usage_events WHERE user_id=? AND event_type='chat' AND created_at >= datetime('now','-1 minute')", (user_id,)
+            ).fetchone()[0]
+            if minute >= per_minute:
+                return "RATE_LIMITED"
+            # Once today's allowance is exhausted, consume persistent gifted credits.
+            if q["used_today"] >= q["daily_limit"]:
+                self._connection.execute("UPDATE users SET bonus_credits=bonus_credits-1 WHERE id=?", (user_id,))
+            self._connection.execute("INSERT INTO usage_events(user_id,request_id,event_type) VALUES (?,?,'chat')", (user_id, request_id))
+            return None
+
+    def summary(self) -> dict:
+        row = self._connection.execute("SELECT count(*),sum(disabled),sum(date(last_active_at)=date('now')) FROM users").fetchone()
+        chats = self._connection.execute("SELECT count(*) FROM usage_events WHERE event_type='chat' AND date(created_at)=date('now')").fetchone()[0]
+        return {"total_users": row[0], "disabled_users": row[1] or 0, "active_today": row[2] or 0, "chats_today": chats}
+
+    def users(self, query: str = "") -> list[dict]:
+        rows = self._connection.execute(
+            "SELECT id,username,disabled,daily_quota,bonus_credits,created_at,last_active_at FROM users WHERE username LIKE ? ORDER BY created_at DESC LIMIT 200",
+            (f"%{query}%",),
+        ).fetchall()
+        return [{**dict(r), "quota": self.quota(r["id"])} for r in rows]
+
+    def patch_user(self, user_id: str, disabled: bool | None, quota_delta: int | None) -> dict | None:
+        with self._lock, self._connection:
+            if disabled is not None:
+                self._connection.execute("UPDATE users SET disabled=? WHERE id=?", (int(disabled), user_id))
+            if quota_delta is not None:
+                self._connection.execute("UPDATE users SET bonus_credits=max(0,bonus_credits+?) WHERE id=?", (quota_delta, user_id))
+            if not self._connection.execute("SELECT 1 FROM users WHERE id=?", (user_id,)).fetchone():
+                return None
+        return {**self.user_by_id(user_id), "quota": self.quota(user_id)}
 
     def ensure_player(self, player_id: str):
         with self._lock, self._connection:

@@ -1,0 +1,14 @@
+import {type FormEvent,useEffect,useState} from 'react'
+import {motion,useReducedMotion} from 'motion/react'
+import App from './App'
+import {ApiError,api,session} from './api'
+import type {Quota,User} from './types'
+
+export function AuthGate(){
+ const reduce=useReducedMotion(),[user,setUser]=useState<User|null>(null),[quota,setQuota]=useState<Quota|null>(null),[checking,setChecking]=useState(true),[busy,setBusy]=useState(false),[error,setError]=useState(''),[username,setUsername]=useState(''),[code,setCode]=useState('')
+ useEffect(()=>{if(!session.token()){setChecking(false);return}api.me().then(data=>{setUser(data.user);setQuota(data.quota)}).catch(()=>session.clear()).finally(()=>setChecking(false))},[])
+ const submit=async(event:FormEvent)=>{event.preventDefault();setBusy(true);setError('');try{const data=await api.register(username.trim(),code.trim());session.save(data.session_token);setUser(data.user);setQuota(data.quota)}catch(cause){if(cause instanceof ApiError&&cause.status===409)setError('That username is already taken. Try another one.');else if(cause instanceof ApiError&&(cause.status===400||cause.status===403))setError('That invite code is invalid or has already been used.');else if(cause instanceof ApiError&&cause.status===422)setError('Use 3–32 letters, numbers, underscores or hyphens for your name.');else if(cause instanceof ApiError&&cause.status===429)setError('Too many attempts. Please wait a moment.');else setError('We could not open the door just now. Please try again.')}finally{setBusy(false)}}
+ if(checking)return <main className="gate"><p className="gate-loading">Opening LingoLife…</p></main>
+ if(user&&quota)return <App user={user} initialQuota={quota} onLogout={()=>{setUser(null);setQuota(null)}}/>
+ return <main className="gate"><motion.section className="gate-card" initial={reduce?false:{opacity:0,y:18}} animate={{opacity:1,y:0}}><div className="gate-art"><div className="gate-moon"/><span>✦</span><div className="gate-window"><i/><i/><i/></div></div><div className="gate-copy"><p className="eyebrow">Private playtest</p><h1>Someone is waiting<br/>to hear from you.</h1><p>Step into Emma's room and practice real English through a story that remembers you.</p><form onSubmit={submit} className="gate-form"><label>Choose your unique name<input required minLength={3} maxLength={32} pattern="[A-Za-z0-9_-]+" autoComplete="username" value={username} onChange={e=>setUsername(e.target.value)} placeholder="e.g. river_lee"/></label><label>Invitation code<input required autoCapitalize="characters" value={code} onChange={e=>setCode(e.target.value)} placeholder="XXXX-XXXX"/></label>{error&&<p className="gate-error" role="alert">{error}</p>}<motion.button disabled={busy} whileTap={reduce?undefined:{scale:.98}}>{busy?'Opening the door…':'Enter Emma’s room →'}</motion.button></form><small>Your username is public to the playtest team. Never use your real password here.</small></div></motion.section></main>
+}

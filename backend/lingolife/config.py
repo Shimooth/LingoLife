@@ -22,6 +22,12 @@ class Settings:
     deepseek_max_tokens: int = 700
     deepseek_temperature: float = 0.7
     deepseek_retry_count: int = 1
+    admin_password: str | None = None
+    admin_session_secret: str | None = None
+    admin_cookie_secure: bool = True
+    admin_allowed_origin: str = "https://lingolife.admin.shimooth.me"
+    default_daily_quota: int = 30
+    chat_per_minute: int = 5
 
 
 def load_settings(path: str | None = None) -> Settings:
@@ -49,4 +55,10 @@ def load_settings(path: str | None = None) -> Settings:
         deepseek_max_tokens=int(ai.get("max_tokens", Settings.deepseek_max_tokens)),
         deepseek_temperature=float(ai.get("temperature", Settings.deepseek_temperature)),
         deepseek_retry_count=int(ai.get("retry_count", Settings.deepseek_retry_count)),
+        admin_password=os.getenv("ADMIN_PASSWORD"),
+        admin_session_secret=os.getenv("SESSION_SECRET_KEY"),
+        admin_cookie_secure=os.getenv("ADMIN_COOKIE_SECURE", "true").lower() not in {"0", "false", "no"},
+        admin_allowed_origin=os.getenv("ADMIN_ALLOWED_ORIGIN", Settings.admin_allowed_origin),
+        default_daily_quota=int(os.getenv("DEFAULT_DAILY_QUOTA", Settings.default_daily_quota)),
+        chat_per_minute=int(os.getenv("CHAT_PER_MINUTE", Settings.chat_per_minute)),
     )

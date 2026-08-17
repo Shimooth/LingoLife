@@ -1,7 +1,15 @@
-import type {ChatResponse,Room} from './types'
-const storageKey='lingolife.player-id'
+import type {AdminSummary,AdminUser,AuthResponse,ChatResponse,InvitesResponse,MeResponse,Quota,Room,UsersResponse} from './types'
+const tokenKey='lingolife.session-token'
 const randomId=(prefix:string)=>`${prefix}-${crypto.randomUUID?.()??`${Date.now()}-${Math.random().toString(36).slice(2)}`}`
-function playerId(){try{const saved=localStorage.getItem(storageKey);if(saved&&/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(saved))return saved;const id=randomId('web').slice(0,64);localStorage.setItem(storageKey,id);return id}catch{return randomId('guest').slice(0,64)}}
-const player=playerId()
-async function request<T>(path:string,init?:RequestInit):Promise<T>{const response=await fetch(`/api/v1${path}`,{...init,headers:{'X-Player-Id':player,...init?.headers}});const data=await response.json().catch(()=>null);if(!response.ok)throw new Error(data?.error?.message||"Emma couldn't hear you just now.");return data}
-export const api={room:()=>request<Room>('/room'),chat:(message:string,key:string)=>request<ChatResponse>('/chat',{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':key},body:JSON.stringify({message})}),key:()=>randomId('chat')}
+export class ApiError extends Error{status:number;code?:string;constructor(status:number,message:string,code?:string){super(message);this.status=status;this.code=code}}
+async function request<T>(path:string,init:RequestInit={},admin=false):Promise<T>{
+ const token=session.token();const headers=new Headers(init.headers);if(token&&!admin)headers.set('Authorization',`Bearer ${token}`)
+ const response=await fetch(`/api/v1${path}`,{...init,headers,credentials:admin?'include':'same-origin'});const data=await response.json().catch(()=>null)
+ if(!response.ok)throw new ApiError(response.status,data?.error?.message||data?.detail||'Request failed',data?.error?.code)
+ return data as T
+}
+export const session={token:()=>localStorage.getItem(tokenKey),save:(token:string)=>localStorage.setItem(tokenKey,token),clear:()=>localStorage.removeItem(tokenKey)}
+const json=(value:unknown):RequestInit=>({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(value)})
+export const api={register:(username:string,invite_code:string)=>request<AuthResponse>('/auth/register',json({username,invite_code})),me:()=>request<MeResponse>('/auth/me'),logout:()=>request<void>('/auth/logout',{method:'POST'}),room:()=>request<Room>('/room'),chat:(message:string,key:string)=>request<ChatResponse>('/chat',{...json({message}),headers:{'Content-Type':'application/json','Idempotency-Key':key}}),key:()=>randomId('chat')}
+export const adminApi={login:(password:string)=>request<void>('/admin/login',json({password}),true),session:()=>request<{authenticated:boolean}>('/admin/session',{},true),logout:()=>request<void>('/admin/logout',{method:'POST'},true),summary:()=>request<AdminSummary>('/admin/summary',{},true),users:(q='')=>request<UsersResponse>(`/admin/users?q=${encodeURIComponent(q)}`,{},true),updateUser:(id:string|number,body:{disabled?:boolean;quota_delta?:number})=>request<AdminUser>(`/admin/users/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)},true),invites:(count:number,daily_quota:number)=>request<InvitesResponse>('/admin/invites',json({count,daily_quota}),true)}
+export const quotaText=(quota:Quota|null)=>quota?`${quota.remaining} messages left${quota.bonus_credits?` · ${quota.bonus_credits} bonus`:''}`:'—'
