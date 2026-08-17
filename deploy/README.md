@@ -22,9 +22,10 @@ The following commands change the VPS and must only be run after reviewing the
 templates and checking that the existing Nginx configuration has no matching
 `server_name`:
 
-1. Put a clean checkout at `/opt/lingolife/app`. A deploy key on the VPS or an
-   archive copied over SSH are both valid; do not copy a personal GitHub key.
-2. As root, run `deploy/scripts/install-host.sh`.
+1. As root, run `deploy/scripts/install-host.sh` from a reviewed copy of the repository.
+2. Copy a clean checkout into `/opt/lingolife/app`, owned by
+   `lingolife-deploy:lingolife-deploy`. An archive copied over SSH is preferred;
+   do not copy a personal GitHub key to the VPS.
 3. Create `/etc/lingolife/lingolife.env` without displaying its values. Use:
 
    ```dotenv
@@ -33,22 +34,38 @@ templates and checking that the existing Nginx configuration has no matching
    LOG_LEVEL=INFO
    ```
 
-4. As root, run `deploy/scripts/deploy-release.sh`.
-5. Verify HTTP reaches the correct virtual host:
+4. As root, install the reviewed service and Nginx files, then create a narrowly
+   scoped sudo rule for future restarts:
+
+   ```bash
+   install -o root -g root -m 0644 /opt/lingolife/app/deploy/systemd/lingolife-api.service /etc/systemd/system/lingolife-api.service
+   install -o root -g root -m 0644 /opt/lingolife/app/deploy/nginx/lingolife.api.shimooth.me.conf /etc/nginx/sites-available/lingolife.api.shimooth.me.conf
+   ln -sfn /etc/nginx/sites-available/lingolife.api.shimooth.me.conf /etc/nginx/sites-enabled/lingolife.api.shimooth.me.conf
+   printf '%s\n' 'lingolife-deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart lingolife-api.service' > /etc/sudoers.d/lingolife-deploy-lingolife
+   chmod 0440 /etc/sudoers.d/lingolife-deploy-lingolife
+   visudo -cf /etc/sudoers.d/lingolife-deploy-lingolife
+   systemctl daemon-reload
+   nginx -t
+   systemctl enable lingolife-api.service
+   systemctl reload nginx
+   ```
+
+5. As `lingolife-deploy`, run `deploy/scripts/deploy-release.sh`.
+6. Verify HTTP reaches the correct virtual host:
 
    ```bash
    curl --resolve lingolife.api.shimooth.me:80:127.0.0.1 \
      http://lingolife.api.shimooth.me/api/v1/health
    ```
 
-6. Issue and install the certificate only after the HTTP check succeeds:
+7. Issue and install the certificate only after the HTTP check succeeds:
 
    ```bash
    certbot --nginx -d lingolife.api.shimooth.me
    certbot renew --dry-run
    ```
 
-7. Verify `https://lingolife.api.shimooth.me/api/v1/health`, then restrict TCP
+8. Verify `https://lingolife.api.shimooth.me/api/v1/health`, then restrict TCP
    8000 in the cloud firewall/UFW if the unrelated existing service does not
    require public access. Do not change that existing service without first
    identifying its owner and purpose.

@@ -10,7 +10,7 @@ Group=lingolife
 WorkingDirectory=/opt/lingolife/app/backend
 EnvironmentFile=/etc/lingolife/lingolife.env
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/lingolife/venv/bin/uvicorn lingolife.app:app --host 127.0.0.1 --port 8010 --workers 1 --no-access-log
+ExecStart=/opt/lingolife/app/backend/.venv/bin/uvicorn lingolife.app:app --host 127.0.0.1 --port 8010 --workers 1 --no-access-log
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=20
