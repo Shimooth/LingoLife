@@ -1,0 +1,39 @@
+name: lingolife
+services:
+  api:
+    image: lingolife-api:local
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    env_file:
+      - /etc/lingolife/lingolife.env
+    environment:
+      DATABASE_URL: sqlite:////data/lingolife.db
+      LINGOLIFE_CONFIG: /app/config/lingolife.example.yaml
+    ports:
+      - "127.0.0.1:8010:8000"
+    volumes:
+      - /opt/lingolife/data:/data
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    mem_limit: 384m
+    cpus: 0.75
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

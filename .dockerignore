@@ -1,0 +1,12 @@
+.git
+.venv
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/*.pyc
+backend/data
+UnityDemo
+docs
+deploy
+*.env
+config/*.local.yaml

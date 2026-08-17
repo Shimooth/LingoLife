@@ -7,18 +7,24 @@ if [[ "$(id -un)" != "lingolife-deploy" ]]; then
 fi
 
 PROJECT_ROOT=/opt/lingolife/app
-BACKEND_ROOT="${PROJECT_ROOT}/backend"
-VENV_ROOT="${BACKEND_ROOT}/.venv"
-
-test -f "${BACKEND_ROOT}/requirements.txt"
-
-if [[ ! -x "${VENV_ROOT}/bin/python" ]]; then
-  python3 -m venv "${VENV_ROOT}"
-fi
-"${VENV_ROOT}/bin/pip" install --disable-pip-version-check --no-cache-dir -r "${BACKEND_ROOT}/requirements.txt"
-
-sudo /usr/bin/systemctl restart lingolife-api.service
-
-curl --fail --silent --show-error http://127.0.0.1:8010/api/v1/health
-echo
-echo "Local health check passed."
+COMPOSE_FILE="${PROJECT_ROOT}/deploy/compose.yaml"
+ENV_FILE=/etc/lingolife/lingolife.env
+test -f "${COMPOSE_FILE}"
+test -r "${ENV_FILE}" || { echo "Cannot read ${ENV_FILE}." >&2; exit 1; }
+test "$(stat -c '%a' "${ENV_FILE}")" = 640 || { echo "${ENV_FILE} must have mode 0640." >&2; exit 1; }
+docker compose version >/dev/null
+cd "${PROJECT_ROOT}"
+SOURCE_REVISION="$(git rev-parse --short HEAD 2>/dev/null || echo archive)"
+docker compose -f "${COMPOSE_FILE}" build --pull api
+docker compose -f "${COMPOSE_FILE}" up -d --remove-orphans api
+for attempt in {1..20}; do
+  if curl --fail --silent http://127.0.0.1:8010/api/v1/health >/dev/null; then
+    echo "Local health check passed. Source revision: ${SOURCE_REVISION}"
+    exit 0
+  fi
+  sleep 2
+done
+docker compose -f "${COMPOSE_FILE}" ps
+docker compose -f "${COMPOSE_FILE}" logs --tail=100 api
+echo "Deployment failed its health check." >&2
+exit 1

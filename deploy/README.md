@@ -1,101 +1,88 @@
-# LingoLife Demo deployment
+# LingoLife Docker Compose deployment
 
-Target: Ubuntu 24.04, x86_64, 1 GB RAM, Nginx, systemd, and
-`lingolife.api.shimooth.me`.
+Ubuntu 24.04 x86_64 / 1 GB RAM。宿主机 Nginx 负责 HTTPS，并转发到
+`127.0.0.1:8010` 上的单个 FastAPI 容器。现有占用公网 8000 端口的容器不受影响。
 
-The API runs as the unprivileged `lingolife` service account on
-`127.0.0.1:8010`. One Uvicorn worker is deliberate for this small VPS. Nginx is
-the only public application entry point. The host currently has another service
-on public port 8000, so do not bind LingoLife there.
+容器使用 UID/GID `10001`，丢弃全部 Linux capabilities，根文件系统只读，并限制为
+384 MB 内存、0.75 CPU、128 个进程。SQLite 持久化在 `/opt/lingolife/data`。
 
-## Secret handling
+## 密钥
 
-Never commit or copy a key into a command line. Create
-`/etc/lingolife/lingolife.env` in an interactive root session, using
-`config/server.env.example` as the list of variables. It must be owned by root,
-group `lingolife`, mode `0640`. The DeepSeek key remains in that file and is
-read by systemd; it is never sent to Unity or printed by these scripts.
+在 VPS 交互式创建 `/etc/lingolife/lingolife.env`，不要把 Key 放入命令行、Git、镜像或
+Compose YAML：
 
-## First deployment
-
-The following commands change the VPS and must only be run after reviewing the
-templates and checking that the existing Nginx configuration has no matching
-`server_name`:
-
-1. As root, run `deploy/scripts/install-host.sh` from a reviewed copy of the repository.
-2. Copy a clean checkout into `/opt/lingolife/app`, owned by
-   `lingolife-deploy:lingolife-deploy`. An archive copied over SSH is preferred;
-   do not copy a personal GitHub key to the VPS.
-3. Create `/etc/lingolife/lingolife.env` without displaying its values. Use:
-
-   ```dotenv
-   DEEPSEEK_API_KEY=...
-   DATABASE_URL=sqlite:////opt/lingolife/data/lingolife.db
-   LOG_LEVEL=INFO
-   ```
-
-4. As root, install the reviewed service and Nginx files, then create a narrowly
-   scoped sudo rule for future restarts:
-
-   ```bash
-   install -o root -g root -m 0644 /opt/lingolife/app/deploy/systemd/lingolife-api.service /etc/systemd/system/lingolife-api.service
-   install -o root -g root -m 0644 /opt/lingolife/app/deploy/nginx/lingolife.api.shimooth.me.conf /etc/nginx/sites-available/lingolife.api.shimooth.me.conf
-   ln -sfn /etc/nginx/sites-available/lingolife.api.shimooth.me.conf /etc/nginx/sites-enabled/lingolife.api.shimooth.me.conf
-   printf '%s\n' 'lingolife-deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart lingolife-api.service' > /etc/sudoers.d/lingolife-deploy-lingolife
-   chmod 0440 /etc/sudoers.d/lingolife-deploy-lingolife
-   visudo -cf /etc/sudoers.d/lingolife-deploy-lingolife
-   systemctl daemon-reload
-   nginx -t
-   systemctl enable lingolife-api.service
-   systemctl reload nginx
-   ```
-
-5. As `lingolife-deploy`, run `deploy/scripts/deploy-release.sh`.
-6. Verify HTTP reaches the correct virtual host:
-
-   ```bash
-   curl --resolve lingolife.api.shimooth.me:80:127.0.0.1 \
-     http://lingolife.api.shimooth.me/api/v1/health
-   ```
-
-7. Issue and install the certificate only after the HTTP check succeeds:
-
-   ```bash
-   certbot --nginx -d lingolife.api.shimooth.me
-   certbot renew --dry-run
-   ```
-
-8. Verify `https://lingolife.api.shimooth.me/api/v1/health`, then restrict TCP
-   8000 in the cloud firewall/UFW if the unrelated existing service does not
-   require public access. Do not change that existing service without first
-   identifying its owner and purpose.
-
-## Updates and rollback
-
-Before an update, copy the SQLite database with SQLite's online backup command
-or stop the service briefly and copy the database. Keep the previous Git commit
-ID. After updating the clean checkout, rerun `deploy-release.sh` and test the
-health endpoint. To roll back, check out the recorded commit, rerun the release
-script, and restore the database only if a migration made it incompatible.
-
-Useful diagnostics (they do not expose the environment file):
-
-```bash
-systemctl status lingolife-api.service --no-pager
-journalctl -u lingolife-api.service -n 100 --no-pager
-nginx -t
-curl http://127.0.0.1:8010/api/v1/health
+```dotenv
+DEEPSEEK_API_KEY=...
+LOG_LEVEL=INFO
 ```
 
-## Confirmed preflight state (2026-08-17)
+Compose 会覆盖容器内的数据库和配置路径。以 root 设置权限：
 
-- Ubuntu 24.04.4 LTS, x86_64; 961 MiB RAM and 1 GiB swap.
-- Git, Python 3, Docker, Nginx, and systemd are installed; Caddy is absent.
-- Nginx and UFW are active.
-- TCP 22, 80, 443, and 8000 listen publicly. Port 8000 belongs to an existing
-  Docker/Uvicorn workload and is not changed by this deployment.
-- DNS A record for `lingolife.api.shimooth.me` resolves to `198.46.175.233`, the
-  SSH target. No AAAA record was returned.
-- SSH alias logs in as `lingolife-deploy`; it has no passwordless sudo. A human
-  administrator must perform the root-only installation steps or grant narrowly
-  scoped deployment privileges.
+```bash
+chown root:lingolife-deploy /etc/lingolife/lingolife.env
+chmod 0640 /etc/lingolife/lingolife.env
+```
+
+## 首次部署
+
+旧版 `install-host.sh` 已经执行过一次，无需回滚。将当前发布包再次传到原位置后，以
+root 重跑新版脚本。它可重复执行，并会把数据目录改为容器 UID 10001：
+
+```bash
+bash /home/lingolife-deploy/lingolife-release/deploy/scripts/install-host.sh
+```
+
+重新连接 `ssh lingolife-vps`，让 Docker 组权限生效。把审阅后的发布包复制到
+`/opt/lingolife/app`；不要把个人 GitHub 私钥放到 VPS。以 root 只安装 Nginx 配置：
+
+```bash
+install -o root -g root -m 0644 /opt/lingolife/app/deploy/nginx/lingolife.api.shimooth.me.conf /etc/nginx/sites-available/lingolife.api.shimooth.me.conf
+ln -sfn /etc/nginx/sites-available/lingolife.api.shimooth.me.conf /etc/nginx/sites-enabled/lingolife.api.shimooth.me.conf
+nginx -t
+systemctl reload nginx
+```
+
+不要安装旧的 `deploy/systemd/lingolife-api.service`。若曾另外安装过，先执行
+`systemctl disable --now lingolife-api.service`。随后以 `lingolife-deploy` 部署：
+
+```bash
+cd /opt/lingolife/app
+deploy/scripts/deploy-release.sh
+curl --resolve lingolife.api.shimooth.me:80:127.0.0.1 http://lingolife.api.shimooth.me/api/v1/health
+```
+
+HTTP 成功后申请证书并验证：
+
+```bash
+certbot --nginx -d lingolife.api.shimooth.me
+certbot renew --dry-run
+curl https://lingolife.api.shimooth.me/api/v1/health
+```
+
+Docker 组实际上拥有 root 级权限。本方案用它让部署账户无需保存 sudo 密码即可更新服务；
+不要用此账户运行不可信代码，并严格限制 SSH 私钥访问。
+
+## 更新与回滚
+
+更新前创建 SQLite 在线一致性备份，并记录当前 commit：
+
+```bash
+cd /opt/lingolife/app
+deploy/scripts/backup-database.sh
+git rev-parse HEAD
+deploy/scripts/deploy-release.sh
+```
+
+部署脚本只构建并启动本项目 `api` 服务，等待健康检查；不会执行 `compose down`，也不会
+操作其他 Compose 项目或 8000 端口。回滚时，将记录的旧 commit 发布到
+`/opt/lingolife/app` 后重新执行部署脚本。除非明确存在不兼容的数据库迁移，不要恢复旧库；
+如需恢复，必须先停止 API 并另存当前数据库。
+
+## 诊断
+
+```bash
+docker compose -f /opt/lingolife/app/deploy/compose.yaml ps
+docker compose -f /opt/lingolife/app/deploy/compose.yaml logs --tail=100 api
+curl http://127.0.0.1:8010/api/v1/health
+nginx -t
+```
