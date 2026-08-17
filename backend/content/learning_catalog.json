@@ -22,7 +22,12 @@
     "work_school": ["manager","coworker","client","meeting","deadline","project","idea","feedback","mistake","interview","job","office","class","teacher","assignment","exam","team","schedule","promotion","design"],
     "relationships": ["friend","partner","family","roommate","neighbor","colleague","argument","support","trust","promise","apology","advice","secret","invitation","message","conversation","misunderstanding","relationship","choice","feeling"],
     "daily_life": ["morning","afternoon","evening","weekend","home","trip","party","appointment","plan","problem","chance","change","break","rest","hobby","pet","call","email","news","decision"],
-    "story_actions": ["happen","feel","say","tell","ask","answer","meet","leave","forget","remember","decide","try","help","wait","explain","invite","cancel","agree","disagree","finish"]
+    "story_actions": ["happen","feel","say","tell","ask","answer","meet","leave","forget","remember","decide","try","help","wait","explain","invite","cancel","agree","disagree","finish"],
+    "personality": ["kind","patient","honest","quiet","outgoing","curious","creative","careful","brave","generous","stubborn","sensitive","reliable","independent","optimistic","serious","friendly","thoughtful","confident","humorous"],
+    "conversation": ["actually","probably","perhaps","especially","instead","anyway","although","however","because","unless","opinion","reason","example","detail","point","experience","situation","suggestion","question","response"],
+    "goals_growth": ["goal","dream","habit","progress","practice","improve","challenge","opportunity","success","failure","effort","skill","future","step","result","focus","confidence","motivation","plan","achievement"],
+    "places_travel": ["neighborhood","cafe","station","airport","museum","gallery","restaurant","library","park","beach","mountain","hotel","journey","ticket","luggage","direction","destination","abroad","local","crowded"],
+    "health_wellbeing": ["healthy","tired","stress","sleep","exercise","energy","headache","medicine","doctor","recover","breathe","relax","balance","routine","meal","hungry","comfortable","pain","wellbeing","mental"]
   },
   "llm_evidence_contract": {
     "description": "The evaluator selects only known target ids and reports observable evidence; the rule engine owns scoring.",

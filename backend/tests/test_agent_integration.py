@@ -70,3 +70,26 @@ def test_profile_requires_auth_and_rejects_oversized_drawing(tmp_path):
     profile["avatar"]["strokes"] = [{"color": "#112233", "width": 4,
                                       "points": [[1, 1]] * 81}]
     assert client.put("/api/v1/npc/profile", headers=auth, json=profile).status_code == 422
+
+
+def test_up_to_five_custom_characters_have_separate_rooms(tmp_path):
+    client, _, auth = setup(tmp_path)
+    base = client.get("/api/v1/npc/profile", headers=auth).json()
+    created = []
+    for index in range(4):
+        profile = {**base, "name": f"Character {index}", "relationship": f"custom bond {index}",
+                   "occupation": f"custom job {index}", "personality": [f"trait {index}"],
+                   "interests": [f"interest {index}"], "avatar": {**base["avatar"], "strokes": []}}
+        response = client.post("/api/v1/npcs", headers=auth, json=profile)
+        assert response.status_code == 201
+        created.append(response.json()["id"])
+    assert len(client.get("/api/v1/npcs", headers=auth).json()["npcs"]) == 5
+    assert client.post("/api/v1/npcs", headers=auth, json=base).status_code == 409
+
+    second = created[0]
+    room = client.get(f"/api/v1/room?npc_id={second}", headers=auth).json()
+    assert room["npc"]["name"] == "Character 0"
+    client.post("/api/v1/chat", headers={**auth, "Idempotency-Key": "second-npc-001"},
+                json={"message": "Hello there", "npc_id": second})
+    assert len(client.get(f"/api/v1/room?npc_id={second}", headers=auth).json()["messages"]) == 3
+    assert len(client.get("/api/v1/room?npc_id=emma", headers=auth).json()["messages"]) == 1

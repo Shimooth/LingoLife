@@ -36,6 +36,7 @@ class Database:
             CREATE TABLE IF NOT EXISTS messages (
               id INTEGER PRIMARY KEY AUTOINCREMENT, player_id TEXT NOT NULL,
               speaker TEXT NOT NULL CHECK(speaker IN ('player','npc')), text TEXT NOT NULL,
+              npc_id TEXT NOT NULL DEFAULT 'emma',
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
             CREATE TABLE IF NOT EXISTS chat_requests (
               idempotency_key TEXT NOT NULL, player_id TEXT NOT NULL, response_json TEXT NOT NULL,
@@ -85,6 +86,9 @@ class Database:
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
             """)
+            columns = {row[1] for row in self._connection.execute("PRAGMA table_info(messages)")}
+            if "npc_id" not in columns:
+                self._connection.execute("ALTER TABLE messages ADD COLUMN npc_id TEXT NOT NULL DEFAULT 'emma'")
 
     @staticmethod
     def token_hash(value: str) -> str:
@@ -204,20 +208,34 @@ class Database:
             )
             if cur.rowcount:
                 self._connection.execute(
-                    "INSERT INTO messages(player_id,speaker,text) VALUES (?,'npc',?)",
+                    "INSERT INTO messages(player_id,speaker,text,npc_id) VALUES (?,'npc',?,'emma')",
                     (player_id, "I had a terrible day at work..."),
                 )
 
-    def state(self, player_id: str) -> Stats:
+    def ensure_npc(self, player_id: str, npc_id: str, greeting: str = "It is good to see you. How was your day?"):
         self.ensure_player(player_id)
-        row = self._connection.execute("SELECT relationship,mood,english_xp FROM npc_states WHERE player_id=? AND npc_id='emma'", (player_id,)).fetchone()
+        with self._lock, self._connection:
+            cur = self._connection.execute(
+                "INSERT OR IGNORE INTO npc_states(player_id,npc_id,relationship,mood,english_xp) VALUES (?,?,35,50,0)",
+                (player_id, npc_id),
+            )
+            if cur.rowcount:
+                self._connection.execute(
+                    "INSERT INTO messages(player_id,speaker,text,npc_id) VALUES (?,'npc',?,?)",
+                    (player_id, greeting, npc_id),
+                )
+
+    def state(self, player_id: str, npc_id: str = "emma") -> Stats:
+        self.ensure_player(player_id)
+        self.ensure_npc(player_id, npc_id)
+        row = self._connection.execute("SELECT relationship,mood,english_xp FROM npc_states WHERE player_id=? AND npc_id=?", (player_id, npc_id)).fetchone()
         return Stats(**dict(row))
 
-    def messages(self, player_id: str, limit: int) -> list[dict]:
+    def messages(self, player_id: str, limit: int, npc_id: str = "emma") -> list[dict]:
         self.ensure_player(player_id)
         rows = self._connection.execute(
-            "SELECT speaker,text FROM (SELECT id,speaker,text FROM messages WHERE player_id=? ORDER BY id DESC LIMIT ?) ORDER BY id",
-            (player_id, limit),
+            "SELECT speaker,text FROM (SELECT id,speaker,text FROM messages WHERE player_id=? AND npc_id=? ORDER BY id DESC LIMIT ?) ORDER BY id",
+            (player_id, npc_id, limit),
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -225,7 +243,7 @@ class Database:
         row = self._connection.execute("SELECT response_json FROM chat_requests WHERE player_id=? AND idempotency_key=?", (player_id, key)).fetchone()
         return json.loads(row[0]) if row else None
 
-    def commit_chat(self, player_id: str, key: str, message: str, response: dict) -> dict:
+    def commit_chat(self, player_id: str, key: str, message: str, response: dict, npc_id: str = "emma") -> dict:
         """Atomically stores state/messages/result; concurrent duplicates return the winner."""
         with self._lock, self._connection:
             cached = self.cached(player_id, key)
@@ -233,11 +251,11 @@ class Database:
                 return cached
             stats = response["stats"]
             self._connection.execute(
-                "UPDATE npc_states SET relationship=?,mood=?,english_xp=?,updated_at=CURRENT_TIMESTAMP WHERE player_id=? AND npc_id='emma'",
-                (stats["relationship"], stats["mood"], stats["english_xp"], player_id),
+                "UPDATE npc_states SET relationship=?,mood=?,english_xp=?,updated_at=CURRENT_TIMESTAMP WHERE player_id=? AND npc_id=?",
+                (stats["relationship"], stats["mood"], stats["english_xp"], player_id, npc_id),
             )
-            self._connection.execute("INSERT INTO messages(player_id,speaker,text) VALUES (?,'player',?)", (player_id, message))
-            self._connection.execute("INSERT INTO messages(player_id,speaker,text) VALUES (?,'npc',?)", (player_id, response["npc_reply"]))
+            self._connection.execute("INSERT INTO messages(player_id,speaker,text,npc_id) VALUES (?,'player',?,?)", (player_id, message, npc_id))
+            self._connection.execute("INSERT INTO messages(player_id,speaker,text,npc_id) VALUES (?,'npc',?,?)", (player_id, response["npc_reply"], npc_id))
             self._connection.execute("INSERT INTO chat_requests(idempotency_key,player_id,response_json) VALUES (?,?,?)", (key, player_id, json.dumps(response)))
             return response
 
@@ -252,6 +270,12 @@ class Database:
             "SELECT profile_json FROM npc_profiles WHERE player_id=? AND npc_id=?", (player_id, npc_id)
         ).fetchone()
         return json.loads(row[0]) if row else None
+
+    def list_npc_profiles(self, player_id: str) -> list[dict]:
+        rows = self._connection.execute(
+            "SELECT npc_id,profile_json FROM npc_profiles WHERE player_id=? ORDER BY created_at,npc_id", (player_id,)
+        ).fetchall()
+        return [{"id": row["npc_id"], "profile": json.loads(row["profile_json"])} for row in rows]
 
     def get_or_create_npc_profile(self, player_id: str, npc_id: str, default_profile: dict) -> dict:
         """Persist the caller-owned default once; never silently replace customization."""

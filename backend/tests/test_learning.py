@@ -10,7 +10,7 @@ def test_catalog_has_small_but_meaningful_a2_b1_scope():
     catalog = LearningCatalog.load()
     assert len(catalog.targets) == 8
     assert sum(len(values) for values in catalog.data["expressions"].values()) == 48
-    assert sum(len(values) for values in catalog.data["vocabulary"].values()) == 100
+    assert sum(len(values) for values in catalog.data["vocabulary"].values()) == 200
     assert {target["kind"] for target in catalog.targets.values()} == {"intent", "grammar"}
 
 

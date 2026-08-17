@@ -49,6 +49,7 @@ class AIResult(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
+    npc_id: str = Field(default="emma", pattern=r"^[a-z0-9-]{1,48}$")
 
 
 class ChatResponse(AIResult):

@@ -8,6 +8,7 @@ import secrets
 import threading
 import time
 import inspect
+import uuid
 from typing import Optional
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -86,15 +87,20 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
             raise HTTPException(403, {"code": "USER_DISABLED", "message": "This account is disabled."})
         return user
 
-    def profile_for(player_id: str) -> dict:
-        return db.get_or_create_npc_profile(player_id, "emma", DEFAULT_NPC_PROFILE)
+    def profile_for(player_id: str, npc_id: str = "emma", create_default: bool = True) -> dict:
+        profile = db.get_npc_profile(player_id, npc_id)
+        if profile:
+            return profile
+        if npc_id == "emma" and create_default:
+            return db.get_or_create_npc_profile(player_id, "emma", DEFAULT_NPC_PROFILE)
+        raise HTTPException(404, {"code": "NPC_NOT_FOUND", "message": "Character was not found."})
 
-    def event_context(player_id: str, profile: dict, stats, learning_state) -> NPCEventContext:
+    def event_context(player_id: str, npc_id: str, profile: dict, stats, learning_state) -> NPCEventContext:
         targets = learning_engine.targets(learning_state, limit=3)
         mood = "sad" if stats.mood < 35 else "happy" if stats.mood >= 65 else "neutral"
         goal = profile.get("longTermGoal", "")
         return NPCEventContext(
-            player_id=player_id, npc_id="emma", traits=tuple(profile.get("personality", [])),
+            player_id=player_id, npc_id=npc_id, traits=tuple(profile.get("personality", [])),
             interests=tuple(profile.get("interests", [])), occupation=profile.get("occupation", ""),
             mood=mood, relationship=stats.relationship,
             long_term_goals=(goal,) if goal else (),
@@ -175,15 +181,15 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         return Response(status_code=204)
 
     @app.get(settings.api_prefix + "/room")
-    def room(authorization: Optional[str] = Header(None)):
+    def room(npc_id: str = "emma", authorization: Optional[str] = Header(None)):
         user = current_user(authorization); player_id = user["player_id"]
-        stats = db.state(player_id)
-        profile = profile_for(player_id)
+        profile = profile_for(player_id, npc_id)
+        stats = db.state(player_id, npc_id)
         learning_state = db.get_learning_state(player_id)
-        active = event_engine.daily_event(event_context(player_id, profile, stats, learning_state))
+        active = event_engine.daily_event(event_context(player_id, npc_id, profile, stats, learning_state))
         animation = "sad" if stats.mood < 40 else "happy" if stats.mood >= 60 else "idle"
-        return {"room_id": "emma-room", "npc": {"id": "emma", "name": profile["name"], "animation": animation},
-                "stats": stats, "messages": db.messages(player_id, settings.recent_message_limit),
+        return {"room_id": f"{npc_id}-room", "npc": {"id": npc_id, "name": profile["name"], "animation": animation},
+                "stats": stats, "messages": db.messages(player_id, settings.recent_message_limit, npc_id),
                 "quota": db.quota(user["id"]), "active_event": public_event(active)}
 
     @app.get(settings.api_prefix + "/npc/profile")
@@ -195,6 +201,29 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
     def save_npc_profile(body: NpcProfile, authorization: Optional[str] = Header(None)):
         user = current_user(authorization)
         return db.save_npc_profile(user["player_id"], "emma", body.model_dump())
+
+    @app.get(settings.api_prefix + "/npcs")
+    def npc_profiles(authorization: Optional[str] = Header(None)):
+        user = current_user(authorization); player_id = user["player_id"]
+        profile_for(player_id)
+        return {"npcs": db.list_npc_profiles(player_id), "limit": 5}
+
+    @app.post(settings.api_prefix + "/npcs", status_code=201)
+    def create_npc(body: NpcProfile, authorization: Optional[str] = Header(None)):
+        user = current_user(authorization); player_id = user["player_id"]
+        profile_for(player_id)
+        if len(db.list_npc_profiles(player_id)) >= 5:
+            raise HTTPException(409, {"code": "NPC_LIMIT_REACHED", "message": "You can create up to five characters."})
+        npc_id = "npc-" + uuid.uuid4().hex[:12]
+        db.ensure_npc(player_id, npc_id, f"Hi, I'm {body.name}. What would you like to talk about?")
+        db.save_npc_profile(player_id, npc_id, body.model_dump())
+        return {"id": npc_id, "profile": body.model_dump()}
+
+    @app.put(settings.api_prefix + "/npcs/{npc_id}")
+    def update_npc(npc_id: str, body: NpcProfile, authorization: Optional[str] = Header(None)):
+        user = current_user(authorization); player_id = user["player_id"]
+        profile_for(player_id, npc_id, create_default=False)
+        return {"id": npc_id, "profile": db.save_npc_profile(player_id, npc_id, body.model_dump())}
 
     @app.get(settings.api_prefix + "/learning/profile")
     def learning_profile(authorization: Optional[str] = Header(None)):
@@ -215,14 +244,15 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         if denied:
             status = 429
             raise HTTPException(status, {"code": denied, "message": "Chat limit reached. Please try again later."})
-        old = db.state(player_id)
-        profile = profile_for(player_id)
+        npc_id = body.npc_id
+        profile = profile_for(player_id, npc_id)
+        old = db.state(player_id, npc_id)
         learning_state = db.get_learning_state(player_id)
-        active = event_engine.daily_event(event_context(player_id, profile, old, learning_state))
+        active = event_engine.daily_event(event_context(player_id, npc_id, profile, old, learning_state))
         context = {"npc_profile": profile, "current_event": public_event(active),
                    "learning_targets": learning_engine.targets(learning_state, limit=3),
-                   "memories": db.list_npc_memories(player_id, "emma", limit=8)}
-        result = provider_reply(message, old, db.messages(player_id, settings.recent_message_limit), context)
+                   "memories": db.list_npc_memories(player_id, npc_id, limit=8)}
+        result = provider_reply(message, old, db.messages(player_id, settings.recent_message_limit, npc_id), context)
         evidence = [Evidence(**item.model_dump()) for item in result.learning_evidence]
         learning_engine.apply(learning_state, evidence)
         db.save_learning_state(player_id, learning_state)
@@ -233,7 +263,7 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
             event_update = {"stage_changed": transition.stage_changed, "completed": transition.completed}
             if transition.completed and transition.outcome and transition.memory:
                 event_rel, event_mood = transition.outcome.relationship_change, transition.outcome.mood_change
-                db.add_npc_memory(player_id, "emma", "event", transition.memory.memory,
+                db.add_npc_memory(player_id, npc_id, "event", transition.memory.memory,
                                   transition.memory.template_id, importance=3)
                 event_update.update({"outcome": {"id": transition.outcome.id,
                                                  "memory": transition.memory.memory},
@@ -252,7 +282,7 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
                     "animation": "happy" if mood > 0 else "sad" if mood < 0 else "idle",
                     "active_event": public_event(active), "event_update": event_update,
                     "learning_summary": learning_engine.progress(learning_state)}
-        committed = db.commit_chat(player_id, idempotency_key, message, response)
+        committed = db.commit_chat(player_id, idempotency_key, message, response, npc_id)
         return {**committed, "quota": db.quota(user["id"])}
 
     @app.post(settings.api_prefix + "/admin/login")

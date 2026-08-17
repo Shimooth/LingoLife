@@ -143,4 +143,5 @@ class LearningEngine:
         level = "B1-ready" if overall >= 75 else "A2+" if overall >= 45 else "A2 foundation"
         return {"scope": self.catalog.data.get("scope"), "overall_mastery": overall,
                 "level": level, "mastered_count": sum(item["status"] == "mastered" for item in items),
-                "total_targets": len(items), "targets": items, "recommended": self.targets(state, moment)}
+                "total_targets": len(items), "targets": items, "recommended": self.targets(state, moment),
+                "vocabulary": self.catalog.data.get("vocabulary", {})}
