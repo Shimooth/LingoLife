@@ -36,8 +36,8 @@ bash /home/lingolife-deploy/lingolife-release/deploy/scripts/install-host.sh
 `/opt/lingolife/app`；不要把个人 GitHub 私钥放到 VPS。以 root 只安装 Nginx 配置：
 
 ```bash
-install -o root -g root -m 0644 /opt/lingolife/app/deploy/nginx/lingolife.api.shimooth.me.conf /etc/nginx/sites-available/lingolife.api.shimooth.me.conf
-ln -sfn /etc/nginx/sites-available/lingolife.api.shimooth.me.conf /etc/nginx/sites-enabled/lingolife.api.shimooth.me.conf
+install -o root -g root -m 0644 /opt/lingolife/app/deploy/nginx/lingolife.shimooth.me.conf /etc/nginx/sites-available/lingolife.shimooth.me.conf
+ln -sfn /etc/nginx/sites-available/lingolife.shimooth.me.conf /etc/nginx/sites-enabled/lingolife.shimooth.me.conf
 nginx -t
 systemctl reload nginx
 ```
@@ -48,15 +48,15 @@ systemctl reload nginx
 ```bash
 cd /opt/lingolife/app
 deploy/scripts/deploy-release.sh
-curl --resolve lingolife.api.shimooth.me:80:127.0.0.1 http://lingolife.api.shimooth.me/api/v1/health
+curl --resolve lingolife.shimooth.me:80:127.0.0.1 http://lingolife.shimooth.me/api/v1/health
 ```
 
 HTTP 成功后申请证书并验证：
 
 ```bash
-certbot --nginx -d lingolife.api.shimooth.me
+certbot --nginx -d lingolife.shimooth.me
 certbot renew --dry-run
-curl https://lingolife.api.shimooth.me/api/v1/health
+curl https://lingolife.shimooth.me/api/v1/health
 ```
 
 Docker 组实际上拥有 root 级权限。本方案用它让部署账户无需保存 sudo 密码即可更新服务；
