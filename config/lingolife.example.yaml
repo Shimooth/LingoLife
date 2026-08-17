@@ -1,0 +1,68 @@
+app:
+  name: LingoLife
+  environment: development
+  api_prefix: /api/v1
+  version: 0.1.0
+
+demo:
+  room_id: emma-room
+  npc_id: emma
+  player_id_header: X-Player-Id
+  initial_relationship: 35
+  initial_mood: 35
+  initial_english_xp: 0
+  recent_message_limit: 10
+
+server:
+  host: 127.0.0.1
+  port: 8010
+  public_base_url: https://lingolife.api.shimooth.me
+  cors_origins:
+    - http://localhost
+  request_timeout_seconds: 30
+  max_message_characters: 500
+
+vps:
+  ssh_alias: lingolife-vps
+  deploy_user: lingolife-deploy
+  deploy_path: /opt/lingolife/app
+  data_path: /opt/lingolife/data
+  env_file: /etc/lingolife/lingolife.env
+  systemd_service: lingolife-api.service
+
+domain:
+  api_hostname: lingolife.api.shimooth.me
+  tls: true
+  reverse_proxy: nginx
+
+git:
+  remote_name: origin
+  remote_url: git@github.com:Shimooth/LingoLife.git
+  default_branch: main
+  deploy_branch: main
+
+ai:
+  provider: deepseek
+  base_url: https://api.deepseek.com
+  model: deepseek-chat
+  api_key_env: DEEPSEEK_API_KEY
+  response_format: json_object
+  timeout_seconds: 25
+  max_tokens: 700
+  temperature: 0.7
+  retry_count: 1
+
+database:
+  url_env: DATABASE_URL
+  development_url: sqlite:///./data/lingolife.db
+
+observability:
+  log_level: INFO
+  log_player_message_body: false
+  health_path: /api/v1/health
+
+backup:
+  enabled: true
+  schedule: daily
+  retention_days: 7
+  target_path: /opt/lingolife/backups

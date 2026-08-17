@@ -1,0 +1,42 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+config/lingolife.local.yaml
+config/lingolife.yaml
+*.pem
+*.key
+*.p12
+
+# Python backend
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Runtime data
+data/
+*.db
+*.sqlite
+*.sqlite3
+logs/
+backups/
+
+# Unity generated directories
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+MemoryCaptures/
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+*.csproj
+*.sln
+*.user
