@@ -21,3 +21,6 @@ export type AvatarStroke={color:string;width:number;points:[number,number][]}
 export type AvatarConfig={hair:string;hairColor:string;face:string;skin:string;eyes:string;brows:string;nose:string;mouth:string;outfit:string;outfitColor:string;accessory:string;strokes:AvatarStroke[]}
 export type NpcProfile={name:string;relationship:string;personality:string[];interests:string[];occupation:string;longTermGoal:string;avatar:AvatarConfig}
 export type NpcEntry={id:string;profile:NpcProfile}
+export type CityLocation={id:string;name:string;kind:string;x:number;y:number;district:string}
+export type CityResident={id:string;name:string;avatar:AvatarConfig;home:{id:string;x:number;y:number};current_location_id:string;position:{x:number;y:number};is_home:boolean;active_event?:ActiveEvent|null}
+export type City={date:string;map:{width:number;height:number};locations:CityLocation[];npcs:CityResident[]}

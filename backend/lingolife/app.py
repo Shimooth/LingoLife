@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .ai import DeepSeekProvider, DialogueProvider, ResilientProvider
 from .config import Settings, load_settings
+from .city import city_payload
 from .db import Database
 from .events import ActiveEvent, EventEngine, NPCEventContext
 from .learning import Evidence, LearningEngine
@@ -211,6 +212,25 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         user = current_user(authorization); player_id = user["player_id"]
         profile_for(player_id)
         return {"npcs": db.list_npc_profiles(player_id), "limit": 5}
+
+    @app.get(settings.api_prefix + "/city")
+    def city(authorization: Optional[str] = Header(None)):
+        user = current_user(authorization); player_id = user["player_id"]
+        profile_for(player_id)  # Materialize the default resident for older accounts.
+        profiles = db.list_npc_profiles(player_id)
+        learning_state = db.get_learning_state(player_id)
+        active_events: dict[str, ActiveEvent | None] = {}
+        summaries: dict[str, dict | None] = {}
+        for entry in profiles:
+            npc_id, profile = entry["id"], entry["profile"]
+            stats = db.state(player_id, npc_id)
+            active = event_engine.daily_event(event_context(player_id, npc_id, profile, stats, learning_state))
+            active_events[npc_id] = active
+            summaries[npc_id] = public_event(active)
+        payload = city_payload(player_id, profiles, active_events)
+        for resident in payload["npcs"]:
+            resident["active_event"] = summaries[resident["id"]]
+        return payload
 
     @app.post(settings.api_prefix + "/npcs", status_code=201)
     def create_npc(body: NpcProfile, authorization: Optional[str] = Header(None)):
