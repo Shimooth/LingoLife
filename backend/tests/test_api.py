@@ -236,7 +236,12 @@ def test_admin_invites_user_management_summary_and_no_message_leak(tmp_path):
     assert login.status_code == 200 and login.json() == {"authenticated": True}
     made = c.post("/api/v1/admin/invites", headers=origin, json={"count": 1, "daily_quota": 9})
     assert made.status_code == 201
+    unused = c.get("/api/v1/admin/invites").json()["invites"]
+    assert unused == [{"code": made.json()["invites"][0], "daily_quota": 9, "created_at": unused[0]["created_at"]}]
+    encrypted = c.app.state.db._connection.execute("SELECT code_value FROM invitations WHERE used_at IS NULL").fetchone()[0]
+    assert made.json()["invites"][0] not in encrypted
     token = c.post("/api/v1/auth/register", json={"username": "managed", "invite_code": made.json()["invites"][0], "password": "managed-pass"}).json()["session_token"]
+    assert c.get("/api/v1/admin/invites").json() == {"invites": []}
     c.post("/api/v1/chat", headers={"Authorization": "Bearer " + token, "Idempotency-Key": "managed-001"}, json={"message": "private chat text"})
     listing = c.get("/api/v1/admin/users").json()
     assert "private chat text" not in str(listing)

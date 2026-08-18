@@ -8,6 +8,7 @@ import secrets
 import uuid
 import base64
 from pathlib import Path
+from cryptography.fernet import Fernet, InvalidToken
 
 from .events import ActiveEvent, EventHistory, event_to_dict
 from .learning import LearningState
@@ -15,7 +16,7 @@ from .models import Stats
 
 
 class Database:
-    def __init__(self, url: str):
+    def __init__(self, url: str, invite_secret: str | None = None):
         if not url.startswith("sqlite:///"):
             raise ValueError("Demo supports sqlite:/// URLs only")
         self.path = url.removeprefix("sqlite:///")
@@ -24,6 +25,7 @@ class Database:
         self._connection = sqlite3.connect(self.path, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
         self._lock = threading.RLock()
+        self._invite_cipher = Fernet(base64.urlsafe_b64encode(hashlib.sha256(invite_secret.encode()).digest())) if invite_secret else None
         self._init_schema()
 
     def _init_schema(self):
@@ -50,7 +52,8 @@ class Database:
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, last_active_at TEXT);
             CREATE TABLE IF NOT EXISTS invitations (
               code_hash TEXT PRIMARY KEY, daily_quota INTEGER NOT NULL,
-              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, used_at TEXT, used_by TEXT);
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, used_at TEXT, used_by TEXT,
+              code_value TEXT);
             CREATE TABLE IF NOT EXISTS sessions (
               token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL,
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, last_used_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -94,6 +97,9 @@ class Database:
             user_columns = {row[1] for row in self._connection.execute("PRAGMA table_info(users)")}
             if "password_hash" not in user_columns:
                 self._connection.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
+            invitation_columns = {row[1] for row in self._connection.execute("PRAGMA table_info(invitations)")}
+            if "code_value" not in invitation_columns:
+                self._connection.execute("ALTER TABLE invitations ADD COLUMN code_value TEXT")
 
     @staticmethod
     def token_hash(value: str) -> str:
@@ -133,9 +139,25 @@ class Database:
         with self._lock, self._connection:
             for _ in range(count):
                 code = "LL-" + secrets.token_urlsafe(12).replace("_", "").replace("-", "")
-                self._connection.execute("INSERT INTO invitations(code_hash,daily_quota) VALUES (?,?)", (self.token_hash(code), daily_quota))
+                encrypted = self._invite_cipher.encrypt(code.encode()).decode() if self._invite_cipher else None
+                self._connection.execute("INSERT INTO invitations(code_hash,daily_quota,code_value) VALUES (?,?,?)", (self.token_hash(code), daily_quota, encrypted))
                 codes.append(code)
         return codes
+
+    def unused_invites(self) -> list[dict]:
+        rows = self._connection.execute(
+            "SELECT code_value,daily_quota,created_at FROM invitations WHERE used_at IS NULL AND code_value IS NOT NULL ORDER BY created_at DESC"
+        ).fetchall()
+        if not self._invite_cipher:
+            return []
+        result = []
+        for row in rows:
+            try:
+                code = self._invite_cipher.decrypt(row["code_value"].encode()).decode()
+            except (InvalidToken, ValueError):
+                continue
+            result.append({"code": code, "daily_quota": row["daily_quota"], "created_at": row["created_at"]})
+        return result
 
     def register(self, username: str, invite_code: str, password: str) -> tuple[dict, str] | None:
         token = secrets.token_urlsafe(32)

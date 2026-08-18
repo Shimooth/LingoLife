@@ -45,7 +45,7 @@ DEFAULT_NPC_PROFILE = {
 
 def create_app(settings: Settings | None = None, provider: DialogueProvider | None = None) -> FastAPI:
     settings = settings or load_settings()
-    db = Database(settings.database_url)
+    db = Database(settings.database_url, settings.admin_session_secret)
     learning_engine = LearningEngine()
     event_engine = EventEngine(db)
     if provider is None:
@@ -399,6 +399,11 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         require_admin(request); check_admin_origin(request)
         quota = body.daily_quota or settings.default_daily_quota
         return {"invites": db.create_invites(body.count, quota), "daily_quota": quota}
+
+    @app.get(settings.api_prefix + "/admin/invites")
+    def admin_unused_invites(request: Request):
+        require_admin(request)
+        return {"invites": db.unused_invites()}
 
     # Keep this catch-all mount after every API route so the web UI can never
     # shadow the JSON endpoints. Starlette's StaticFiles rejects paths that
