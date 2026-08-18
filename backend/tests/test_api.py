@@ -111,6 +111,20 @@ def test_fallback_non_english_input_does_not_award_xp(tmp_path):
     assert data["english_feedback"]["is_understandable"] is False
 
 
+def test_chat_stream_sends_delta_then_validated_final_result(tmp_path):
+    import json
+    from lingolife.ai import ResilientProvider
+    c = client(tmp_path, ResilientProvider(None))
+    response = c.post("/api/v1/chat/stream", headers={**auth(c), "Idempotency-Key": "stream-0001"},
+                      json={"message": "Why did that happen?", "npc_id": "emma"})
+    events = [json.loads(line) for line in response.text.splitlines()]
+    assert response.status_code == 200
+    assert events[0]["type"] == "delta" and events[0]["data"]
+    assert events[-1]["type"] == "final"
+    assert events[-1]["data"]["npc_reply"].startswith(events[0]["data"])
+    assert events[-1]["data"]["stats"]["english_xp"] == 1
+
+
 def test_invite_registration_unique_username_session_and_logout(tmp_path):
     c = client(tmp_path)
     code1, code2 = c.app.state.db.create_invites(2, 7)

@@ -9,12 +9,14 @@ import threading
 import time
 import inspect
 import uuid
+import json
+import queue
 from typing import Optional
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .ai import DeepSeekProvider, DialogueProvider, ResilientProvider
@@ -118,9 +120,11 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
                 "stage_index": active.stage_index, "stage_count": len(template.stages),
                 "learning_targets": list(template.learning_targets)}
 
-    def provider_reply(message: str, stats, history: list[dict], context: dict):
+    def provider_reply(message: str, stats, history: list[dict], context: dict, on_chunk=None):
         # Preserve compatibility with small test/custom providers implementing the original contract.
         parameters = inspect.signature(provider.reply).parameters
+        if on_chunk and len(parameters) >= 5:
+            return provider.reply(message, stats, history, context, on_chunk)
         return provider.reply(message, stats, history, context) if len(parameters) >= 4 else provider.reply(message, stats, history)
 
     def admin_cookie() -> str:
@@ -230,20 +234,23 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         user = current_user(authorization)
         return learning_engine.progress(db.get_learning_state(user["player_id"]))
 
-    @app.post(settings.api_prefix + "/chat", response_model=ChatResponse)
-    def chat(body: ChatRequest, idempotency_key: str = Header(...), authorization: Optional[str] = Header(None)):
+    def prepare_chat(body: ChatRequest, idempotency_key: str, authorization: str | None):
         user = current_user(authorization); player_id = user["player_id"]
         if not KEY_RE.fullmatch(idempotency_key):
             raise HTTPException(400, {"code": "INVALID_IDEMPOTENCY_KEY", "message": "Idempotency-Key is invalid."})
         cached = db.cached(player_id, idempotency_key)
-        if cached: return {**cached, "quota": db.quota(user["id"])}
+        if cached:
+            return user, body.message.strip(), {**cached, "quota": db.quota(user["id"])}
         message = body.message.strip()
         if not message or len(message) > settings.max_message_characters or any(ord(c) < 32 and c not in "\n\t" for c in message):
             raise HTTPException(422, {"code": "INVALID_MESSAGE", "message": f"Message must contain 1-{settings.max_message_characters} valid characters."})
         denied = db.consume_chat(user["id"], idempotency_key, settings.chat_per_minute)
         if denied:
-            status = 429
-            raise HTTPException(status, {"code": denied, "message": "Chat limit reached. Please try again later."})
+            raise HTTPException(429, {"code": denied, "message": "Chat limit reached. Please try again later."})
+        return user, message, None
+
+    def execute_chat(body: ChatRequest, idempotency_key: str, user: dict, message: str, on_chunk=None):
+        player_id = user["player_id"]
         npc_id = body.npc_id
         profile = profile_for(player_id, npc_id)
         old = db.state(player_id, npc_id)
@@ -252,7 +259,7 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         context = {"npc_profile": profile, "current_event": public_event(active),
                    "learning_targets": learning_engine.targets(learning_state, limit=3),
                    "memories": db.list_npc_memories(player_id, npc_id, limit=8)}
-        result = provider_reply(message, old, db.messages(player_id, settings.recent_message_limit, npc_id), context)
+        result = provider_reply(message, old, db.messages(player_id, settings.recent_message_limit, npc_id), context, on_chunk)
         evidence = [Evidence(**item.model_dump()) for item in result.learning_evidence]
         learning_engine.apply(learning_state, evidence)
         db.save_learning_state(player_id, learning_state)
@@ -284,6 +291,36 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
                     "learning_summary": learning_engine.progress(learning_state)}
         committed = db.commit_chat(player_id, idempotency_key, message, response, npc_id)
         return {**committed, "quota": db.quota(user["id"])}
+
+    @app.post(settings.api_prefix + "/chat", response_model=ChatResponse)
+    def chat(body: ChatRequest, idempotency_key: str = Header(...), authorization: Optional[str] = Header(None)):
+        user, message, cached = prepare_chat(body, idempotency_key, authorization)
+        return cached or execute_chat(body, idempotency_key, user, message)
+
+    @app.post(settings.api_prefix + "/chat/stream")
+    def chat_stream(body: ChatRequest, idempotency_key: str = Header(...), authorization: Optional[str] = Header(None)):
+        user, message, cached = prepare_chat(body, idempotency_key, authorization)
+        def encode(kind: str, value) -> str:
+            return json.dumps({"type": kind, "data": value}, ensure_ascii=False, separators=(",", ":")) + "\n"
+        if cached:
+            return StreamingResponse(iter([encode("delta", cached["npc_reply"]), encode("final", cached)]), media_type="application/x-ndjson")
+        def stream():
+            events: queue.Queue = queue.Queue()
+            def work():
+                try:
+                    result = execute_chat(body, idempotency_key, user, message, lambda chunk: events.put(("delta", chunk)))
+                    events.put(("final", result))
+                except Exception as exc:
+                    events.put(("error", {"message": str(exc)}))
+                finally:
+                    events.put(("done", None))
+            threading.Thread(target=work, daemon=True).start()
+            while True:
+                kind, value = events.get()
+                if kind == "done":
+                    break
+                yield encode(kind, value)
+        return StreamingResponse(stream(), media_type="application/x-ndjson", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     @app.post(settings.api_prefix + "/admin/login")
     def admin_login(body: AdminLoginRequest, request: Request, response: Response):

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 import httpx
 
@@ -15,6 +15,34 @@ class DialogueProvider(Protocol):
               context: dict[str, Any] | None = None) -> AIResult: ...
 
 
+def npc_reply_prefix(raw: str) -> str:
+    """Decode the currently complete portion of npc_reply from streamed JSON."""
+    match = re.search(r'"npc_reply"\s*:\s*"', raw)
+    if not match:
+        return ""
+    chars: list[str] = []
+    index = match.end()
+    escapes = {'"': '"', "\\": "\\", "/": "/", "b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t"}
+    while index < len(raw):
+        char = raw[index]
+        if char == '"':
+            break
+        if char != "\\":
+            chars.append(char); index += 1; continue
+        if index + 1 >= len(raw):
+            break
+        escaped = raw[index + 1]
+        if escaped == "u":
+            digits = raw[index + 2:index + 6]
+            if len(digits) < 4 or not re.fullmatch(r"[0-9a-fA-F]{4}", digits):
+                break
+            chars.append(chr(int(digits, 16))); index += 6; continue
+        if escaped not in escapes:
+            break
+        chars.append(escapes[escaped]); index += 2
+    return "".join(chars)
+
+
 class DeepSeekProvider:
     def __init__(self, settings: Settings):
         if not settings.deepseek_api_key:
@@ -22,7 +50,8 @@ class DeepSeekProvider:
         self.settings = settings
 
     def reply(self, message: str, stats: Stats, history: list[dict],
-              context: dict[str, Any] | None = None) -> AIResult:
+              context: dict[str, Any] | None = None,
+              on_chunk: Callable[[str], None] | None = None) -> AIResult:
         context = context or {}
         profile = context.get("npc_profile") or {"name": "Emma", "personality": ["kind", "thoughtful"]}
         npc_name = str(profile.get("name", "Emma"))[:24]
@@ -67,12 +96,26 @@ class DeepSeekProvider:
             "temperature": self.settings.deepseek_temperature,
         }
         last_error: Exception | None = None
+        emitted = ""
         for _ in range(self.settings.deepseek_retry_count + 1):
             try:
                 with httpx.Client(timeout=self.settings.deepseek_timeout) as client:
-                    response = client.post(self.settings.deepseek_base_url.rstrip("/") + "/chat/completions", headers={"Authorization": f"Bearer {self.settings.deepseek_api_key}"}, json=payload)
-                    response.raise_for_status()
-                content = response.json()["choices"][0]["message"]["content"]
+                    if on_chunk:
+                        content = ""; streaming_payload = {**payload, "stream": True}
+                        with client.stream("POST", self.settings.deepseek_base_url.rstrip("/") + "/chat/completions", headers={"Authorization": f"Bearer {self.settings.deepseek_api_key}"}, json=streaming_payload) as response:
+                            response.raise_for_status()
+                            for line in response.iter_lines():
+                                if not line.startswith("data: ") or line == "data: [DONE]":
+                                    continue
+                                delta = json.loads(line[6:])["choices"][0]["delta"].get("content", "")
+                                content += delta
+                                visible = npc_reply_prefix(content)
+                                if len(visible) > len(emitted):
+                                    on_chunk(visible[len(emitted):]); emitted = visible
+                    else:
+                        response = client.post(self.settings.deepseek_base_url.rstrip("/") + "/chat/completions", headers={"Authorization": f"Bearer {self.settings.deepseek_api_key}"}, json=payload)
+                        response.raise_for_status()
+                        content = response.json()["choices"][0]["message"]["content"]
                 return AIResult.model_validate_json(content)
             except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as error:
                 last_error = error
@@ -115,14 +158,18 @@ class ResilientProvider:
         self.primary, self.fallback = primary, fallback or FallbackProvider()
 
     def reply(self, message: str, stats: Stats, history: list[dict],
-              context: dict[str, Any] | None = None) -> AIResult:
+              context: dict[str, Any] | None = None,
+              on_chunk: Callable[[str], None] | None = None) -> AIResult:
         if self.primary:
             try:
+                if on_chunk and isinstance(self.primary, DeepSeekProvider):
+                    return self.primary.reply(message, stats, history, context, on_chunk)
                 if context is None:
                     return self.primary.reply(message, stats, history)
                 return self.primary.reply(message, stats, history, context)
             except Exception:
                 pass
-        if context is None:
-            return self.fallback.reply(message, stats, history)
-        return self.fallback.reply(message, stats, history, context)
+        result = self.fallback.reply(message, stats, history) if context is None else self.fallback.reply(message, stats, history, context)
+        if on_chunk:
+            on_chunk(result.npc_reply)
+        return result

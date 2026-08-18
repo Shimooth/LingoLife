@@ -3,7 +3,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from lingolife.ai import DeepSeekProvider, FallbackProvider
+from lingolife.ai import DeepSeekProvider, FallbackProvider, npc_reply_prefix
 from lingolife.config import Settings
 from lingolife.models import AIResult, EnglishFeedback, Stats
 
@@ -25,6 +25,13 @@ def test_ai_result_additions_default_empty_and_reject_unknown_values():
         base_result(learning_evidence=[{"target_id": "unknown.target", "outcome": "success"}])
     with pytest.raises(ValidationError):
         base_result(learning_evidence=[{"target_id": "intent.empathy", "outcome": "success", "confidence": 2}])
+
+
+def test_streamed_json_exposes_only_complete_decoded_reply_text():
+    assert npc_reply_prefix('{"npc_reply":"Hello') == "Hello"
+    assert npc_reply_prefix('{"npc_reply":"Hello\\nMaya \\u4f60') == "Hello\nMaya 你"
+    assert npc_reply_prefix('{"npc_reply":"unfinished\\') == "unfinished"
+    assert npc_reply_prefix('{"relationship_change":2}') == ""
 
 
 def test_fallback_extracts_conservative_signals_and_learning_evidence():
