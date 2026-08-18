@@ -21,7 +21,7 @@ def client(tmp_path, provider=None, web_root=None):
 
 def auth(c, username="tester", quota=30):
     code = c.app.state.db.create_invites(1, quota)[0]
-    data = c.post("/api/v1/auth/register", json={"username": username, "invite_code": code}).json()
+    data = c.post("/api/v1/auth/register", json={"username": username, "invite_code": code, "password": "test-password"}).json()
     return {"Authorization": "Bearer " + data["session_token"]}
 
 
@@ -128,12 +128,12 @@ def test_chat_stream_sends_delta_then_validated_final_result(tmp_path):
 def test_invite_registration_unique_username_session_and_logout(tmp_path):
     c = client(tmp_path)
     code1, code2 = c.app.state.db.create_invites(2, 7)
-    registered = c.post("/api/v1/auth/register", json={"username": "Alice_1", "invite_code": code1})
+    registered = c.post("/api/v1/auth/register", json={"username": "Alice_1", "invite_code": code1, "password": "🌙 any format"})
     assert registered.status_code == 201
     token = registered.json()["session_token"]
     assert registered.json()["quota"] == {"daily_limit": 7, "used_today": 0, "bonus_credits": 0, "remaining": 7}
     assert c.get("/api/v1/auth/me", headers={"Authorization": "Bearer " + token}).json()["user"]["username"] == "Alice_1"
-    duplicate = c.post("/api/v1/auth/register", json={"username": "alice_1", "invite_code": code2})
+    duplicate = c.post("/api/v1/auth/register", json={"username": "alice_1", "invite_code": code2, "password": "anything"})
     assert duplicate.status_code == 409 and duplicate.json()["error"]["code"] == "USERNAME_TAKEN"
     assert c.post("/api/v1/auth/logout", headers={"Authorization": "Bearer " + token}).status_code == 204
     assert c.get("/api/v1/auth/me", headers={"Authorization": "Bearer " + token}).status_code == 401
@@ -142,11 +142,63 @@ def test_invite_registration_unique_username_session_and_logout(tmp_path):
     assert token not in stored and len(stored) == 64
 
 
+def test_password_login_restores_the_same_account_on_another_device(tmp_path):
+    c = client(tmp_path)
+    code = c.app.state.db.create_invites(1, 7)[0]
+    registered = c.post("/api/v1/auth/register", json={
+        "username": "AcrossDevices", "invite_code": code, "password": "🌙 spaces and symbols !?",
+    }).json()
+    old_token = registered["session_token"]
+    player_id = c.app.state.db.authenticate(old_token)["player_id"]
+    c.app.state.db.state(player_id, "emma")
+    with c.app.state.db._connection:
+        c.app.state.db._connection.execute(
+            "UPDATE npc_states SET relationship=39,mood=37,english_xp=1 WHERE player_id=? AND npc_id='emma'",
+            (player_id,),
+        )
+
+    assert c.post("/api/v1/auth/login", json={"username": "acrossdevices", "password": "wrong"}).status_code == 401
+    logged_in = c.post("/api/v1/auth/login", json={
+        "username": "acrossdevices", "password": "🌙 spaces and symbols !?",
+    })
+    assert logged_in.status_code == 200
+    new_token = logged_in.json()["session_token"]
+    room = c.get("/api/v1/room", headers={"Authorization": "Bearer " + new_token}).json()
+    assert room["stats"] == {"relationship": 39, "mood": 37, "english_xp": 1}
+    stored = c.app.state.db._connection.execute(
+        "SELECT password_hash FROM users WHERE username='AcrossDevices'"
+    ).fetchone()[0]
+    assert stored.startswith("pbkdf2_sha256$600000$")
+    assert "spaces and symbols" not in stored
+
+
+def test_legacy_account_can_set_password_once_and_password_change_revokes_other_sessions(tmp_path):
+    c = client(tmp_path)
+    db = c.app.state.db
+    db.ensure_player("legacy-player")
+    with db._connection:
+        db._connection.execute(
+            "INSERT INTO users(id,username,player_id,last_active_at) VALUES ('legacy-user','legacy','legacy-player',CURRENT_TIMESTAMP)"
+        )
+    legacy_token = db.create_session("legacy-user")
+    headers = {"Authorization": "Bearer " + legacy_token}
+    assert c.get("/api/v1/auth/me", headers=headers).json()["user"]["has_password"] is False
+    assert c.put("/api/v1/auth/password", headers=headers, json={"new_password": "first", "current_password": None}).status_code == 200
+    second = c.post("/api/v1/auth/login", json={"username": "legacy", "password": "first"}).json()["session_token"]
+    second_headers = {"Authorization": "Bearer " + second}
+    wrong = c.put("/api/v1/auth/password", headers=second_headers, json={"current_password": "nope", "new_password": "next"})
+    assert wrong.status_code == 401
+    assert c.put("/api/v1/auth/password", headers=second_headers, json={"current_password": "first", "new_password": "next"}).status_code == 200
+    assert c.get("/api/v1/auth/me", headers=headers).status_code == 401
+    assert c.post("/api/v1/auth/login", json={"username": "legacy", "password": "first"}).status_code == 401
+    assert c.post("/api/v1/auth/login", json={"username": "legacy", "password": "next"}).status_code == 200
+
+
 def test_invite_is_single_use_and_auth_is_required(tmp_path):
     c = client(tmp_path)
     code = c.app.state.db.create_invites(1, 30)[0]
-    assert c.post("/api/v1/auth/register", json={"username": "first", "invite_code": code}).status_code == 201
-    reused = c.post("/api/v1/auth/register", json={"username": "second", "invite_code": code})
+    assert c.post("/api/v1/auth/register", json={"username": "first", "invite_code": code, "password": "x"}).status_code == 201
+    reused = c.post("/api/v1/auth/register", json={"username": "second", "invite_code": code, "password": "x"})
     assert reused.status_code == 400 and reused.json()["error"]["code"] == "INVALID_INVITE"
     assert c.get("/api/v1/room", headers={"X-Player-Id": "forged"}).status_code == 401
 
@@ -182,7 +234,7 @@ def test_admin_invites_user_management_summary_and_no_message_leak(tmp_path):
     assert login.status_code == 200 and login.json() == {"authenticated": True}
     made = c.post("/api/v1/admin/invites", headers=origin, json={"count": 1, "daily_quota": 9})
     assert made.status_code == 201
-    token = c.post("/api/v1/auth/register", json={"username": "managed", "invite_code": made.json()["invites"][0]}).json()["session_token"]
+    token = c.post("/api/v1/auth/register", json={"username": "managed", "invite_code": made.json()["invites"][0], "password": "managed-pass"}).json()["session_token"]
     c.post("/api/v1/chat", headers={"Authorization": "Bearer " + token, "Idempotency-Key": "managed-001"}, json={"message": "private chat text"})
     listing = c.get("/api/v1/admin/users").json()
     assert "private chat text" not in str(listing)

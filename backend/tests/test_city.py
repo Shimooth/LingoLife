@@ -44,7 +44,7 @@ def test_city_api_requires_auth_and_includes_event_summary(tmp_path):
     client = TestClient(create_app(settings))
     assert client.get("/api/v1/city").status_code == 401
     code = client.app.state.db.create_invites(1, 30)[0]
-    registration = client.post("/api/v1/auth/register", json={"username": "cityuser", "invite_code": code}).json()
+    registration = client.post("/api/v1/auth/register", json={"username": "cityuser", "invite_code": code, "password": "city-pass"}).json()
     headers = {"Authorization": "Bearer " + registration["session_token"]}
     response = client.get("/api/v1/city", headers=headers)
     assert response.status_code == 200

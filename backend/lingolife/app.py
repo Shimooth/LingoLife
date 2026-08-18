@@ -26,7 +26,7 @@ from .db import Database
 from .events import ActiveEvent, EventEngine, NPCEventContext
 from .learning import Evidence, LearningEngine
 from .models import (AdminLoginRequest, AdminUserPatch, ChatRequest, ChatResponse,
-                     InviteCreateRequest, NpcProfile, RegisterRequest)
+                     InviteCreateRequest, LoginRequest, NpcProfile, PasswordChangeRequest, RegisterRequest)
 
 KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$")
 USERNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{2,31}$")
@@ -166,18 +166,38 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         if not USERNAME_RE.fullmatch(username):
             raise HTTPException(422, {"code": "INVALID_USERNAME", "message": "Username must be 3-32 letters, numbers, _ or -."})
         try:
-            result = db.register(username, body.invite_code.strip())
+            result = db.register(username, body.invite_code.strip(), body.password)
         except ValueError:
             raise HTTPException(409, {"code": "USERNAME_TAKEN", "message": "Username is already taken."})
         if not result:
             raise HTTPException(400, {"code": "INVALID_INVITE", "message": "Invite code is invalid or already used."})
         user, token = result
-        return {"session_token": token, "user": {"id": user["id"], "username": user["username"]}, "quota": db.quota(user["id"])}
+        return {"session_token": token, "user": {"id": user["id"], "username": user["username"], "has_password": True}, "quota": db.quota(user["id"])}
+
+    @app.post(settings.api_prefix + "/auth/login")
+    def login(body: LoginRequest, request: Request):
+        rate_limit("login", request, maximum=10, window_seconds=15 * 60)
+        username = body.username.strip()
+        result = db.login(username, body.password)
+        if not result:
+            raise HTTPException(401, {"code": "INVALID_CREDENTIALS", "message": "Username or password is incorrect."})
+        user, token = result
+        if user.get("disabled"):
+            raise HTTPException(403, {"code": "USER_DISABLED", "message": "This account is disabled."})
+        clear_attempts("login", request)
+        return {"session_token": token, "user": {"id": user["id"], "username": user["username"], "has_password": True}, "quota": db.quota(user["id"])}
 
     @app.get(settings.api_prefix + "/auth/me")
     def me(authorization: Optional[str] = Header(None)):
         user = current_user(authorization)
-        return {"user": {"id": user["id"], "username": user["username"]}, "quota": db.quota(user["id"])}
+        return {"user": {"id": user["id"], "username": user["username"], "has_password": bool(user.get("password_hash"))}, "quota": db.quota(user["id"])}
+
+    @app.put(settings.api_prefix + "/auth/password")
+    def change_password(body: PasswordChangeRequest, authorization: Optional[str] = Header(None)):
+        user = current_user(authorization); token = authorization[7:]
+        if not db.set_password(user["id"], body.new_password, body.current_password, token):
+            raise HTTPException(401, {"code": "INVALID_CURRENT_PASSWORD", "message": "Current password is incorrect."})
+        return {"has_password": True}
 
     @app.post(settings.api_prefix + "/auth/logout", status_code=204)
     def logout(authorization: Optional[str] = Header(None)):

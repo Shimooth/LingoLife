@@ -6,6 +6,7 @@ import threading
 import hashlib
 import secrets
 import uuid
+import base64
 from pathlib import Path
 
 from .events import ActiveEvent, EventHistory, event_to_dict
@@ -43,7 +44,8 @@ class Database:
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(idempotency_key, player_id));
             CREATE TABLE IF NOT EXISTS users (
               id TEXT PRIMARY KEY, username TEXT NOT NULL COLLATE NOCASE UNIQUE,
-              player_id TEXT NOT NULL UNIQUE, disabled INTEGER NOT NULL DEFAULT 0,
+              player_id TEXT NOT NULL UNIQUE, password_hash TEXT,
+              disabled INTEGER NOT NULL DEFAULT 0,
               daily_quota INTEGER NOT NULL DEFAULT 30, bonus_credits INTEGER NOT NULL DEFAULT 0,
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, last_active_at TEXT);
             CREATE TABLE IF NOT EXISTS invitations (
@@ -89,10 +91,42 @@ class Database:
             columns = {row[1] for row in self._connection.execute("PRAGMA table_info(messages)")}
             if "npc_id" not in columns:
                 self._connection.execute("ALTER TABLE messages ADD COLUMN npc_id TEXT NOT NULL DEFAULT 'emma'")
+            user_columns = {row[1] for row in self._connection.execute("PRAGMA table_info(users)")}
+            if "password_hash" not in user_columns:
+                self._connection.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
 
     @staticmethod
     def token_hash(value: str) -> str:
         return hashlib.sha256(value.encode()).hexdigest()
+
+    @staticmethod
+    def password_hash(password: str) -> str:
+        salt = secrets.token_bytes(16)
+        iterations = 600_000
+        derived = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations, dklen=32)
+        encoded = lambda value: base64.urlsafe_b64encode(value).decode().rstrip("=")
+        return f"pbkdf2_sha256${iterations}${encoded(salt)}${encoded(derived)}"
+
+    @staticmethod
+    def verify_password(password: str, stored: str | None) -> bool:
+        if not stored:
+            # Keep unknown/unmigrated account checks deliberately expensive.
+            hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), b"LingoLife-dummy!", 600_000, dklen=32)
+            return False
+        try:
+            algorithm, iterations, salt_text, digest_text = stored.split("$", 3)
+            if algorithm != "pbkdf2_sha256": return False
+            decode = lambda value: base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+            actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), decode(salt_text), int(iterations), dklen=32)
+            return secrets.compare_digest(actual, decode(digest_text))
+        except (ValueError, TypeError):
+            return False
+
+    def create_session(self, user_id: str) -> str:
+        token = secrets.token_urlsafe(32)
+        with self._lock, self._connection:
+            self._connection.execute("INSERT INTO sessions(token_hash,user_id) VALUES (?,?)", (self.token_hash(token), user_id))
+        return token
 
     def create_invites(self, count: int, daily_quota: int) -> list[str]:
         codes = []
@@ -103,9 +137,14 @@ class Database:
                 codes.append(code)
         return codes
 
-    def register(self, username: str, invite_code: str) -> tuple[dict, str] | None:
+    def register(self, username: str, invite_code: str, password: str) -> tuple[dict, str] | None:
         token = secrets.token_urlsafe(32)
         user_id, player_id = str(uuid.uuid4()), str(uuid.uuid4())
+        if not self._connection.execute(
+            "SELECT 1 FROM invitations WHERE code_hash=? AND used_at IS NULL", (self.token_hash(invite_code),)
+        ).fetchone():
+            return None
+        password_hash = self.password_hash(password)
         try:
             with self._lock, self._connection:
                 invite = self._connection.execute(
@@ -115,8 +154,8 @@ class Database:
                     return None
                 self.ensure_player(player_id)
                 self._connection.execute(
-                    "INSERT INTO users(id,username,player_id,daily_quota,last_active_at) VALUES (?,?,?,?,CURRENT_TIMESTAMP)",
-                    (user_id, username, player_id, invite[0]),
+                    "INSERT INTO users(id,username,player_id,daily_quota,last_active_at,password_hash) VALUES (?,?,?,?,CURRENT_TIMESTAMP,?)",
+                    (user_id, username, player_id, invite[0], password_hash),
                 )
                 self._connection.execute("UPDATE invitations SET used_at=CURRENT_TIMESTAMP,used_by=? WHERE code_hash=?", (user_id, self.token_hash(invite_code)))
                 self._connection.execute("INSERT INTO sessions(token_hash,user_id) VALUES (?,?)", (self.token_hash(token), user_id))
@@ -125,6 +164,28 @@ class Database:
             if "username" in str(exc).lower():
                 raise ValueError("USERNAME_TAKEN") from exc
             raise
+
+    def login(self, username: str, password: str) -> tuple[dict, str] | None:
+        row = self._connection.execute("SELECT * FROM users WHERE username=? COLLATE NOCASE", (username,)).fetchone()
+        user = dict(row) if row else None
+        if not self.verify_password(password, user.get("password_hash") if user else None):
+            return None
+        if user["disabled"]:
+            return user, ""
+        return user, self.create_session(user["id"])
+
+    def set_password(self, user_id: str, new_password: str, current_password: str | None,
+                     current_token: str) -> bool:
+        user = self.user_by_id(user_id)
+        existing = user.get("password_hash")
+        if existing and (current_password is None or not self.verify_password(current_password, existing)):
+            return False
+        replacement = self.password_hash(new_password)
+        with self._lock, self._connection:
+            self._connection.execute("UPDATE users SET password_hash=? WHERE id=?", (replacement, user_id))
+            self._connection.execute("UPDATE sessions SET revoked_at=CURRENT_TIMESTAMP WHERE user_id=? AND token_hash<>? AND revoked_at IS NULL",
+                                     (user_id, self.token_hash(current_token)))
+        return True
 
     def authenticate(self, token: str) -> dict | None:
         row = self._connection.execute(

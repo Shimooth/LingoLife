@@ -95,6 +95,17 @@ class NpcProfile(BaseModel):
 class RegisterRequest(BaseModel):
     username: str
     invite_code: str
+    password: str = Field(min_length=1, max_length=256)
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str = Field(min_length=1, max_length=256)
+
+
+class PasswordChangeRequest(BaseModel):
+    new_password: str = Field(min_length=1, max_length=256)
+    current_password: Optional[str] = Field(default=None, max_length=256)
 
 
 class AdminLoginRequest(BaseModel):

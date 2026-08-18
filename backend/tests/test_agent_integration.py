@@ -27,7 +27,7 @@ def setup(tmp_path):
     settings = Settings(database_url=f"sqlite:///{tmp_path / 'agent.db'}", web_root=str(tmp_path / "none"))
     client = TestClient(create_app(settings, provider))
     code = client.app.state.db.create_invites(1, 30)[0]
-    token = client.post("/api/v1/auth/register", json={"username": "agentuser", "invite_code": code}).json()["session_token"]
+    token = client.post("/api/v1/auth/register", json={"username": "agentuser", "invite_code": code, "password": "agent-pass"}).json()["session_token"]
     return client, provider, {"Authorization": "Bearer " + token}
 
 

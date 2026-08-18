@@ -1,0 +1,9 @@
+.settings-password-form{display:grid;gap:11px;margin-top:16px}
+.settings-password-form label{color:#5f6168;font-size:12px;font-weight:700}
+.settings-password-form input{display:block;width:100%;margin-top:5px;padding:11px 12px;border:1px solid #deddd9;border-radius:11px;background:#fff;color:#30343b;outline:none}
+.settings-password-form input:focus{border-color:#887158;box-shadow:0 0 0 3px rgba(136,113,88,.14)}
+.settings-password-form button{justify-self:start;padding:11px 17px;border:0;border-radius:11px;background:#826c53;color:#fff;font-weight:800;cursor:pointer}
+.settings-password-form button:disabled{opacity:.55}
+.settings-password-error,.settings-password-success{font-weight:700}
+.settings-password-error{color:#a24e49!important}
+.settings-password-success{color:#397351!important}
