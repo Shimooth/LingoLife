@@ -214,7 +214,7 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         active = event_engine.daily_event(event_context(player_id, npc_id, profile, stats, learning_state))
         animation = "sad" if stats.mood < 40 else "happy" if stats.mood >= 60 else "idle"
         return {"room_id": f"{npc_id}-room", "npc": {"id": npc_id, "name": profile["name"], "animation": animation},
-                "stats": stats, "messages": db.messages(player_id, settings.recent_message_limit, npc_id),
+                "stats": stats, "messages": db.messages(player_id, 200, npc_id),
                 "quota": db.quota(user["id"]), "active_event": public_event(active)}
 
     @app.get(settings.api_prefix + "/npc/profile")

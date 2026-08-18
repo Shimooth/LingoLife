@@ -54,7 +54,9 @@ def test_health_and_new_room(tmp_path):
     assert c.get("/api/v1/health").json() == {"status": "ok", "version": "0.1.0"}
     room = c.get("/api/v1/room", headers=auth(c)).json()
     assert room["stats"] == {"relationship": 35, "mood": 35, "english_xp": 0}
-    assert room["messages"] == [{"speaker": "npc", "text": "I had a terrible day at work..."}]
+    assert room["messages"][0]["speaker"] == "npc"
+    assert room["messages"][0]["text"] == "I had a terrible day at work..."
+    assert room["messages"][0]["created_at"]
 
 
 def test_chat_clamps_and_is_idempotent(tmp_path):

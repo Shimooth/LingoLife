@@ -295,7 +295,7 @@ class Database:
     def messages(self, player_id: str, limit: int, npc_id: str = "emma") -> list[dict]:
         self.ensure_player(player_id)
         rows = self._connection.execute(
-            "SELECT speaker,text FROM (SELECT id,speaker,text FROM messages WHERE player_id=? AND npc_id=? ORDER BY id DESC LIMIT ?) ORDER BY id",
+            "SELECT speaker,text,created_at FROM (SELECT id,speaker,text,created_at FROM messages WHERE player_id=? AND npc_id=? ORDER BY id DESC LIMIT ?) ORDER BY id",
             (player_id, npc_id, limit),
         ).fetchall()
         return [dict(r) for r in rows]
