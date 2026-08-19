@@ -1,0 +1,14 @@
+/* Give the city more of the viewport while keeping the existing map scale controls. */
+.city-shell{padding:clamp(6px,1.4vw,18px)}
+.city-screen{width:min(1500px,100%)}
+.city-screen>.city-map{height:max(680px,calc(100dvh - 118px))}
+
+@media(max-width:760px){
+ .city-shell{padding:0}
+ .city-screen>.city-map{height:max(500px,calc(100dvh - 172px));min-height:500px}
+}
+
+@media(min-width:1600px){
+ .city-screen{width:min(1680px,calc(100% - 16px))}
+ .city-screen>.city-map{height:max(760px,calc(100dvh - 112px))}
+}
