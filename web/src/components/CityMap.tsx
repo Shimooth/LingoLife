@@ -31,19 +31,39 @@ const DEFAULT_LANDMARKS:CityLandmark[]=[
 ]
 const clamp=(value:number,min:number,max:number)=>Math.min(max,Math.max(min,value))
 
-function AvatarPin({character,active,onSelect}:{character:CityCharacter;active:boolean;onSelect:()=>void}){
-  const skin=character.avatar?.skin||'#e8b99a',hair=character.avatar?.hairColor||'#4b342d',outfit=character.avatar?.outfitColor||'#738ca5'
-  return <button className={`city-avatar ${active?'is-active':''}`} style={{left:`${character.location.x/12}%`,top:`${character.location.y/7.6}%`}} onClick={onSelect} aria-label={`${character.name}${character.location.place?`, ${character.location.place}`:''}`}>
-    <span className="city-avatar__portrait" aria-hidden="true">
-      <svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="23" fill="#fff"/><path d="M7 48q2-17 17-17t17 17" fill={outfit}/><ellipse cx="24" cy="22" rx="11" ry="13" fill={skin}/><path d="M13 22Q12 7 24 7t12 15q-8-2-14-8-2 6-9 8" fill={hair}/><circle cx="20" cy="22" r="1"/><circle cx="28" cy="22" r="1"/><path d="M21 27q3 2 6 0" fill="none" stroke="#9b5960" strokeWidth="1.5" strokeLinecap="round"/></svg>
-    </span>
-    <span className="city-avatar__label"><strong>{character.name}</strong>{character.location.place&&<small>{character.location.place}</small>}</span>
-  </button>
+function Portrait({character}:{character:CityCharacter}){
+ const skin=character.avatar?.skin||'#e8b99a',hair=character.avatar?.hairColor||'#4b342d',outfit=character.avatar?.outfitColor||'#738ca5'
+ return <span className="city-avatar__portrait" aria-hidden><svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="23" fill="#fff"/><path d="M7 48q2-17 17-17t17 17" fill={outfit}/><ellipse cx="24" cy="22" rx="11" ry="13" fill={skin}/><path d="M13 22Q12 7 24 7t12 15q-8-2-14-8-2 6-9 8" fill={hair}/><circle cx="20" cy="22" r="1"/><circle cx="28" cy="22" r="1"/><path d="M21 27q3 2 6 0" fill="none" stroke="#9b5960" strokeWidth="1.5" strokeLinecap="round"/></svg></span>
 }
 
-function HomePin({character,homeLabel,onSelect}:{character:CityCharacter;homeLabel:string;onSelect:()=>void}){
- const skin=character.avatar?.skin||'#e8b99a',hair=character.avatar?.hairColor||'#4b342d',outfit=character.avatar?.outfitColor||'#738ca5'
- return <button className="city-home-avatar" style={{left:`${character.home.x/12}%`,top:`${character.home.y/7.6}%`}} onClick={onSelect} aria-label={`${character.name} · ${homeLabel}`}><span className="city-avatar__portrait" aria-hidden><svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="23" fill="#fff"/><path d="M7 48q2-17 17-17t17 17" fill={outfit}/><ellipse cx="24" cy="22" rx="11" ry="13" fill={skin}/><path d="M13 22Q12 7 24 7t12 15q-8-2-14-8-2 6-9 8" fill={hair}/><circle cx="20" cy="22" r="1"/><circle cx="28" cy="22" r="1"/></svg></span><strong>{character.name}</strong></button>
+function HomeMarker({character,homeLabel}:{character:CityCharacter;homeLabel:string}){
+ return <span className="city-home-marker" style={{left:`${clamp(character.home.x,24,1176)/12}%`,top:`${clamp(character.home.y,35,725)/7.6}%`}} aria-label={`${character.name} · ${homeLabel}`}>
+  <i aria-hidden/><small>{character.name} · {homeLabel}</small>
+ </span>
+}
+
+function CharacterPin({character,active,onSelect}:{character:CityCharacter;active:boolean;onSelect:()=>void}){
+ return <button className={`city-avatar ${active?'is-active':''}`} style={{left:`${clamp(character.location.x,25,1175)/12}%`,top:`${clamp(character.location.y,35,725)/7.6}%`}} onClick={onSelect} aria-label={`${character.name}${character.location.place?` · ${character.location.place}`:''}`}>
+  <Portrait character={character}/>
+  <span className="city-avatar__label"><strong>{character.name}</strong>{character.location.place&&<small>{character.location.place}</small>}</span>
+ </button>
+}
+
+const BUILDING_BLOCKS=[
+ [24,24,112,91,4],[190,28,184,88,5],[445,25,220,91,6],[744,26,185,88,5],[1003,25,157,89,4],
+ [24,184,116,134,5],[184,184,186,132,6],[736,184,190,134,5],[996,184,170,134,5],
+ [22,404,142,119,5],[194,404,180,119,5],[430,400,238,120,6],[741,400,190,120,5],[990,399,176,123,5],
+ [45,552,158,112,5],[244,560,148,106,4],[730,554,200,109,5],[978,552,175,112,4],
+] as const
+const MICRO_PARKS=[[27,336,100,47],[1010,335,146,40],[270,682,104,48],[760,682,162,46]] as const
+
+function CityFabric(){
+ return <g aria-hidden="true">
+  <g className="city-neighborhoods">{BUILDING_BLOCKS.map(([x,y,w,h,count],block)=><g key={block}>{Array.from({length:count},(_,index)=>{const columns=Math.ceil(Math.sqrt(count));const gap=7,bw=(w-gap*(columns-1))/columns,bh=Math.min(37,(h-gap)/Math.ceil(count/columns));const bx=x+(index%columns)*(bw+gap),by=y+Math.floor(index/columns)*(bh+gap);return <g key={index} transform={`translate(${bx} ${by})`}><rect width={bw} height={bh} rx="3"/><path d={`M5 ${Math.min(10,bh/2)}h${Math.max(4,bw-10)}M5 ${Math.min(20,bh-5)}h${Math.max(4,bw-10)}`}/></g>})}</g>)}</g>
+  <g className="city-pocket-parks">{MICRO_PARKS.map(([x,y,w,h],index)=><g key={index}><rect x={x} y={y} width={w} height={h} rx="10"/><circle cx={x+18} cy={y+18} r="8"/><circle cx={x+w-18} cy={y+h-16} r="10"/><path d={`M${x+9} ${y+h-8}L${x+w-10} ${y+8}`}/></g>)}</g>
+  <g className="city-rail"><path d="M4 706C260 677 449 723 684 691s345 1 516-25"/><path d="M4 716C260 687 449 733 684 701s345 1 516-25"/>{Array.from({length:30},(_,i)=><path key={i} d={`M${i*43-10} 694l8 28`}/>)}</g>
+  <g className="city-vehicles">{[[93,137],[322,371],[651,139],[849,358],[1075,145],[406,506],[696,474],[958,281]].map(([x,y],index)=><g key={index} transform={`translate(${x} ${y}) rotate(${index%3===0?90:0})`}><rect width="20" height="9" rx="4"/><circle cx="5" cy="9" r="2"/><circle cx="15" cy="9" r="2"/></g>)}</g>
+ </g>
 }
 
 export function CityMap({characters,landmarks=DEFAULT_LANDMARKS,activeCharacterId,language='zh',onCharacterClick,className=''}:CityMapProps){
@@ -75,11 +95,15 @@ export function CityMap({characters,landmarks=DEFAULT_LANDMARKS,activeCharacterI
       <div className="city-map__canvas" style={{transform:`translate3d(${view.panX}px,${view.panY}px,0) scale(${view.zoom})`}}>
         <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-labelledby="city-title city-desc">
           <title id="city-title">{copy.label}</title><desc id="city-desc">{language==='zh'?'包含住宅、公园、商店、学校、医院、车站和办公区的可交互地图':'Interactive map with homes, park, shops, school, hospital, station and offices'}</desc>
-          <defs><pattern id="city-grid" width="28" height="28" patternUnits="userSpaceOnUse"><path d="M28 0H0v28" fill="none" stroke="#cfd8cf" strokeOpacity=".28"/></pattern><filter id="city-shadow"><feDropShadow dx="0" dy="5" stdDeviation="6" floodOpacity=".16"/></filter></defs>
+          <defs><pattern id="city-grid" width="28" height="28" patternUnits="userSpaceOnUse"><path d="M28 0H0v28" fill="none" stroke="#cfd8cf" strokeOpacity=".28"/></pattern><filter id="city-shadow"><feDropShadow dx="0" dy="5" stdDeviation="6" floodOpacity=".16"/></filter><linearGradient id="city-water" x1="0" y1="0" x2="1" y2="1"><stop stopColor="#c5e3e4"/><stop offset="1" stopColor="#a8d0d9"/></linearGradient></defs>
           <rect width="1200" height="760" rx="36" fill="#e9ede4"/><rect width="1200" height="760" rx="36" fill="url(#city-grid)"/>
+          <path className="city-hills" d="M0 0h1200v65q-80 35-163 1-99-39-180 9-83 49-177 2-107-53-198 0-90 51-189 0-74-39-147 6Q77 125 0 75z"/>
+          <path className="city-lake" d="M968 0h232v127q-38 19-84-8-49-28-87 0-41 30-74-6-25-29 13-113z"/><path className="city-lake-shine" d="M1040 43q50-22 111 8M1018 79q64-23 146 12"/>
           <path className="city-river" d="M-30 620C180 530 288 700 477 628s319-134 475-42 215 32 288-24"/><path className="city-river-line" d="M-30 620C180 530 288 700 477 628s319-134 475-42 215 32 288-24"/><text x="1035" y="657" className="city-water-label">{copy.river}</text>
-          <g className="city-roads"><path d="M64 144H1130M68 365H1140M160 38V555M412 35V680M705 45V700M968 40V570"/><path d="M35 510L1160 250"/></g>
+          <g className="city-roads city-roads--major"><path d="M64 144H1130M68 365H1140M160 38V555M412 35V680M705 45V700M968 40V570"/><path d="M35 510L1160 250"/></g>
+          <g className="city-roads city-roads--minor"><path d="M18 167H1180M18 336H1180M20 542H1170M18 681H1170M181 8V690M394 12V738M724 12V740M948 9V735M1176 140v575"/><path d="M5 278h395m315 0h480M209 525v179m820-210v200"/></g>
           <g className="city-road-lines"><path d="M64 144H1130M68 365H1140M160 38V555M412 35V680M705 45V700M968 40V570"/><path d="M35 510L1160 250"/></g>
+          <CityFabric/>
           <g filter="url(#city-shadow)"><path className="city-park" d="M462 186h190q25 0 25 25v105q0 25-25 25H462q-25 0-25-25V211q0-25 25-25z"/><g className="city-tree"><circle cx="491" cy="234" r="17"/><circle cx="536" cy="284" r="20"/><circle cx="620" cy="228" r="22"/><circle cx="639" cy="296" r="15"/></g><path d="M462 314q90-102 187-99" fill="none" stroke="#e4d9ae" strokeWidth="9" strokeLinecap="round"/><text x="550" y="250" className="city-place-label">{copy.park}</text></g>
           <g className="city-building city-school" transform="translate(212 188)"><path d="M0 40L76 0l76 40v105H0z"/><path d="M18 62h116M61 65h31v80H61z"/><text x="76" y="172">{copy.school}</text></g>
           <g className="city-building city-hospital" transform="translate(1014 178)"><rect width="130" height="140" rx="10"/><path d="M65 32v66M32 65h66"/><text x="65" y="168">{copy.hospital}</text></g>
@@ -87,10 +111,12 @@ export function CityMap({characters,landmarks=DEFAULT_LANDMARKS,activeCharacterI
           <g className="city-building city-shops" transform="translate(758 400)"><rect width="160" height="104" rx="10"/><path d="M0 32h160M22 0v32m38-32v32m40-32v32m38-32v32M27 58h42v46M92 58h42v25H92z"/><text x="80" y="132">{copy.shops}</text></g>
           <g className="city-building city-office" transform="translate(756 186)"><rect width="162" height="132" rx="8"/><path d="M28 22h28v24H28zm52 0h28v24H80zm52 0h16v24h-16zM28 62h28v24H28zm52 0h28v24H80zm52 0h16v24h-16z"/><text x="81" y="160">{copy.office}</text></g>
           <g className="city-building city-station" transform="translate(488 434)"><path d="M0 82V18Q0 0 18 0h164q18 0 18 18v64z"/><path d="M22 82V34h156v48M47 18h106M50 103h100M62 82l-14 42m90-42 14 42"/><text x="100" y="153">{copy.station}</text></g>
-          <g className="city-houses">{characters.slice(0,5).map((c,index)=><g key={c.id} transform={`translate(${c.home.x-19} ${c.home.y-22})`}><path d="M0 18L19 0l19 18v27H0z"/><rect x="15" y="27" width="9" height="18"/><circle cx="34" cy="4" r="8" className="city-house-light"/><text x="19" y="60">{c.name} · {copy.home}</text><title>{c.name} — {copy.home} {index+1}</title></g>)}</g>
         </svg>
         <div className="city-landmarks" aria-hidden>{landmarks.filter(place=>!['central_station','business_center','city_hospital','riverside_park','old_town_market','moonlight_cafe','community_school'].includes(place.id)).map(place=><span key={place.id} className={`city-landmark city-landmark--${place.kind}`} style={{left:`${place.x/12}%`,top:`${place.y/7.6}%`}}><i>{place.kind==='culture'?'◆':place.kind==='education'?'▤':place.kind==='fitness'?'●':place.kind==='civic'?'★':place.kind==='health'?'+':'•'}</i><b>{place.name}</b></span>)}</div>
-        <div className="city-map__characters">{characters.slice(0,5).map(c=><HomePin key={`home-${c.id}`} character={c} homeLabel={copy.home} onSelect={()=>onCharacterClick(c.id)}/>)}{characters.slice(0,5).map(c=><AvatarPin key={c.id} character={c} active={c.id===activeCharacterId} onSelect={()=>onCharacterClick(c.id)}/>)}</div>
+        <div className="city-map__characters">
+          {characters.slice(0,5).map(c=><HomeMarker key={`home-${c.id}`} character={c} homeLabel={copy.home}/>)}
+          {characters.slice(0,5).map(c=><CharacterPin key={c.id} character={c} active={c.id===activeCharacterId} onSelect={()=>onCharacterClick(c.id)}/>)}
+        </div>
       </div>
     </div>
   </section>
