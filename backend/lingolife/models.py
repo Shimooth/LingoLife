@@ -37,6 +37,26 @@ class LearningEvidence(BaseModel):
     source: Literal["chat", "event", "review"] = "chat"
 
 
+class MemoryCandidate(BaseModel):
+    kind: Literal["player_fact", "episodic", "relationship", "language"]
+    content: str = Field(min_length=3, max_length=500)
+    tags: list[str] = Field(default_factory=list, max_length=8)
+    importance: int = Field(default=2, ge=1, le=5)
+    confidence: float = Field(default=.7, ge=0, le=1)
+    ttl_days: Optional[int] = Field(default=None, ge=1, le=365)
+    access_stage: Literal["stranger", "acquaintance", "friend", "close_friend"] = "stranger"
+
+
+class TurnAnalysis(BaseModel):
+    relationship_change: int = Field(ge=-5, le=5)
+    mood_change: int = Field(ge=-5, le=5)
+    english_xp_change: int = Field(ge=0, le=5)
+    english_feedback: EnglishFeedback
+    semantic_signals: list[SemanticSignal] = Field(default_factory=list, max_length=11)
+    learning_evidence: list[LearningEvidence] = Field(default_factory=list, max_length=12)
+    memory_candidates: list[MemoryCandidate] = Field(default_factory=list, max_length=4)
+
+
 class AIResult(BaseModel):
     npc_reply: str = Field(min_length=1, max_length=1000)
     relationship_change: int
@@ -45,6 +65,8 @@ class AIResult(BaseModel):
     english_feedback: EnglishFeedback
     semantic_signals: list[SemanticSignal] = Field(default_factory=list, max_length=11)
     learning_evidence: list[LearningEvidence] = Field(default_factory=list, max_length=12)
+    memory_candidates: list[MemoryCandidate] = Field(default_factory=list, exclude=True)
+    agent_trace: Dict[str, Any] = Field(default_factory=dict, exclude=True)
 
 
 class ChatRequest(BaseModel):
@@ -59,6 +81,7 @@ class ChatResponse(AIResult):
     active_event: Optional[Dict[str, Any]] = None
     event_update: Optional[Dict[str, Any]] = None
     learning_summary: Optional[Dict[str, Any]] = None
+    agent: Optional[Dict[str, Any]] = None
 
 
 class AvatarStroke(BaseModel):
@@ -84,6 +107,7 @@ class AvatarConfig(BaseModel):
 
 class NpcProfile(BaseModel):
     name: str = Field(min_length=1, max_length=24)
+    age: Optional[int] = Field(default=None, ge=16, le=100)
     relationship: str = Field(min_length=1, max_length=32)
     personality: list[str] = Field(max_length=4)
     interests: list[str] = Field(max_length=5)

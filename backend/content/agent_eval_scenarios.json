@@ -1,0 +1,9 @@
+{
+  "scenarios": [
+    {"id":"quiet-musician","profile":{"name":"Lisa","relationship":"Friend","occupation":"Music producer","personality":["introverted","creative","witty"],"interests":["music","photography"],"longTermGoal":"Hold a personal concert"},"expect":{"initiative":"low","question_frequency":"low"}},
+    {"id":"warm-coach","profile":{"name":"Noah","relationship":"Coach","occupation":"Fitness trainer","personality":["outgoing","warm","confident"],"interests":["sports","cooking"],"longTermGoal":"Open an inclusive neighborhood gym"},"expect":{"initiative":"high","emotional_expression":"open"}},
+    {"id":"calm-doctor","profile":{"name":"Ava","relationship":"Friend","occupation":"Doctor","personality":["calm","serious","practical"],"interests":["reading","travel"],"longTermGoal":"Improve community healthcare"},"expect":{"humor_style":"rare","support_style":"reserved"}},
+    {"id":"bold-artist","profile":{"name":"Mika","relationship":"Rival","occupation":"Artist","personality":["bold","creative","direct"],"interests":["art","film"],"longTermGoal":"Create a public exhibition"},"expect":{"directness":"direct","conflict_style":"direct"}},
+    {"id":"gentle-reader","profile":{"name":"Eli","relationship":"Neighbor","occupation":"Librarian","personality":["gentle","kind","quiet"],"interests":["books","gardening"],"longTermGoal":"Start a community reading club"},"expect":{"directness":"gentle","initiative":"low"}}
+  ]
+}

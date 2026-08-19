@@ -71,6 +71,15 @@ def test_colliding_events_keep_one_exact_story_location_and_separate_everyone():
             assert distance_squared >= MIN_NPC_DISTANCE ** 2
 
 
+def test_daily_plan_drives_location_but_joint_scheduler_still_resolves_collisions():
+    profiles = [{"id": f"npc-{index}", "profile": profile(str(index))} for index in range(3)]
+    plans = {entry["id"]: "music_hall" for entry in profiles}
+    payload = city_payload("player-1", profiles, {}, date(2026, 8, 19), plans)
+    residents = {npc["id"]: npc for npc in payload["npcs"]}
+    assert residents["npc-0"]["current_location_id"] == "music_hall"
+    assert len({(npc["position"]["x"], npc["position"]["y"]) for npc in payload["npcs"]}) == 3
+
+
 def test_active_event_places_npc_at_related_landmark():
     event = SimpleNamespace(template_id="growth_first_exhibition")
     assert daily_location_id("p", "n", profile(), event, date(2026, 8, 18)) == "community_gallery"

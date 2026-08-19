@@ -205,9 +205,10 @@ def _rotated(values: Sequence[str], offset: int) -> tuple[str, ...]:
 
 
 def _location_candidates(player_id: str, npc_id: str, profile: dict, active_event,
-                         day: date) -> tuple[str | None, ...]:
+                         day: date, planned_location: str | None = None) -> tuple[str | None, ...]:
     """Return a preference-ordered, deterministic schedule for one NPC."""
-    preferred = daily_location_id(player_id, npc_id, profile, active_event, day)
+    preferred = daily_location_id(player_id, npc_id, profile, active_event, day) if active_event else \
+        planned_location if planned_location in LOCATION_BY_ID else daily_location_id(player_id, npc_id, profile, active_event, day)
     seed = _number("location-candidates", day.isoformat(), player_id, npc_id)
     candidates: list[str | None] = [preferred]
 
@@ -247,7 +248,8 @@ def _nearest_distance_squared(point: tuple[int, int], occupied: Sequence[tuple[i
 
 
 def _daily_assignments(player_id: str, profiles: Sequence[dict], active_events: dict[str, object],
-                       homes: dict[str, int], day: date) -> dict[str, str | None]:
+                       homes: dict[str, int], day: date,
+                       planned_locations: dict[str, str] | None = None) -> dict[str, str | None]:
     """Assign today's places jointly so NPCs never overlap or cluster.
 
     Event participants are placed first, then all remaining NPCs in stable ID
@@ -263,7 +265,8 @@ def _daily_assignments(player_id: str, profiles: Sequence[dict], active_events: 
     for entry in entries:
         npc_id, profile = entry["id"], entry["profile"]
         home = HOME_SLOTS[homes[npc_id]]
-        candidates = _location_candidates(player_id, npc_id, profile, active_events.get(npc_id), day)
+        candidates = _location_candidates(player_id, npc_id, profile, active_events.get(npc_id), day,
+                                           (planned_locations or {}).get(npc_id))
         selected = next(
             (candidate for candidate in candidates if _far_enough(_coordinates(candidate, home), occupied)),
             None,
@@ -282,10 +285,10 @@ def _daily_assignments(player_id: str, profiles: Sequence[dict], active_events: 
 
 
 def city_payload(player_id: str, profiles: Sequence[dict], active_events: dict[str, object],
-                 on_date: date | None = None) -> dict:
+                 on_date: date | None = None, planned_locations: dict[str, str] | None = None) -> dict:
     day = on_date or date.today()
     assignments = _home_assignments(player_id, [entry["id"] for entry in profiles])
-    daily_assignments = _daily_assignments(player_id, profiles, active_events, assignments, day)
+    daily_assignments = _daily_assignments(player_id, profiles, active_events, assignments, day, planned_locations)
     residents = []
     for entry in profiles:
         npc_id, profile = entry["id"], entry["profile"]

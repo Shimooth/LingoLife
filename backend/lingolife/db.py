@@ -90,6 +90,35 @@ class Database:
               player_id TEXT PRIMARY KEY, state_json TEXT NOT NULL,
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+            CREATE TABLE IF NOT EXISTS npc_personas (
+              player_id TEXT NOT NULL,npc_id TEXT NOT NULL,persona_json TEXT NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(player_id,npc_id));
+            CREATE TABLE IF NOT EXISTS npc_runtime_states (
+              player_id TEXT NOT NULL,npc_id TEXT NOT NULL,state_json TEXT NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(player_id,npc_id));
+            CREATE TABLE IF NOT EXISTS npc_relationships (
+              player_id TEXT NOT NULL,npc_id TEXT NOT NULL,relationship_json TEXT NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(player_id,npc_id));
+            CREATE TABLE IF NOT EXISTS npc_goals (
+              player_id TEXT NOT NULL,npc_id TEXT NOT NULL,goal_json TEXT NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(player_id,npc_id));
+            CREATE TABLE IF NOT EXISTS npc_daily_plans (
+              player_id TEXT NOT NULL,npc_id TEXT NOT NULL,game_date TEXT NOT NULL,plan_json TEXT NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(player_id,npc_id,game_date));
+            CREATE TABLE IF NOT EXISTS npc_social_edges (
+              player_id TEXT NOT NULL,npc_a TEXT NOT NULL,npc_b TEXT NOT NULL,affinity INTEGER NOT NULL DEFAULT 50,
+              status TEXT NOT NULL DEFAULT 'neutral',updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(player_id,npc_a,npc_b));
+            CREATE TABLE IF NOT EXISTS agent_turn_traces (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,player_id TEXT NOT NULL,npc_id TEXT NOT NULL,
+              request_id TEXT NOT NULL,prompt_version TEXT NOT NULL,persona_version TEXT,
+              memory_ids_json TEXT NOT NULL DEFAULT '[]',model TEXT,fallback_used INTEGER NOT NULL DEFAULT 0,
+              dialogue_ms INTEGER NOT NULL DEFAULT 0,analysis_ms INTEGER NOT NULL DEFAULT 0,
+              error_type TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+            CREATE INDEX IF NOT EXISTS idx_agent_trace_owner ON agent_turn_traces(player_id,npc_id,id DESC);
+            CREATE TABLE IF NOT EXISTS conversation_summaries (
+              player_id TEXT NOT NULL,npc_id TEXT NOT NULL,game_date TEXT NOT NULL,summary TEXT NOT NULL,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(player_id,npc_id,game_date));
             """)
             columns = {row[1] for row in self._connection.execute("PRAGMA table_info(messages)")}
             if "npc_id" not in columns:
@@ -100,6 +129,27 @@ class Database:
             invitation_columns = {row[1] for row in self._connection.execute("PRAGMA table_info(invitations)")}
             if "code_value" not in invitation_columns:
                 self._connection.execute("ALTER TABLE invitations ADD COLUMN code_value TEXT")
+            memory_columns = {row[1] for row in self._connection.execute("PRAGMA table_info(npc_memories)")}
+            for column, definition in (
+                ("tags_json", "TEXT NOT NULL DEFAULT '[]'"),
+                ("confidence", "REAL NOT NULL DEFAULT 1"),
+                ("expires_at", "TEXT"),
+                ("last_accessed_at", "TEXT"),
+                ("access_stage", "TEXT NOT NULL DEFAULT 'stranger'"),
+            ):
+                if column not in memory_columns:
+                    self._connection.execute(f"ALTER TABLE npc_memories ADD COLUMN {column} {definition}")
+            try:
+                self._connection.execute(
+                    "CREATE VIRTUAL TABLE IF NOT EXISTS npc_memory_fts USING fts5(content,player_id UNINDEXED,npc_id UNINDEXED,memory_id UNINDEXED)"
+                )
+                self._connection.execute(
+                    """INSERT INTO npc_memory_fts(content,player_id,npc_id,memory_id)
+                       SELECT m.content,m.player_id,m.npc_id,m.id FROM npc_memories m
+                       WHERE NOT EXISTS(SELECT 1 FROM npc_memory_fts f WHERE f.memory_id=CAST(m.id AS TEXT))"""
+                )
+            except sqlite3.OperationalError:
+                pass  # Minimal SQLite builds can still use weighted recency retrieval.
 
     @staticmethod
     def token_hash(value: str) -> str:
@@ -326,12 +376,28 @@ class Database:
         row = self._connection.execute("SELECT response_json FROM chat_requests WHERE player_id=? AND idempotency_key=?", (player_id, key)).fetchone()
         return json.loads(row[0]) if row else None
 
-    def commit_chat(self, player_id: str, key: str, message: str, response: dict, npc_id: str = "emma") -> dict:
+    def positive_relationship_change_today(self, player_id: str, npc_id: str, game_date: str) -> int:
+        rows = self._connection.execute(
+            """SELECT response_json,created_at FROM chat_requests
+               WHERE player_id=? AND created_at>=datetime('now','-2 days') ORDER BY created_at""", (player_id,)
+        ).fetchall()
+        total = 0
+        for row in rows:
+            value = json.loads(row[0])
+            # Old cached responses may not contain npc_id; messages keep the
+            # authoritative separation, while new responses include agent data.
+            response_day = value.get("game_date") or str(row["created_at"])[:10]
+            if value.get("npc_id", "emma") == npc_id and response_day == game_date:
+                total += max(0, int(value.get("relationship_change", 0)))
+        return total
+
+    def commit_chat(self, player_id: str, key: str, message: str, response: dict,
+                    npc_id: str = "emma") -> tuple[dict, bool]:
         """Atomically stores state/messages/result; concurrent duplicates return the winner."""
         with self._lock, self._connection:
             cached = self.cached(player_id, key)
             if cached:
-                return cached
+                return cached, False
             stats = response["stats"]
             self._connection.execute(
                 "UPDATE npc_states SET relationship=?,mood=?,english_xp=?,updated_at=CURRENT_TIMESTAMP WHERE player_id=? AND npc_id=?",
@@ -340,7 +406,7 @@ class Database:
             self._connection.execute("INSERT INTO messages(player_id,speaker,text,npc_id) VALUES (?,'player',?,?)", (player_id, message, npc_id))
             self._connection.execute("INSERT INTO messages(player_id,speaker,text,npc_id) VALUES (?,'npc',?,?)", (player_id, response["npc_reply"], npc_id))
             self._connection.execute("INSERT INTO chat_requests(idempotency_key,player_id,response_json) VALUES (?,?,?)", (key, player_id, json.dumps(response)))
-            return response
+            return response, True
 
     # NPC Agent persistence -------------------------------------------------
 
@@ -382,15 +448,39 @@ class Database:
         return profile
 
     def add_npc_memory(self, player_id: str, npc_id: str, kind: str, content: str,
-                       source_event_id: str | None = None, importance: int = 1) -> dict:
+                       source_event_id: str | None = None, importance: int = 1,
+                       tags: list[str] | None = None, confidence: float = 1.0,
+                       expires_at: str | None = None, access_stage: str = "stranger") -> dict:
         importance = max(1, min(5, int(importance)))
+        content = " ".join(content.split())[:500]
+        confidence = max(0.0, min(1.0, float(confidence)))
         with self._lock, self._connection:
+            existing = self._connection.execute(
+                "SELECT * FROM npc_memories WHERE player_id=? AND npc_id=? AND lower(content)=lower(?)",
+                (player_id, npc_id, content),
+            ).fetchone()
+            if existing:
+                self._connection.execute(
+                    "UPDATE npc_memories SET importance=max(importance,?),confidence=max(confidence,?) WHERE id=?",
+                    (importance, confidence, existing["id"]),
+                )
+                return dict(self._connection.execute("SELECT * FROM npc_memories WHERE id=?", (existing["id"],)).fetchone())
             cursor = self._connection.execute(
-                """INSERT INTO npc_memories(player_id,npc_id,kind,content,source_event_id,importance)
-                   VALUES (?,?,?,?,?,?)""",
-                (player_id, npc_id, kind, content, source_event_id, importance),
+                """INSERT INTO npc_memories(player_id,npc_id,kind,content,source_event_id,importance,
+                                              tags_json,confidence,expires_at,access_stage)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (player_id, npc_id, kind, content, source_event_id, importance,
+                 self._json(tags or []), confidence, expires_at,
+                 access_stage if access_stage in {"stranger", "acquaintance", "friend", "close_friend"} else "stranger"),
             )
             row = self._connection.execute("SELECT * FROM npc_memories WHERE id=?", (cursor.lastrowid,)).fetchone()
+            try:
+                self._connection.execute(
+                    "INSERT INTO npc_memory_fts(content,player_id,npc_id,memory_id) VALUES (?,?,?,?)",
+                    (content, player_id, npc_id, str(cursor.lastrowid)),
+                )
+            except sqlite3.OperationalError:
+                pass
         return dict(row)
 
     def list_npc_memories(self, player_id: str, npc_id: str, limit: int = 20,
@@ -406,7 +496,47 @@ class Database:
                 """SELECT * FROM npc_memories WHERE player_id=? AND npc_id=? AND kind=?
                    ORDER BY importance DESC,id DESC LIMIT ?""", (player_id, npc_id, kind, limit)
             ).fetchall()
-        return [dict(row) for row in rows]
+        return [self._decode_memory(row) for row in rows]
+
+    @staticmethod
+    def _decode_memory(row) -> dict:
+        value = dict(row)
+        value["tags"] = json.loads(value.pop("tags_json", "[]") or "[]")
+        return value
+
+    def relevant_npc_memories(self, player_id: str, npc_id: str, query: str, limit: int = 8,
+                              relationship_stage: str = "close_friend") -> list[dict]:
+        tokens = [value.casefold() for value in query.replace("'", " ").split() if len(value) >= 3][:8]
+        matched: list[sqlite3.Row] = []
+        if tokens:
+            expression = " OR ".join(f'"{token.replace(chr(34), "")}"' for token in tokens)
+            try:
+                matched = self._connection.execute(
+                    """SELECT m.* FROM npc_memory_fts f JOIN npc_memories m ON m.id=CAST(f.memory_id AS INTEGER)
+                       WHERE npc_memory_fts MATCH ? AND f.player_id=? AND f.npc_id=?
+                         AND (m.expires_at IS NULL OR m.expires_at>CURRENT_TIMESTAMP)
+                       ORDER BY bm25(npc_memory_fts),m.importance DESC,m.id DESC LIMIT ?""",
+                    (expression, player_id, npc_id, max(1, limit)),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                matched = []
+        important = self._connection.execute(
+            """SELECT * FROM npc_memories WHERE player_id=? AND npc_id=?
+                 AND (expires_at IS NULL OR expires_at>CURRENT_TIMESTAMP)
+               ORDER BY importance DESC,id DESC LIMIT ?""", (player_id, npc_id, max(1, limit))
+        ).fetchall()
+        stage_rank = {"stranger": 0, "acquaintance": 1, "friend": 2, "close_friend": 3}
+        allowed_rank = stage_rank.get(relationship_stage, 0)
+        unique: dict[int, sqlite3.Row] = {}
+        for row in (*matched, *important):
+            if stage_rank.get(row["access_stage"], 0) <= allowed_rank:
+                unique.setdefault(row["id"], row)
+        chosen = list(unique.values())[:max(0, min(20, limit))]
+        if chosen:
+            with self._connection:
+                self._connection.executemany("UPDATE npc_memories SET last_accessed_at=CURRENT_TIMESTAMP WHERE id=?",
+                                             [(row["id"],) for row in chosen])
+        return [self._decode_memory(row) for row in chosen]
 
     def delete_npc_memory(self, player_id: str, npc_id: str, memory_id: int) -> bool:
         with self._lock, self._connection:
@@ -414,7 +544,130 @@ class Database:
                 "DELETE FROM npc_memories WHERE id=? AND player_id=? AND npc_id=?",
                 (memory_id, player_id, npc_id),
             )
+            try:
+                self._connection.execute("DELETE FROM npc_memory_fts WHERE memory_id=?", (str(memory_id),))
+            except sqlite3.OperationalError:
+                pass
         return cursor.rowcount > 0
+
+    def _agent_json(self, table: str, column: str, player_id: str, npc_id: str) -> dict | None:
+        row = self._connection.execute(
+            f"SELECT {column} FROM {table} WHERE player_id=? AND npc_id=?", (player_id, npc_id)
+        ).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def _save_agent_json(self, table: str, column: str, player_id: str, npc_id: str, value: dict) -> dict:
+        with self._lock, self._connection:
+            self._connection.execute(
+                f"""INSERT INTO {table}(player_id,npc_id,{column}) VALUES (?,?,?)
+                    ON CONFLICT(player_id,npc_id) DO UPDATE SET {column}=excluded.{column},updated_at=CURRENT_TIMESTAMP""",
+                (player_id, npc_id, self._json(value)),
+            )
+        return value
+
+    def get_persona(self, player_id: str, npc_id: str) -> dict | None:
+        return self._agent_json("npc_personas", "persona_json", player_id, npc_id)
+
+    def save_persona(self, player_id: str, npc_id: str, value: dict) -> dict:
+        return self._save_agent_json("npc_personas", "persona_json", player_id, npc_id, value)
+
+    def get_runtime_state(self, player_id: str, npc_id: str) -> dict | None:
+        return self._agent_json("npc_runtime_states", "state_json", player_id, npc_id)
+
+    def save_runtime_state(self, player_id: str, npc_id: str, value: dict) -> dict:
+        return self._save_agent_json("npc_runtime_states", "state_json", player_id, npc_id, value)
+
+    def get_relationship(self, player_id: str, npc_id: str) -> dict | None:
+        return self._agent_json("npc_relationships", "relationship_json", player_id, npc_id)
+
+    def save_relationship(self, player_id: str, npc_id: str, value: dict) -> dict:
+        return self._save_agent_json("npc_relationships", "relationship_json", player_id, npc_id, value)
+
+    def get_goal(self, player_id: str, npc_id: str) -> dict | None:
+        return self._agent_json("npc_goals", "goal_json", player_id, npc_id)
+
+    def save_goal(self, player_id: str, npc_id: str, value: dict) -> dict:
+        return self._save_agent_json("npc_goals", "goal_json", player_id, npc_id, value)
+
+    def get_daily_plan(self, player_id: str, npc_id: str, game_date: str) -> dict | None:
+        row = self._connection.execute(
+            "SELECT plan_json FROM npc_daily_plans WHERE player_id=? AND npc_id=? AND game_date=?",
+            (player_id, npc_id, game_date),
+        ).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def save_daily_plan(self, player_id: str, npc_id: str, game_date: str, value: dict) -> dict:
+        with self._lock, self._connection:
+            self._connection.execute(
+                """INSERT INTO npc_daily_plans(player_id,npc_id,game_date,plan_json) VALUES (?,?,?,?)
+                   ON CONFLICT(player_id,npc_id,game_date) DO UPDATE SET plan_json=excluded.plan_json,updated_at=CURRENT_TIMESTAMP""",
+                (player_id, npc_id, game_date, self._json(value)),
+            )
+        return value
+
+    def ensure_social_edges(self, player_id: str, npc_ids: list[str]) -> list[dict]:
+        ordered = sorted(npc_ids)
+        with self._lock, self._connection:
+            for index, npc_a in enumerate(ordered):
+                for npc_b in ordered[index + 1:]:
+                    self._connection.execute(
+                        "INSERT OR IGNORE INTO npc_social_edges(player_id,npc_a,npc_b) VALUES (?,?,?)",
+                        (player_id, npc_a, npc_b),
+                    )
+        rows = self._connection.execute(
+            "SELECT npc_a,npc_b,affinity,status FROM npc_social_edges WHERE player_id=? ORDER BY npc_a,npc_b",
+            (player_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def add_agent_trace(self, player_id: str, npc_id: str, request_id: str, trace: dict) -> None:
+        with self._lock, self._connection:
+            self._connection.execute(
+                """INSERT INTO agent_turn_traces(player_id,npc_id,request_id,prompt_version,persona_version,
+                   memory_ids_json,model,fallback_used,dialogue_ms,analysis_ms,error_type)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (player_id, npc_id, request_id, trace.get("prompt_version", "agent-v1"),
+                 trace.get("persona_version"), self._json(trace.get("memory_ids", [])), trace.get("model"),
+                 int(bool(trace.get("fallback_used"))), int(trace.get("dialogue_ms", 0)),
+                 int(trace.get("analysis_ms", 0)), trace.get("error_type")),
+            )
+
+    def append_conversation_summary(self, player_id: str, npc_id: str, game_date: str,
+                                    observations: list[str]) -> None:
+        clean = [" ".join(value.split())[:300] for value in observations if value.strip()]
+        if not clean:
+            return
+        row = self._connection.execute(
+            "SELECT summary FROM conversation_summaries WHERE player_id=? AND npc_id=? AND game_date=?",
+            (player_id, npc_id, game_date),
+        ).fetchone()
+        existing = row[0].split(" | ") if row and row[0] else []
+        merged = list(dict.fromkeys([*existing, *clean]))[-8:]
+        with self._lock, self._connection:
+            self._connection.execute(
+                """INSERT INTO conversation_summaries(player_id,npc_id,game_date,summary) VALUES (?,?,?,?)
+                   ON CONFLICT(player_id,npc_id,game_date) DO UPDATE SET summary=excluded.summary""",
+                (player_id, npc_id, game_date, " | ".join(merged)),
+            )
+
+    def list_conversation_summaries(self, player_id: str, npc_id: str, limit: int = 7) -> list[dict]:
+        rows = self._connection.execute(
+            """SELECT game_date,summary FROM conversation_summaries WHERE player_id=? AND npc_id=?
+               ORDER BY game_date DESC LIMIT ?""", (player_id, npc_id, max(1, min(30, limit)))
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_agent_traces(self, limit: int = 100) -> list[dict]:
+        rows = self._connection.execute(
+            """SELECT t.id,u.username,t.npc_id,t.request_id,t.prompt_version,t.persona_version,
+                      t.memory_ids_json,t.model,t.fallback_used,t.dialogue_ms,t.analysis_ms,t.error_type,t.created_at
+               FROM agent_turn_traces t LEFT JOIN users u ON u.player_id=t.player_id
+               ORDER BY t.id DESC LIMIT ?""", (max(1, min(500, limit)),)
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row); item["memory_ids"] = json.loads(item.pop("memory_ids_json")); result.append(item)
+        return result
 
     # EventRepository implementation ---------------------------------------
 

@@ -72,6 +72,15 @@ def test_chat_clamps_and_is_idempotent(tmp_path):
     assert len(c.get("/api/v1/room", headers=headers).json()["messages"]) == 3
 
 
+def test_positive_relationship_growth_has_a_per_character_daily_cap(tmp_path):
+    c = client(tmp_path, Stub())
+    headers = auth(c)
+    results = [c.post("/api/v1/chat", headers={**headers, "Idempotency-Key": f"bond-cap-{index:02d}"},
+                      json={"message": "I am here for you."}).json() for index in range(3)]
+    assert [item["relationship_change"] for item in results] == [5, 5, 0]
+    assert results[-1]["stats"]["relationship"] == 45
+
+
 def test_invalid_input_has_unified_error_and_does_not_mutate(tmp_path):
     c = client(tmp_path)
     headers = {**auth(c), "Idempotency-Key": "12345678-abcd"}
@@ -245,6 +254,8 @@ def test_admin_invites_user_management_summary_and_no_message_leak(tmp_path):
     c.post("/api/v1/chat", headers={"Authorization": "Bearer " + token, "Idempotency-Key": "managed-001"}, json={"message": "private chat text"})
     listing = c.get("/api/v1/admin/users").json()
     assert "private chat text" not in str(listing)
+    traces = c.get("/api/v1/admin/agent-traces").json()["traces"]
+    assert len(traces) == 1 and "private chat text" not in str(traces)
     user_id = listing["users"][0]["id"]
     changed = c.patch(f"/api/v1/admin/users/{user_id}", headers=origin, json={"disabled": True, "quota_delta": 5})
     assert changed.status_code == 200 and changed.json()["disabled"] == 1

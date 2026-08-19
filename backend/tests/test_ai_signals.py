@@ -5,7 +5,7 @@ from pydantic import ValidationError
 
 from lingolife.ai import DeepSeekProvider, FallbackProvider, npc_reply_prefix
 from lingolife.config import Settings
-from lingolife.models import AIResult, EnglishFeedback, Stats
+from lingolife.models import AIResult, EnglishFeedback, Stats, TurnAnalysis
 
 
 def base_result(**extra):
@@ -52,34 +52,44 @@ def test_fallback_awards_no_evidence_for_non_english_input():
 
 
 def test_deepseek_prompt_contains_optional_agent_context(monkeypatch):
-    captured = {}
-    content = base_result(semantic_signals=["empathy"], learning_evidence=[{
-        "target_id": "intent.empathy", "outcome": "success", "confidence": .9,
-    }]).model_dump_json()
+    captured = []
+    analysis = TurnAnalysis(
+        relationship_change=2, mood_change=1, english_xp_change=2,
+        english_feedback=EnglishFeedback(is_understandable=True, corrected_text="Are you okay?", tip="Natural."),
+        semantic_signals=["empathy"], learning_evidence=[{
+            "target_id": "intent.empathy", "outcome": "success", "confidence": .9,
+        }], memory_candidates=[],
+    ).model_dump_json()
 
     class Response:
         def raise_for_status(self): pass
-        def json(self): return {"choices": [{"message": {"content": content}}]}
+        def __init__(self, content): self.content = content
+        def json(self): return {"choices": [{"message": {"content": self.content}}]}
 
     class Client:
         def __init__(self, **kwargs): pass
         def __enter__(self): return self
         def __exit__(self, *args): pass
         def post(self, url, headers, json):
-            captured.update(json)
-            return Response()
+            captured.append(json)
+            return Response(analysis if json.get("response_format") else "I answer in my own voice.")
 
     monkeypatch.setattr("lingolife.ai.httpx.Client", Client)
     provider = DeepSeekProvider(Settings(deepseek_api_key="test-key"))
-    result = provider.reply("Are you okay?", Stats(relationship=35, mood=30, english_xp=0), [], {
-        "npc_profile": {"name": "Mia", "traits": ["bold"]},
+    result = provider.reply("Are you okay?", Stats(relationship=35, mood=30, english_xp=0),
+                            [{"speaker": "npc", "text": "I had a difficult day."}], {
+        "npc_profile": {"name": "Mia", "personality": ["bold"]},
         "current_event": {"title": "Lost sketchbook"},
         "learning_targets": ["intent.empathy"],
         "memories": ["The player helped yesterday."],
     })
-    prompt = json.loads(captured["messages"][1]["content"])
-    assert prompt["npc_profile"]["name"] == "Mia"
-    assert prompt["current_event"]["title"] == "Lost sketchbook"
+    dialogue = next(item for item in captured if not item.get("response_format"))
+    analyzer = next(item for item in captured if item.get("response_format"))
+    system = dialogue["messages"][0]["content"]
+    assert "You are Mia" in system and "Lost sketchbook" in system
+    assert "The player helped yesterday." in system
+    assert dialogue["messages"][1] == {"role": "assistant", "content": "I had a difficult day."}
+    prompt = json.loads(analyzer["messages"][1]["content"])
     assert prompt["learning_targets"] == ["intent.empathy"]
-    assert prompt["relevant_memories"] == ["The player helped yesterday."]
+    assert result.npc_reply == "I answer in my own voice."
     assert result.semantic_signals == ["empathy"]

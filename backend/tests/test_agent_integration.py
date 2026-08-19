@@ -93,3 +93,25 @@ def test_up_to_five_custom_characters_have_separate_rooms(tmp_path):
                 json={"message": "Hello there", "npc_id": second})
     assert len(client.get(f"/api/v1/room?npc_id={second}", headers=auth).json()["messages"]) == 3
     assert len(client.get("/api/v1/room?npc_id=emma", headers=auth).json()["messages"]) == 1
+
+
+def test_agent_endpoint_exposes_persistent_life_without_other_players_data(tmp_path):
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'life.db'}", web_root=str(tmp_path / "none"))
+    client = TestClient(create_app(settings))
+    code = client.app.state.db.create_invites(1, 30)[0]
+    token = client.post("/api/v1/auth/register", json={"username": "lifetest", "invite_code": code,
+                                                        "password": "pass"}).json()["session_token"]
+    auth = {"Authorization": "Bearer " + token}
+    room = client.get("/api/v1/room", headers=auth).json()
+    assert room["agent"]["persona"]["voice"]
+    assert room["agent"]["runtime_state"]["needs"]
+    assert room["agent"]["relationship"]["stage"] == "acquaintance"
+    assert len(room["agent"]["goal"]["milestones"]) == 4
+    response = client.post("/api/v1/chat", headers={**auth, "Idempotency-Key": "memory-turn-001"},
+                           json={"message": "I really love jazz music."})
+    assert response.status_code == 200 and response.json()["agent"]["goal"]
+    memories = client.get("/api/v1/npcs/emma/memories", headers=auth).json()["memories"]
+    remembered = next(item for item in memories if "jazz music" in item["content"])
+    assert client.delete(f"/api/v1/npcs/emma/memories/{remembered['id']}", headers=auth).status_code == 204
+    assert all(item["id"] != remembered["id"] for item in client.get(
+        "/api/v1/npcs/emma/memories", headers=auth).json()["memories"])

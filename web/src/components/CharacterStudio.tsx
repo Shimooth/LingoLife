@@ -222,6 +222,16 @@ export function CharacterStudio({
                     </label>
                     <div className="field-grid">
                       <label>
+                        {zh ? "年龄" : "Age"}
+                        <input
+                          type="number"
+                          min={16}
+                          max={100}
+                          value={profile.age??''}
+                          onChange={(e) => set("age", e.target.value ? Math.max(16,Math.min(100,Number(e.target.value))) : null)}
+                        />
+                      </label>
+                      <label>
                         {zh ? "关系（自由填写）" : "Relationship (custom)"}
                         <input
                           maxLength={32}

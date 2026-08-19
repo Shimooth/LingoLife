@@ -22,11 +22,13 @@ type Props={
  ready:boolean
  story?:ReactNode
  editLabel:string
+ agentLabel:string
  language:'zh'|'en'
  onHistoryOpen:()=>void
  onHistoryClose:()=>void
  onToggleOlder:()=>void
  onEdit:()=>void
+ onAgent:()=>void
 }
 
 const palettes:Record<string,[string,string,string,string]>={
@@ -93,7 +95,7 @@ function PlayerHead({name}:{name:string}){
  </motion.div>
 }
 
-export function ConversationScene({npcName,playerName,avatar,mood,place,locationId,locationKind,messages,liveSpeech,historyOpen,olderCount,showOlder,ready,story,editLabel,language,onHistoryOpen,onHistoryClose,onToggleOlder,onEdit}:Props){
+export function ConversationScene({npcName,playerName,avatar,mood,place,locationId,locationKind,messages,liveSpeech,historyOpen,olderCount,showOlder,ready,story,editLabel,agentLabel,language,onHistoryOpen,onHistoryClose,onToggleOlder,onEdit,onAgent}:Props){
  const reduce=useReducedMotion(),historyRef=useRef<HTMLDivElement>(null),zh=language==='zh'
  useEffect(()=>{if(historyOpen)requestAnimationFrame(()=>historyRef.current?.scrollTo({top:historyRef.current.scrollHeight,behavior:reduce?'auto':'smooth'}))},[historyOpen,messages,reduce])
  useEffect(()=>{if(!historyOpen)return;const close=(event:KeyboardEvent)=>{if(event.key==='Escape')onHistoryClose()};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close)},[historyOpen,onHistoryClose])
@@ -105,6 +107,7 @@ export function ConversationScene({npcName,playerName,avatar,mood,place,location
   <PlayerHead name={playerName}/>
   <motion.div className="scene-npc" initial={reduce?false:{x:40,opacity:0,scale:.96}} animate={{x:0,opacity:1,scale:1}} transition={{type:'spring',stiffness:165,damping:22}}><AvatarStage avatar={avatar} mood={mood} compact scene/><span>{npcName}</span></motion.div>
   <button className="scene-edit" type="button" onClick={onEdit}>✦ {editLabel}</button>
+  <button className="scene-agent" type="button" onClick={onAgent}>◎ {agentLabel}</button>
   <AnimatePresence mode="wait">{liveSpeech&&<motion.aside layout key={liveSpeech.key} className={`live-speech live-speech--${liveSpeech.speaker}`} initial={reduce?false:{opacity:0,scale:.68,y:26,rotate:liveSpeech.speaker==='player'?-2:2}} animate={{opacity:1,scale:1,y:0,rotate:0}} exit={reduce?{opacity:0}:{opacity:0,scale:.74,y:-48,filter:'blur(5px)'}} transition={{type:'spring',stiffness:300,damping:23,mass:.75}}>
    <strong>{liveSpeech.speaker==='player'?playerName:npcName}</strong><p>{liveSpeech.text}</p>{liveSpeech.streaming&&<i className="live-speech__cursor"/>}
   </motion.aside>}</AnimatePresence>

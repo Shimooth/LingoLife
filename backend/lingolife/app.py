@@ -14,7 +14,7 @@ import queue
 from typing import Optional
 from contextlib import asynccontextmanager
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
@@ -22,6 +22,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .ai import DeepSeekProvider, DialogueProvider, ResilientProvider
+from .agent import (advance_goal, advance_relationship, advance_runtime, compile_goal,
+                    compile_persona, daily_plan, dialogue_objective, initial_relationship,
+                    initial_runtime, time_slot)
 from .config import Settings, load_settings
 from .city import city_payload
 from .db import Database
@@ -34,7 +37,7 @@ KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$")
 USERNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{2,31}$")
 
 DEFAULT_NPC_PROFILE = {
-    "name": "Emma", "relationship": "Friend",
+    "name": "Emma", "age": 25, "relationship": "Friend",
     "personality": ["kind", "thoughtful", "quiet"],
     "interests": ["art", "music", "photography"], "occupation": "Designer",
     "longTermGoal": "Open a small independent design studio.",
@@ -105,28 +108,64 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
             return db.get_or_create_npc_profile(player_id, "emma", DEFAULT_NPC_PROFILE)
         raise HTTPException(404, {"code": "NPC_NOT_FOUND", "message": "Character was not found."})
 
-    def event_context(player_id: str, npc_id: str, profile: dict, stats, learning_state) -> NPCEventContext:
+    def event_context(player_id: str, npc_id: str, profile: dict, stats, learning_state,
+                      runtime: dict | None = None) -> NPCEventContext:
         targets = learning_engine.targets(learning_state, limit=3)
         mood = "sad" if stats.mood < 35 else "happy" if stats.mood >= 65 else "neutral"
         goal = profile.get("longTermGoal", "")
+        needs = runtime.get("needs", {}) if runtime else {}
+        urgent_needs = tuple(key for key, _ in sorted(needs.items(), key=lambda item: item[1])[:2])
         return NPCEventContext(
             player_id=player_id, npc_id=npc_id, traits=tuple(profile.get("personality", [])),
             interests=tuple(profile.get("interests", [])), occupation=profile.get("occupation", ""),
             mood=mood, relationship=stats.relationship,
             long_term_goals=(goal,) if goal else (),
             learning_targets=tuple(item["id"] for item in targets),
-            needs=("connection",) if stats.relationship < 50 else ("growth",),
+            needs=urgent_needs or (("connection",) if stats.relationship < 50 else ("growth",)),
         )
 
-    def public_event(active: ActiveEvent | None) -> dict | None:
+    def public_event(active: ActiveEvent | None, profile: dict | None = None) -> dict | None:
         if not active:
             return None
         template = event_engine.by_id[active.template_id]
         stage = event_engine.stage(active)
-        return {"id": template.id, "title": template.title, "category": template.category,
-                "stage": {"id": stage.id, "prompt": stage.prompt, "objective": stage.objective},
+        name = str((profile or {}).get("name", "Emma"))
+        adapt = lambda value: value.replace("Emma", name)
+        return {"id": template.id, "title": adapt(template.title), "category": template.category,
+                "stage": {"id": stage.id, "prompt": adapt(stage.prompt), "objective": adapt(stage.objective)},
                 "stage_index": active.stage_index, "stage_count": len(template.stages),
                 "learning_targets": list(template.learning_targets)}
+
+    def agent_bundle(player_id: str, npc_id: str, profile: dict, stats, learning_state) -> dict:
+        runtime = db.get_runtime_state(player_id, npc_id) or initial_runtime(stats.mood, stats.relationship)
+        runtime = advance_runtime(runtime, profile, stats.mood)
+        db.save_runtime_state(player_id, npc_id, runtime)
+        persona = compile_persona(profile, runtime.get("growth"))
+        if db.get_persona(player_id, npc_id) != persona:
+            db.save_persona(player_id, npc_id, persona)
+        relationship = db.get_relationship(player_id, npc_id) or initial_relationship(stats.relationship)
+        if not db.get_relationship(player_id, npc_id):
+            db.save_relationship(player_id, npc_id, relationship)
+        goal = db.get_goal(player_id, npc_id)
+        if not goal or goal.get("title") != (profile.get("longTermGoal") or "Build a meaningful everyday life"):
+            goal = db.save_goal(player_id, npc_id, compile_goal(profile))
+        day = game_today().isoformat()
+        plan = db.get_daily_plan(player_id, npc_id, day)
+        if not plan:
+            plan = db.save_daily_plan(player_id, npc_id, day,
+                                      daily_plan(player_id, npc_id, profile, runtime, goal, game_today()))
+        progress = learning_engine.progress(learning_state)
+        mastery = int(progress["overall_mastery"])
+        language_controller = {
+            "estimated_level": progress["level"],
+            "max_sentence_length": 12 if mastery < 25 else 18 if mastery < 50 else 26,
+            "vocabulary": "common" if mastery < 45 else "everyday_plus",
+            "correction_style": "natural_recast",
+            "stretch_targets": [item["id"] for item in progress["recommended"][:2]],
+        }
+        return {"persona": persona, "runtime_state": runtime, "relationship": relationship,
+                "goal": goal, "daily_plan": plan, "current_slot": time_slot(datetime.now(game_zone).hour),
+                "language_controller": language_controller}
 
     def provider_reply(message: str, stats, history: list[dict], context: dict, on_chunk=None):
         # Preserve compatibility with small test/custom providers implementing the original contract.
@@ -218,11 +257,13 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         profile = profile_for(player_id, npc_id)
         stats = db.state(player_id, npc_id)
         learning_state = db.get_learning_state(player_id)
-        active = event_engine.daily_event(event_context(player_id, npc_id, profile, stats, learning_state), game_today())
+        agent = agent_bundle(player_id, npc_id, profile, stats, learning_state)
+        active = event_engine.daily_event(event_context(player_id, npc_id, profile, stats, learning_state,
+                                                        agent["runtime_state"]), game_today())
         animation = "sad" if stats.mood < 40 else "happy" if stats.mood >= 60 else "idle"
         return {"room_id": f"{npc_id}-room", "npc": {"id": npc_id, "name": profile["name"], "animation": animation},
                 "stats": stats, "messages": db.messages(player_id, 200, npc_id),
-                "quota": db.quota(user["id"]), "active_event": public_event(active)}
+                "quota": db.quota(user["id"]), "active_event": public_event(active, profile), "agent": agent}
 
     @app.get(settings.api_prefix + "/npc/profile")
     def npc_profile(authorization: Optional[str] = Header(None)):
@@ -248,15 +289,25 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         learning_state = db.get_learning_state(player_id)
         active_events: dict[str, ActiveEvent | None] = {}
         summaries: dict[str, dict | None] = {}
+        agents: dict[str, dict] = {}
+        planned_locations: dict[str, str] = {}
         for entry in profiles:
             npc_id, profile = entry["id"], entry["profile"]
             stats = db.state(player_id, npc_id)
-            active = event_engine.daily_event(event_context(player_id, npc_id, profile, stats, learning_state), game_today())
+            agent = agent_bundle(player_id, npc_id, profile, stats, learning_state)
+            active = event_engine.daily_event(event_context(player_id, npc_id, profile, stats, learning_state,
+                                                            agent["runtime_state"]), game_today())
             active_events[npc_id] = active
-            summaries[npc_id] = public_event(active)
-        payload = city_payload(player_id, profiles, active_events, game_today())
+            summaries[npc_id] = public_event(active, profile)
+            agents[npc_id] = agent
+            slot = agent["current_slot"]
+            planned_locations[npc_id] = agent["daily_plan"]["slots"][slot]["location_id"]
+        payload = city_payload(player_id, profiles, active_events, game_today(), planned_locations)
         for resident in payload["npcs"]:
             resident["active_event"] = summaries[resident["id"]]
+            resident["daily_plan"] = agents[resident["id"]]["daily_plan"]
+            resident["current_activity"] = agents[resident["id"]]["daily_plan"]["slots"][agents[resident["id"]]["current_slot"]]["activity"]
+        payload["time_slot"] = time_slot(datetime.now(game_zone).hour)
         return payload
 
     @app.post(settings.api_prefix + "/npcs", status_code=201)
@@ -274,7 +325,37 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
     def update_npc(npc_id: str, body: NpcProfile, authorization: Optional[str] = Header(None)):
         user = current_user(authorization); player_id = user["player_id"]
         profile_for(player_id, npc_id, create_default=False)
-        return {"id": npc_id, "profile": db.save_npc_profile(player_id, npc_id, body.model_dump())}
+        saved = db.save_npc_profile(player_id, npc_id, body.model_dump())
+        runtime = db.get_runtime_state(player_id, npc_id) or initial_runtime(db.state(player_id, npc_id).mood,
+                                                                            db.state(player_id, npc_id).relationship)
+        db.save_persona(player_id, npc_id, compile_persona(saved, runtime.get("growth")))
+        existing_goal = db.get_goal(player_id, npc_id)
+        if not existing_goal or existing_goal.get("title") != (saved.get("longTermGoal") or "Build a meaningful everyday life"):
+            db.save_goal(player_id, npc_id, compile_goal(saved))
+        return {"id": npc_id, "profile": saved}
+
+    @app.get(settings.api_prefix + "/npcs/{npc_id}/agent")
+    def npc_agent(npc_id: str, authorization: Optional[str] = Header(None)):
+        user = current_user(authorization); player_id = user["player_id"]
+        profile = profile_for(player_id, npc_id, create_default=False)
+        bundle = agent_bundle(player_id, npc_id, profile, db.state(player_id, npc_id),
+                              db.get_learning_state(player_id))
+        edges = db.ensure_social_edges(player_id, [entry["id"] for entry in db.list_npc_profiles(player_id)])
+        return {**bundle, "memories": db.list_npc_memories(player_id, npc_id, 50),
+                "conversation_summaries": db.list_conversation_summaries(player_id, npc_id),
+                "social_connections": [edge for edge in edges if npc_id in (edge["npc_a"], edge["npc_b"])]}
+
+    @app.get(settings.api_prefix + "/npcs/{npc_id}/memories")
+    def npc_memories(npc_id: str, authorization: Optional[str] = Header(None)):
+        user = current_user(authorization); profile_for(user["player_id"], npc_id, create_default=False)
+        return {"memories": db.list_npc_memories(user["player_id"], npc_id, 100)}
+
+    @app.delete(settings.api_prefix + "/npcs/{npc_id}/memories/{memory_id}", status_code=204)
+    def delete_npc_memory(npc_id: str, memory_id: int, authorization: Optional[str] = Header(None)):
+        user = current_user(authorization); profile_for(user["player_id"], npc_id, create_default=False)
+        if not db.delete_npc_memory(user["player_id"], npc_id, memory_id):
+            raise HTTPException(404, {"code": "MEMORY_NOT_FOUND", "message": "Memory was not found."})
+        return Response(status_code=204)
 
     @app.get(settings.api_prefix + "/learning/profile")
     def learning_profile(authorization: Optional[str] = Header(None)):
@@ -302,10 +383,18 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         profile = profile_for(player_id, npc_id)
         old = db.state(player_id, npc_id)
         learning_state = db.get_learning_state(player_id)
-        active = event_engine.daily_event(event_context(player_id, npc_id, profile, old, learning_state), game_today())
-        context = {"npc_profile": profile, "current_event": public_event(active),
+        agent = agent_bundle(player_id, npc_id, profile, old, learning_state)
+        active = event_engine.daily_event(event_context(player_id, npc_id, profile, old, learning_state,
+                                                        agent["runtime_state"]), game_today())
+        memories = db.relevant_npc_memories(player_id, npc_id, message, limit=8,
+                                            relationship_stage=agent["relationship"]["stage"])
+        summaries = db.list_conversation_summaries(player_id, npc_id, limit=3)
+        event_view = public_event(active, profile)
+        context = {"npc_profile": profile, "current_event": event_view,
                    "learning_targets": learning_engine.targets(learning_state, limit=3),
-                   "memories": db.list_npc_memories(player_id, npc_id, limit=8)}
+                   "memories": memories, "conversation_summaries": summaries, **agent,
+                   "dialogue_objective": dialogue_objective(event_view, agent["runtime_state"],
+                                                             agent["goal"], agent["relationship"])}
         result = provider_reply(message, old, db.messages(player_id, settings.recent_message_limit, npc_id), context, on_chunk)
         evidence = [Evidence(**item.model_dump()) for item in result.learning_evidence]
         learning_engine.apply(learning_state, evidence)
@@ -318,25 +407,68 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
             if transition.completed and transition.outcome and transition.memory:
                 event_rel, event_mood = transition.outcome.relationship_change, transition.outcome.mood_change
                 db.add_npc_memory(player_id, npc_id, "event", transition.memory.memory,
-                                  transition.memory.template_id, importance=3)
+                                  transition.memory.template_id, importance=3,
+                                  tags=["event", transition.memory.category], confidence=1)
                 event_update.update({"outcome": {"id": transition.outcome.id,
                                                  "memory": transition.memory.memory},
                                      "memory": transition.memory.memory})
             elif transition.stage_changed and transition.event:
+                # The next story beat must remain visible even while the live
+                # speech bubble persists. Templates contain situation content,
+                # while names are adapted to the selected custom character.
                 next_stage = event_engine.stage(transition.event)
-                result.npc_reply = f"{result.npc_reply}\n\n{next_stage.prompt}"
+                result.npc_reply = f"{result.npc_reply}\n\n{next_stage.prompt.replace('Emma', profile['name'])}"
             active = transition.event
         understandable = result.english_feedback.is_understandable
         rel = max(-10, min(10, max(-5, min(5, result.relationship_change)) + event_rel))
+        if rel > 0:
+            rel = min(rel, max(0, 10 - db.positive_relationship_change_today(
+                player_id, npc_id, game_today().isoformat())))
         mood = max(-10, min(10, max(-5, min(5, result.mood_change)) + event_mood))
         xp = max(0, min(5, result.english_xp_change)) if understandable else 0
         stats = {"relationship": max(0, min(100, old.relationship + rel)), "mood": max(0, min(100, old.mood + mood)), "english_xp": max(0, min(100, old.english_xp + xp))}
-        response = {**result.model_dump(), "relationship_change": rel, "mood_change": mood,
+        relationship = advance_relationship(agent["relationship"], rel, result.semantic_signals)
+        runtime = json.loads(json.dumps(agent["runtime_state"]))
+        runtime["emotion"]["valence"] = stats["mood"]
+        runtime["emotion"]["stress"] = max(0, min(100, runtime["emotion"]["stress"] - max(0, mood)))
+        runtime["needs"]["social"] = max(0, min(100, runtime["needs"]["social"] + 8))
+        runtime["needs"]["love"] = max(0, min(100, runtime["needs"]["love"] + max(0, rel)))
+        goal = agent["goal"]
+        if event_update and event_update.get("completed"):
+            goal = advance_goal(goal, 8 + max(0, event_rel))
+            growth = runtime.setdefault("growth", {})
+            if set(result.semantic_signals) & {"encouragement", "reassurance", "practical_help"}:
+                growth["assertiveness"] = min(15, float(growth.get("assertiveness", 0)) + .5)
+                growth["emotional_stability"] = min(15, float(growth.get("emotional_stability", 0)) + .5)
+        public_agent = {"runtime_state": runtime, "relationship": relationship, "goal": goal,
+                        "daily_plan": agent["daily_plan"], "current_slot": agent["current_slot"]}
+        response = {**result.model_dump(), "npc_id": npc_id, "game_date": game_today().isoformat(),
+                    "relationship_change": rel, "mood_change": mood,
                     "english_xp_change": xp, "stats": stats,
                     "animation": "happy" if mood > 0 else "sad" if mood < 0 else "idle",
-                    "active_event": public_event(active), "event_update": event_update,
-                    "learning_summary": learning_engine.progress(learning_state)}
-        committed = db.commit_chat(player_id, idempotency_key, message, response, npc_id)
+                    "active_event": public_event(active, profile), "event_update": event_update,
+                    "learning_summary": learning_engine.progress(learning_state), "agent": public_agent}
+        committed, created = db.commit_chat(player_id, idempotency_key, message, response, npc_id)
+        if created:
+            db.save_relationship(player_id, npc_id, relationship)
+            db.save_runtime_state(player_id, npc_id, runtime)
+            db.save_goal(player_id, npc_id, goal)
+            db.save_persona(player_id, npc_id, compile_persona(profile, runtime.get("growth")))
+            summary_observations = []
+            for candidate in result.memory_candidates:
+                if candidate.confidence < .6:
+                    continue
+                expires_at = (datetime.now(timezone.utc) + timedelta(days=candidate.ttl_days)).isoformat() if candidate.ttl_days else None
+                db.add_npc_memory(player_id, npc_id, candidate.kind, candidate.content,
+                                  importance=candidate.importance, tags=candidate.tags,
+                                  confidence=candidate.confidence, expires_at=expires_at,
+                                  access_stage=candidate.access_stage)
+                summary_observations.append(candidate.content)
+            if event_update and event_update.get("memory"):
+                summary_observations.append(event_update["memory"])
+            db.append_conversation_summary(player_id, npc_id, game_today().isoformat(), summary_observations)
+            trace = {**result.agent_trace, "memory_ids": [item["id"] for item in memories]}
+            db.add_agent_trace(player_id, npc_id, idempotency_key, trace)
         return {**committed, "quota": db.quota(user["id"])}
 
     @app.post(settings.api_prefix + "/chat", response_model=ChatResponse)
@@ -393,6 +525,11 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
 
     @app.get(settings.api_prefix + "/admin/users")
     def admin_users(request: Request, q: str = ""): require_admin(request); return {"users": db.users(q[:64])}
+
+    @app.get(settings.api_prefix + "/admin/agent-traces")
+    def admin_agent_traces(request: Request, limit: int = 100):
+        require_admin(request)
+        return {"traces": db.list_agent_traces(limit)}
 
     @app.patch(settings.api_prefix + "/admin/users/{user_id}")
     def admin_patch_user(user_id: str, body: AdminUserPatch, request: Request):
