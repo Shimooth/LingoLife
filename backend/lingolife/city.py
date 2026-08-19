@@ -50,6 +50,12 @@ EVENT_LOCATION_HINTS = {
     "relationship_forgot_birthday": "moonlight_cafe",
     "relationship_old_friend_message": "riverside_park",
     "surprise_found_wallet": "police_station",
+    "daily_library_note": "city_library",
+    "daily_open_mic": "moonlight_cafe",
+    "growth_difficult_student": "community_school",
+    "growth_exhausting_shift": "city_hospital",
+    "relationship_family_call": "riverside_park",
+    "surprise_train_delay": "central_station",
 }
 
 CATEGORY_LOCATIONS = {

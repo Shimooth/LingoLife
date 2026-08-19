@@ -106,6 +106,7 @@ class EventRepository(Protocol):
     def clear_active_event(self, player_id: str, npc_id: str) -> None: ...
     def list_event_history(self, player_id: str, npc_id: str, limit: int = 50) -> list[EventHistory]: ...
     def append_event_history(self, history: EventHistory) -> None: ...
+    def complete_event(self, history: EventHistory) -> None: ...
 
 
 class InMemoryEventRepository:
@@ -128,6 +129,10 @@ class InMemoryEventRepository:
 
     def append_event_history(self, history: EventHistory) -> None:
         self.history.append(history)
+
+    def complete_event(self, history: EventHistory) -> None:
+        self.append_event_history(history)
+        self.clear_active_event(history.player_id, history.npc_id)
 
 
 def load_event_templates(path: str | Path | None = None) -> tuple[EventTemplate, ...]:
@@ -179,14 +184,28 @@ class EventEngine:
         self.rng = rng or random.Random()
 
     def daily_event(self, context: NPCEventContext, today: date | None = None) -> ActiveEvent | None:
+        game_day = today or date.today()
+        day = game_day.isoformat()
         current = self.repository.get_active_event(context.player_id, context.npc_id)
         if current:
-            return current
-        day = (today or date.today()).isoformat()
+            if current.event_date == day:
+                return current
+            if current.event_date > day:
+                return current  # Defensive guard if the configured game timezone moves backwards.
+            template = self.by_id.get(current.template_id)
+            if template:
+                expired = EventHistory(
+                    current.player_id, current.npc_id, current.template_id, template.category,
+                    current.event_date, datetime.combine(game_day, datetime.min.time()).isoformat(),
+                    "expired", 0, 0, "",
+                )
+                self.repository.complete_event(expired)
+            else:
+                self.repository.clear_active_event(context.player_id, context.npc_id)
         history = self.repository.list_event_history(context.player_id, context.npc_id)
         if any(h.started_on == day for h in history):
             return None  # lazy refresh is idempotent: at most one event begins per local game day
-        scored = [(template, self.score(template, context, history, today or date.today()))
+        scored = [(template, self.score(template, context, history, game_day))
                   for template in self.templates]
         scored = [(template, score) for template, score in scored if score > 0]
         if not scored:
@@ -200,6 +219,14 @@ class EventEngine:
               history: Sequence[EventHistory], today: date) -> float:
         if not template.relationship_range[0] <= context.relationship <= template.relationship_range[1]:
             return 0
+        normalized_traits = {value.strip().casefold() for value in context.traits}
+        normalized_interests = {value.strip().casefold() for value in context.interests}
+        normalized_tags = {key: {value.strip().casefold() for value in values} for key, values in template.tags.items()}
+        occupation = context.occupation.strip().casefold()
+        occupation_tags = normalized_tags.get("occupations", set())
+        occupation_matches = {tag for tag in occupation_tags if tag and (tag in occupation or occupation in tag)}
+        if occupation_tags and not occupation_matches:
+            return 0
         previous = [h for h in history if h.template_id == template.id]
         if previous and not template.repeatable:
             return 0
@@ -208,13 +235,13 @@ class EventEngine:
             if (today - last).days < template.cooldown_days:
                 return 0
         score = template.base_weight
-        score += 1.5 * len(set(context.traits) & set(template.tags.get("traits", ())))
-        score += 1.5 * len(set(context.interests) & set(template.tags.get("interests", ())))
-        score += 2.0 * (context.occupation in template.tags.get("occupations", ()))
-        score += 1.25 * (context.mood in template.tags.get("moods", ()))
-        score += 1.5 * len(set(context.needs) & set(template.tags.get("needs", ())))
+        score += 1.5 * len(normalized_traits & normalized_tags.get("traits", set()))
+        score += 1.5 * len(normalized_interests & normalized_tags.get("interests", set()))
+        score += 2.0 * bool(occupation_matches)
+        score += 1.25 * (context.mood.casefold() in normalized_tags.get("moods", set()))
+        score += 1.5 * len({value.casefold() for value in context.needs} & normalized_tags.get("needs", set()))
         goal_words = {word for goal in context.long_term_goals for word in goal.lower().split()}
-        score += 1.25 * len(goal_words & set(template.tags.get("goals", ())))
+        score += 1.25 * len(goal_words & normalized_tags.get("goals", set()))
         score += 1.0 * len(set(context.learning_targets) & set(template.learning_targets))
         recent_categories = [h.category for h in history[:3]]
         score *= 0.45 ** recent_categories.count(template.category)
@@ -248,8 +275,7 @@ class EventEngine:
             (now or datetime.utcnow()).isoformat(timespec="seconds"), outcome.id,
             max(-10, min(10, outcome.relationship_change)), max(-10, min(10, outcome.mood_change)), outcome.memory,
         )
-        self.repository.append_event_history(history)
-        self.repository.clear_active_event(active.player_id, active.npc_id)
+        self.repository.complete_event(history)
         return EventTransition(None, True, True, outcome, history)
 
 

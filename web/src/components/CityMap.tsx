@@ -3,6 +3,7 @@ import './CityMap.css'
 import './CityMapExpansion.css'
 
 export type CityPoint={x:number;y:number}
+export type CityLandmark=CityPoint&{id:string;name:string;kind:string}
 export type CityCharacter={
   id:string
   name:string
@@ -12,6 +13,7 @@ export type CityCharacter={
 }
 export type CityMapProps={
   characters:CityCharacter[]
+  landmarks?:CityLandmark[]
   activeCharacterId?:string
   language?:'zh'|'en'
   onCharacterClick:(id:string)=>void
@@ -19,6 +21,14 @@ export type CityMapProps={
 }
 
 const WIDTH=1200,HEIGHT=760,MIN_ZOOM=1,MAX_ZOOM=3.2
+const DEFAULT_LANDMARKS:CityLandmark[]=[
+ {id:'city_library',name:'City Library',kind:'education',x:236,y:460},
+ {id:'community_gallery',name:'Community Gallery',kind:'culture',x:353,y:600},
+ {id:'greenway_gym',name:'Greenway Gym',kind:'fitness',x:773,y:372},
+ {id:'neighborhood_clinic',name:'Neighborhood Clinic',kind:'health',x:319,y:236},
+ {id:'police_station',name:'Police Station',kind:'civic',x:1043,y:597},
+ {id:'sunny_plaza',name:'Sunny Plaza',kind:'plaza',x:570,y:327},
+]
 const clamp=(value:number,min:number,max:number)=>Math.min(max,Math.max(min,value))
 
 function AvatarPin({character,active,onSelect}:{character:CityCharacter;active:boolean;onSelect:()=>void}){
@@ -36,7 +46,7 @@ function HomePin({character,homeLabel,onSelect}:{character:CityCharacter;homeLab
  return <button className="city-home-avatar" style={{left:`${character.home.x/12}%`,top:`${character.home.y/7.6}%`}} onClick={onSelect} aria-label={`${character.name} · ${homeLabel}`}><span className="city-avatar__portrait" aria-hidden><svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="23" fill="#fff"/><path d="M7 48q2-17 17-17t17 17" fill={outfit}/><ellipse cx="24" cy="22" rx="11" ry="13" fill={skin}/><path d="M13 22Q12 7 24 7t12 15q-8-2-14-8-2 6-9 8" fill={hair}/><circle cx="20" cy="22" r="1"/><circle cx="28" cy="22" r="1"/></svg></span><strong>{character.name}</strong></button>
 }
 
-export function CityMap({characters,activeCharacterId,language='zh',onCharacterClick,className=''}:CityMapProps){
+export function CityMap({characters,landmarks=DEFAULT_LANDMARKS,activeCharacterId,language='zh',onCharacterClick,className=''}:CityMapProps){
   const viewport=useRef<HTMLDivElement>(null)
   const gesture=useRef<{x:number;y:number;panX:number;panY:number;distance?:number}|null>(null)
   const [view,setView]=useState({zoom:1,panX:0,panY:0})
@@ -79,6 +89,7 @@ export function CityMap({characters,activeCharacterId,language='zh',onCharacterC
           <g className="city-building city-station" transform="translate(488 434)"><path d="M0 82V18Q0 0 18 0h164q18 0 18 18v64z"/><path d="M22 82V34h156v48M47 18h106M50 103h100M62 82l-14 42m90-42 14 42"/><text x="100" y="153">{copy.station}</text></g>
           <g className="city-houses">{characters.slice(0,5).map((c,index)=><g key={c.id} transform={`translate(${c.home.x-19} ${c.home.y-22})`}><path d="M0 18L19 0l19 18v27H0z"/><rect x="15" y="27" width="9" height="18"/><circle cx="34" cy="4" r="8" className="city-house-light"/><text x="19" y="60">{c.name} · {copy.home}</text><title>{c.name} — {copy.home} {index+1}</title></g>)}</g>
         </svg>
+        <div className="city-landmarks" aria-hidden>{landmarks.filter(place=>!['central_station','business_center','city_hospital','riverside_park','old_town_market','moonlight_cafe','community_school'].includes(place.id)).map(place=><span key={place.id} className={`city-landmark city-landmark--${place.kind}`} style={{left:`${place.x/12}%`,top:`${place.y/7.6}%`}}><i>{place.kind==='culture'?'◆':place.kind==='education'?'▤':place.kind==='fitness'?'●':place.kind==='civic'?'★':place.kind==='health'?'+':'•'}</i><b>{place.name}</b></span>)}</div>
         <div className="city-map__characters">{characters.slice(0,5).map(c=><HomePin key={`home-${c.id}`} character={c} homeLabel={copy.home} onSelect={()=>onCharacterClick(c.id)}/>)}{characters.slice(0,5).map(c=><AvatarPin key={c.id} character={c} active={c.id===activeCharacterId} onSelect={()=>onCharacterClick(c.id)}/>)}</div>
       </div>
     </div>

@@ -32,9 +32,9 @@ def context():
     )
 
 
-def test_content_has_twelve_unique_multistage_events_across_all_categories(templates):
-    assert len(templates) == 12
-    assert len({event.id for event in templates}) == 12
+def test_content_has_eighteen_unique_multistage_events_across_all_categories(templates):
+    assert len(templates) == 18
+    assert len({event.id for event in templates}) == 18
     assert {event.category for event in templates} == {"daily", "growth", "relationship", "surprise"}
     assert all(len(event.stages) >= 3 for event in templates)
     assert all(event.learning_targets for event in templates)
@@ -88,6 +88,26 @@ def test_daily_lazy_refresh_is_idempotent_and_only_one_event_per_day(templates, 
     engine.advance(first, list(last.required_signals) + list(last.any_signals or ("advice",)), datetime(2026, 8, 17, 12))
     assert engine.daily_event(context, date(2026, 8, 17)) is None
     assert engine.daily_event(context, date(2026, 8, 18)) is not None
+
+
+def test_unfinished_event_expires_and_is_replaced_on_the_next_game_day(templates, context):
+    repo = InMemoryEventRepository()
+    engine = EventEngine(repo, templates, random.Random(4))
+    yesterday = engine.daily_event(context, date(2026, 8, 17))
+    today = engine.daily_event(context, date(2026, 8, 18))
+    assert today is not None and today.event_date == "2026-08-18"
+    assert today is not yesterday
+    expired = next(item for item in repo.history if item.started_on == "2026-08-17")
+    assert expired.outcome_id == "expired"
+    assert expired.relationship_change == expired.mood_change == 0
+    assert expired.memory == ""
+
+
+def test_occupation_events_are_case_insensitive_and_exclude_wrong_jobs(templates, context):
+    engine = EventEngine(InMemoryEventRepository(), templates)
+    teacher_event = next(item for item in templates if item.id == "growth_difficult_student")
+    assert engine.score(teacher_event, replace(context, occupation="High School Teacher"), [], date(2026, 8, 18)) > 0
+    assert engine.score(teacher_event, replace(context, occupation="Designer"), [], date(2026, 8, 18)) == 0
 
 
 def test_stage_requires_rule_signals_and_minimum_turns(templates, context):

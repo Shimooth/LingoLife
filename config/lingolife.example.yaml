@@ -18,6 +18,7 @@ demo:
 server:
   host: 127.0.0.1
   port: 8010
+  game_timezone: Asia/Shanghai
   public_base_url: https://lingolife.shimooth.me
   admin_base_url: https://lingolife.admin.shimooth.me
   cors_origins:

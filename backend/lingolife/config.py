@@ -28,6 +28,7 @@ class Settings:
     admin_allowed_origin: str = "https://lingolife.admin.shimooth.me"
     default_daily_quota: int = 30
     chat_per_minute: int = 5
+    game_timezone: str = "Asia/Shanghai"
 
 
 def load_settings(path: str | None = None) -> Settings:
@@ -61,4 +62,5 @@ def load_settings(path: str | None = None) -> Settings:
         admin_allowed_origin=os.getenv("ADMIN_ALLOWED_ORIGIN", Settings.admin_allowed_origin),
         default_daily_quota=int(os.getenv("DEFAULT_DAILY_QUOTA", Settings.default_daily_quota)),
         chat_per_minute=int(os.getenv("CHAT_PER_MINUTE", Settings.chat_per_minute)),
+        game_timezone=os.getenv("GAME_TIMEZONE", str(server.get("game_timezone", Settings.game_timezone))),
     )

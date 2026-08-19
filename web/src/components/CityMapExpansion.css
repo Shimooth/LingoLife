@@ -2,6 +2,7 @@
 .city-shell{padding:clamp(6px,1.4vw,18px)}
 .city-screen{width:min(1500px,100%)}
 .city-screen>.city-map{height:max(680px,calc(100dvh - 118px))}
+.city-landmarks{position:absolute;inset:0;pointer-events:none}.city-landmark{position:absolute;z-index:1;display:grid;justify-items:center;transform:translate(-50%,-50%);color:#526258}.city-landmark i{display:grid;width:25px;height:25px;place-items:center;border:2px solid rgba(255,255,255,.9);border-radius:50%;background:#8ba08d;color:#fff;box-shadow:0 4px 12px rgba(45,57,47,.2);font-style:normal;font-size:11px}.city-landmark b{margin-top:3px;padding:2px 5px;border-radius:5px;background:rgba(242,245,238,.88);font-size:9px;white-space:nowrap}.city-landmark--culture i{background:#9b7890}.city-landmark--health i{background:#c57970}.city-landmark--fitness i{background:#668f73}.city-landmark--civic i{background:#687985}.city-landmark--plaza i{background:#b58a57}
 
 @media(max-width:760px){
  .city-shell{padding:0}

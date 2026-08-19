@@ -169,6 +169,52 @@
         {"id": "returned_safely", "trigger_signals": ["reassurance", "practical_help"], "relationship_change": 4, "mood_change": 4, "memory": "The player helped me return a lost wallet without taking an unsafe risk."},
         {"id": "taken_to_police", "trigger_signals": ["advice"], "relationship_change": 2, "mood_change": 3, "memory": "I took a lost wallet to the police station."}
       ], "default_outcome": "taken_to_police"
+    },
+    {
+      "id": "daily_library_note", "category": "daily", "title": "A Note Inside a Library Book", "base_weight": 3.4,
+      "tags": {"traits": ["curious", "quiet", "thoughtful"], "interests": ["books", "reading", "writing", "history"]},
+      "cooldown_days": 18, "repeatable": true, "learning_targets": ["intent.follow_up", "grammar.questions"],
+      "stages": [
+        {"id":"discovery","prompt":"A handwritten note fell out of my library book. It says, 'If you found this, tell me what courage means to you.'","objective":"Ask about the note.","any_signals":["curiosity","empathy"]},
+        {"id":"answer","prompt":"Part of me wants to write an answer and leave it in the same book. Is that silly?","objective":"Give an honest reaction.","any_signals":["honesty","encouragement","advice"]},
+        {"id":"leave","prompt":"I think courage can be something tiny, like replying when you are afraid. What would you write?","objective":"Help compose a reply.","any_signals":["practical_help","encouragement"]}
+      ],
+      "outcomes":[{"id":"note_answered","trigger_signals":["honesty","practical_help"],"relationship_change":4,"mood_change":4,"memory":"We answered a stranger's question about courage in a library book."},{"id":"idea_kept","trigger_signals":[],"relationship_change":2,"mood_change":2,"memory":"A mysterious library note made me think about courage."}],"default_outcome":"idea_kept"
+    },
+    {
+      "id": "daily_open_mic", "category": "daily", "title": "Five Minutes of Open Mic", "base_weight": 3.2,
+      "tags": {"traits": ["creative", "outgoing", "brave", "shy"], "interests": ["music", "poetry", "singing", "writing"]},
+      "cooldown_days": 24, "repeatable": true, "learning_targets": ["intent.advice", "grammar.soft_advice"],
+      "stages":[{"id":"poster","prompt":"The café is hosting an open mic tonight. I stopped walking when I saw the poster.","objective":"Ask what they might perform.","any_signals":["curiosity","encouragement"]},{"id":"fear","prompt":"I have something I wrote, but my hands shake just imagining the stage.","objective":"Respond to the fear.","any_signals":["empathy","reassurance","advice"]},{"id":"choice","prompt":"They still have one five-minute slot. Should I put my name down?","objective":"Help make the choice.","any_signals":["honesty","encouragement","practical_help"]}],
+      "outcomes":[{"id":"takes_stage","trigger_signals":["encouragement","practical_help"],"relationship_change":5,"mood_change":6,"memory":"The player gave me courage to take a five-minute open-mic slot."},{"id":"watches_first","trigger_signals":[],"relationship_change":2,"mood_change":2,"memory":"We talked about an open mic I might try someday."}],"default_outcome":"watches_first"
+    },
+    {
+      "id": "growth_difficult_student", "category": "growth", "title": "The Student Who Stopped Trying", "base_weight": 4,
+      "tags": {"traits": ["patient", "kind", "serious"], "interests": ["teaching", "education"], "occupations": ["teacher", "professor", "tutor"]},
+      "cooldown_days": 28, "repeatable": true, "learning_targets": ["intent.empathy", "intent.advice"],
+      "stages":[{"id":"silence","prompt":"One of my students handed in a blank page again today. They would not even look at me.","objective":"Ask what may be wrong.","any_signals":["curiosity","empathy"]},{"id":"boundary","prompt":"I want to help, but I do not want to embarrass them in front of the class.","objective":"Offer a considerate approach.","any_signals":["advice","practical_help"]},{"id":"plan","prompt":"Maybe I could ask them to stay for two quiet minutes after class. How should I start?","objective":"Help plan the conversation.","any_signals":["practical_help","reassurance"]}],
+      "outcomes":[{"id":"private_checkin","trigger_signals":["empathy","practical_help"],"relationship_change":5,"mood_change":4,"memory":"The player helped me plan a private, respectful check-in with a struggling student."},{"id":"gentle_attempt","trigger_signals":[],"relationship_change":2,"mood_change":1,"memory":"I worried about a student who had stopped trying."}],"default_outcome":"gentle_attempt"
+    },
+    {
+      "id": "growth_exhausting_shift", "category": "growth", "title": "After the Longest Shift", "base_weight": 4,
+      "tags": {"traits": ["kind", "reliable", "careful"], "interests": ["health", "medicine"], "occupations": ["doctor", "nurse", "paramedic", "therapist"]},
+      "cooldown_days": 25, "repeatable": true, "learning_targets": ["intent.empathy", "grammar.past_simple"],
+      "stages":[{"id":"shift","prompt":"My shift ran four hours late. I kept telling everyone I was fine until I reached the bus stop.","objective":"Check how they feel.","any_signals":["empathy","curiosity"]},{"id":"guilt","prompt":"I know I need rest, but I feel guilty leaving work for the next team.","objective":"Address the guilt.","any_signals":["reassurance","honesty","advice"]},{"id":"recovery","prompt":"I have tomorrow morning free. What is one thing I should protect that time for?","objective":"Suggest a recovery plan.","any_signals":["practical_help","advice"]}],
+      "outcomes":[{"id":"rests_without_guilt","trigger_signals":["reassurance","practical_help"],"relationship_change":5,"mood_change":5,"memory":"After an exhausting shift, the player helped me choose rest without guilt."},{"id":"gets_sleep","trigger_signals":[],"relationship_change":2,"mood_change":2,"memory":"I admitted how exhausted I was after a very long shift."}],"default_outcome":"gets_sleep"
+    },
+    {
+      "id": "relationship_family_call", "category": "relationship", "title": "The Call I Keep Avoiding", "base_weight": 3.5,
+      "tags": {"traits": ["independent", "sensitive", "stubborn"], "needs": ["love", "social", "security"]},
+      "relationship_range":[30,100], "cooldown_days":35, "repeatable":true, "learning_targets":["intent.empathy","intent.advice"],
+      "stages":[{"id":"missed","prompt":"My family has called three times this week, and I keep letting it ring.","objective":"Invite an explanation.","any_signals":["curiosity","empathy"]},{"id":"pressure","prompt":"They mean well, but every call becomes a list of things I should be doing differently.","objective":"Acknowledge the pressure.","any_signals":["empathy","honesty","reassurance"]},{"id":"boundary","prompt":"I want to call back without turning it into another argument. Can I set a boundary kindly?","objective":"Help phrase a boundary.","any_signals":["advice","practical_help"]}],
+      "outcomes":[{"id":"kind_boundary","trigger_signals":["empathy","practical_help"],"relationship_change":6,"mood_change":4,"memory":"The player helped me prepare a kind boundary before calling my family."},{"id":"calls_back","trigger_signals":[],"relationship_change":2,"mood_change":1,"memory":"I decided not to avoid my family's calls forever."}],"default_outcome":"calls_back"
+    },
+    {
+      "id": "surprise_train_delay", "category": "surprise", "title": "The Last Train Is Not Coming", "base_weight": 3.7,
+      "tags": {"traits": ["anxious", "resourceful", "adventurous"], "interests": ["travel", "city", "music"], "needs": ["security"]},
+      "cooldown_days":30, "repeatable":true, "learning_targets":["intent.advice","grammar.sequence"],
+      "stages":[{"id":"board","prompt":"The station board just changed: the last train is cancelled, and my phone is nearly dead.","objective":"Check the situation.","any_signals":["curiosity","reassurance"]},{"id":"options","prompt":"There is a night bus in forty minutes, or I could share a taxi with two people from the queue.","objective":"Compare safe options.","any_signals":["advice","honesty"]},{"id":"wait","prompt":"The night bus feels safer. Could you keep talking to me while I wait?","objective":"Offer support.","any_signals":["accept","reassurance","encouragement"]}],
+      "outcomes":[{"id":"safe_ride_home","trigger_signals":["advice","reassurance"],"relationship_change":5,"mood_change":4,"memory":"The player stayed with me through a late-night train cancellation until I found a safe way home."},{"id":"bus_chosen","trigger_signals":[],"relationship_change":2,"mood_change":1,"memory":"I found a safe night bus after the last train was cancelled."}],"default_outcome":"bus_chosen"
     }
   ]
 }

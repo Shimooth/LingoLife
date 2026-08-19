@@ -14,6 +14,8 @@ import queue
 from typing import Optional
 from contextlib import asynccontextmanager
 from pathlib import Path
+from datetime import datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -48,6 +50,11 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
     db = Database(settings.database_url, settings.admin_session_secret)
     learning_engine = LearningEngine()
     event_engine = EventEngine(db)
+    try:
+        game_zone = ZoneInfo(settings.game_timezone)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError(f"Unknown GAME_TIMEZONE: {settings.game_timezone}") from exc
+    game_today = lambda: datetime.now(game_zone).date()
     if provider is None:
         primary = DeepSeekProvider(settings) if settings.deepseek_api_key else None
         provider = ResilientProvider(primary)
@@ -211,7 +218,7 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         profile = profile_for(player_id, npc_id)
         stats = db.state(player_id, npc_id)
         learning_state = db.get_learning_state(player_id)
-        active = event_engine.daily_event(event_context(player_id, npc_id, profile, stats, learning_state))
+        active = event_engine.daily_event(event_context(player_id, npc_id, profile, stats, learning_state), game_today())
         animation = "sad" if stats.mood < 40 else "happy" if stats.mood >= 60 else "idle"
         return {"room_id": f"{npc_id}-room", "npc": {"id": npc_id, "name": profile["name"], "animation": animation},
                 "stats": stats, "messages": db.messages(player_id, 200, npc_id),
@@ -244,10 +251,10 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         for entry in profiles:
             npc_id, profile = entry["id"], entry["profile"]
             stats = db.state(player_id, npc_id)
-            active = event_engine.daily_event(event_context(player_id, npc_id, profile, stats, learning_state))
+            active = event_engine.daily_event(event_context(player_id, npc_id, profile, stats, learning_state), game_today())
             active_events[npc_id] = active
             summaries[npc_id] = public_event(active)
-        payload = city_payload(player_id, profiles, active_events)
+        payload = city_payload(player_id, profiles, active_events, game_today())
         for resident in payload["npcs"]:
             resident["active_event"] = summaries[resident["id"]]
         return payload
@@ -295,7 +302,7 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         profile = profile_for(player_id, npc_id)
         old = db.state(player_id, npc_id)
         learning_state = db.get_learning_state(player_id)
-        active = event_engine.daily_event(event_context(player_id, npc_id, profile, old, learning_state))
+        active = event_engine.daily_event(event_context(player_id, npc_id, profile, old, learning_state), game_today())
         context = {"npc_profile": profile, "current_event": public_event(active),
                    "learning_targets": learning_engine.targets(learning_state, limit=3),
                    "memories": db.list_npc_memories(player_id, npc_id, limit=8)}
