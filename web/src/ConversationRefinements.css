@@ -4,6 +4,8 @@
 .character-edit-button:hover{background:#fff;transform:translateX(-50%) translateY(-1px)}
 .older-messages{display:block;margin:0 auto 16px;padding:7px 12px;border:1px solid rgba(87,61,61,.14);border-radius:999px;color:#796c71;background:rgba(255,255,255,.72);font-size:.68rem;font-weight:700;cursor:pointer}
 .older-messages:hover{background:#fff}
+.message.player{width:88%;max-width:88%;justify-content:flex-end;margin-left:auto;margin-right:0}
+.message.player .bubble{width:max-content;max-width:100%;margin-left:auto}
 @media(min-width:780px){.character-stage{grid-column:1;height:455px;border-right:1px solid rgba(87,61,61,.08)}.character-stage>.stage{border-right:0}}
 @media(max-width:779px){.character-stage{height:265px}.learn-button,.create-button{position:static!important;box-shadow:none!important}}
 @media(prefers-reduced-motion:reduce){.character-edit-button{transition:none}}
