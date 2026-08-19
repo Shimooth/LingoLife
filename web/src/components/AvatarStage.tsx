@@ -17,10 +17,10 @@ function ClothingDetails({kind,color}:{kind:string;color:string}){
  return <path d="M140 239q20 16 40 0" fill="none" stroke={color} strokeWidth="2" opacity=".35"/>
 }
 
-export function AvatarStage({mood='idle',avatar=defaultAvatar,compact=false}:{mood?:Mood;avatar?:AvatarConfig;compact?:boolean}){
+export function AvatarStage({mood='idle',avatar=defaultAvatar,compact=false,scene=false}:{mood?:Mood;avatar?:AvatarConfig;compact?:boolean;scene?:boolean}){
  const reduce=useReducedMotion(),eye=eyes[avatar.eyes]||eyes.round
- return <section className={`stage avatar-stage ${compact?'compact':''}`}><svg className="room-art" viewBox="0 0 320 390" role="img" aria-label={`Character feeling ${mood}`}>
-  <rect width="320" height="390" fill="#f0d2bd"/><rect y="286" width="320" height="104" fill="#d7b496"/><rect x="28" y="35" width="82" height="112" rx="4" fill="#fff0df"/><rect x="36" y="43" width="66" height="96" fill="#8792a8"/><path d="M69 43v96M36 90h66" stroke="#fff0df" strokeWidth="5"/>
+ return <section className={`stage avatar-stage ${compact?'compact':''} ${scene?'scene-avatar':''}`}><svg className="room-art" viewBox={scene?'70 30 180 315':'0 0 320 390'} role="img" aria-label={`Character feeling ${mood}`}>
+  {!scene&&<><rect width="320" height="390" fill="#f0d2bd"/><rect y="286" width="320" height="104" fill="#d7b496"/><rect x="28" y="35" width="82" height="112" rx="4" fill="#fff0df"/><rect x="36" y="43" width="66" height="96" fill="#8792a8"/><path d="M69 43v96M36 90h66" stroke="#fff0df" strokeWidth="5"/></>}
   <motion.g animate={reduce?undefined:{y:mood==='happy'?[0,-6,0]:[0,2,0]}} transition={{duration:mood==='happy'?1.4:3.8,repeat:Infinity}}>
    <path d="M122 318h35l-4 67h-43zM163 318h35l12 67h-43z" fill="#535866"/><path d="M108 380h47v10h-51q-7-4 4-10m58 0h45q11 6 3 10h-48z" fill="#3e3940"/>
    <path d="M140 174q20 13 40 0v77h-40z" fill={avatar.skin}/>
@@ -35,5 +35,5 @@ export function AvatarStage({mood='idle',avatar=defaultAvatar,compact=false}:{mo
    <motion.path d={mouths[avatar.mouth]||mouths.soft} animate={{scaleX:mood==='sad'?.92:1,scaleY:mood==='happy'?1.08:1}} style={{transformOrigin:'160px 152px'}} fill="none" stroke="#9e5260" strokeWidth="3" strokeLinecap="round"/>
    {avatar.accessory==='glasses'&&<g fill="none" stroke="#504951" strokeWidth="3"><circle cx="139" cy="122" r="13"/><circle cx="181" cy="122" r="13"/><path d="M152 122h16"/></g>}{avatar.accessory==='earrings'&&<g fill="#dfad42"><circle cx="112" cy="142" r="5"/><circle cx="208" cy="142" r="5"/></g>}{avatar.accessory==='headphones'&&<path d="M111 132q-2-82 49-82t49 82" fill="none" stroke="#54566f" strokeWidth="10"/>}{avatar.accessory==='hairclip'&&<path d="M116 89l18-8" stroke="#f4cf55" strokeWidth="7"/>}{avatar.accessory==='necklace'&&<path d="M140 226q20 24 40 0" fill="none" stroke="#e4bc55" strokeWidth="3"/>}{avatar.accessory==='scarf'&&<path d="M126 218q34 25 68 0l-9 38h-50z" fill="#d9905e"/>}{avatar.accessory==='beanie'&&<path d="M111 87q5-52 49-52t50 52z" fill="#657d79"/>}{avatar.accessory==='freckles'&&<g fill="#aa705f"><circle cx="133" cy="139" r="1.5"/><circle cx="140" cy="141" r="1"/><circle cx="180" cy="141" r="1"/><circle cx="187" cy="139" r="1.5"/></g>}
   </motion.g>
- </svg>{!compact&&<p className="stage-caption">Your story grows with every conversation.</p>}</section>
+ </svg>{!compact&&!scene&&<p className="stage-caption">Your story grows with every conversation.</p>}</section>
 }
