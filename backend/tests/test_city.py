@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from lingolife.app import create_app
 from lingolife.city import (CITY_LOCATIONS, EVENT_LOCATION_HINTS, HOME_SLOTS,
-                            city_payload, daily_location_id)
+                            MIN_NPC_DISTANCE, city_payload, daily_location_id)
 from lingolife.config import Settings
 
 
@@ -36,6 +36,39 @@ def test_home_assignment_does_not_depend_on_profile_order():
     normal_homes = {npc["id"]: npc["home"] for npc in normal["npcs"]}
     reversed_homes = {npc["id"]: npc["home"] for npc in reversed_payload["npcs"]}
     assert normal_homes == reversed_homes
+    normal_positions = {npc["id"]: npc["position"] for npc in normal["npcs"]}
+    reversed_positions = {npc["id"]: npc["position"] for npc in reversed_payload["npcs"]}
+    assert normal_positions == reversed_positions
+
+
+def test_characters_are_not_close_on_the_same_day():
+    profiles = [
+        {"id": f"npc-{index}", "profile": profile(str(index), occupation="Nurse")}
+        for index in range(5)
+    ]
+    for day in range(18, 25):
+        payload = city_payload("player-1", profiles, {}, date(2026, 8, day))
+        points = [(npc["position"]["x"], npc["position"]["y"]) for npc in payload["npcs"]]
+        for index, point in enumerate(points):
+            for other in points[index + 1:]:
+                distance_squared = (point[0] - other[0]) ** 2 + (point[1] - other[1]) ** 2
+                assert distance_squared >= MIN_NPC_DISTANCE ** 2
+
+
+def test_colliding_events_keep_one_exact_story_location_and_separate_everyone():
+    profiles = [{"id": f"npc-{index}", "profile": profile(str(index))} for index in range(5)]
+    events = {
+        entry["id"]: SimpleNamespace(template_id="daily_library_note")
+        for entry in profiles
+    }
+    payload = city_payload("player-1", profiles, events, date(2026, 8, 18))
+    residents = {npc["id"]: npc for npc in payload["npcs"]}
+    assert residents["npc-0"]["current_location_id"] == "city_library"
+    points = [(npc["position"]["x"], npc["position"]["y"]) for npc in payload["npcs"]]
+    for index, point in enumerate(points):
+        for other in points[index + 1:]:
+            distance_squared = (point[0] - other[0]) ** 2 + (point[1] - other[1]) ** 2
+            assert distance_squared >= MIN_NPC_DISTANCE ** 2
 
 
 def test_active_event_places_npc_at_related_landmark():

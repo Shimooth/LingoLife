@@ -100,6 +100,18 @@ CATEGORY_LOCATIONS = {
     "surprise": ("central_station", "old_town_market", "riverside_park", "south_harbor", "sunny_plaza"),
 }
 
+# Character markers should remain visually distinct on the city map. These five
+# landmarks are more than twice the minimum distance apart, so with the current
+# five-character cap there is always a collision-free deterministic fallback.
+MIN_NPC_DISTANCE = 600
+SEPARATION_ANCHORS: tuple[str, ...] = (
+    "north_bus_terminal",
+    "airport_express",
+    "animal_shelter",
+    "city_stadium",
+    "harbor_restaurant",
+)
+
 
 def _number(*parts: str) -> int:
     raw = "\x1f".join(parts).encode("utf-8")
@@ -185,17 +197,102 @@ def daily_location_id(player_id: str, npc_id: str, profile: dict, active_event,
     return choices[_number("schedule", day.isoformat(), player_id, npc_id) % len(choices)]
 
 
+def _rotated(values: Sequence[str], offset: int) -> tuple[str, ...]:
+    if not values:
+        return ()
+    start = offset % len(values)
+    return tuple(values[start:]) + tuple(values[:start])
+
+
+def _location_candidates(player_id: str, npc_id: str, profile: dict, active_event,
+                         day: date) -> tuple[str | None, ...]:
+    """Return a preference-ordered, deterministic schedule for one NPC."""
+    preferred = daily_location_id(player_id, npc_id, profile, active_event, day)
+    seed = _number("location-candidates", day.isoformat(), player_id, npc_id)
+    candidates: list[str | None] = [preferred]
+
+    if active_event:
+        category = active_event.template_id.split("_", 1)[0]
+        candidates.extend(_rotated(CATEGORY_LOCATIONS.get(category, ()), seed))
+    elif day.weekday() < 5:
+        candidates.extend((_workplace(profile), "moonlight_cafe", "sunny_plaza", None))
+    else:
+        candidates.extend(_rotated(_leisure_places(profile), seed))
+        candidates.extend(("riverside_park", "old_town_market", "canal_walk", None))
+
+    # Fallbacks are deliberately city-wide. Their pairwise spacing guarantees a
+    # free point for every character even when several preferred places collide.
+    candidates.extend(_rotated(SEPARATION_ANCHORS, seed))
+    candidates.extend(_rotated(tuple(LOCATION_BY_ID), seed))
+    candidates.append(None)
+    return tuple(dict.fromkeys(candidates))
+
+
+def _coordinates(location_id: str | None, home: tuple[int, int]) -> tuple[int, int]:
+    location = LOCATION_BY_ID.get(location_id) if location_id else None
+    return (location.x, location.y) if location else home
+
+
+def _far_enough(point: tuple[int, int], occupied: Sequence[tuple[int, int]]) -> bool:
+    minimum_squared = MIN_NPC_DISTANCE * MIN_NPC_DISTANCE
+    return all((point[0] - other[0]) ** 2 + (point[1] - other[1]) ** 2 >= minimum_squared
+               for other in occupied)
+
+
+def _nearest_distance_squared(point: tuple[int, int], occupied: Sequence[tuple[int, int]]) -> float:
+    return min(
+        ((point[0] - other[0]) ** 2 + (point[1] - other[1]) ** 2 for other in occupied),
+        default=float("inf"),
+    )
+
+
+def _daily_assignments(player_id: str, profiles: Sequence[dict], active_events: dict[str, object],
+                       homes: dict[str, int], day: date) -> dict[str, str | None]:
+    """Assign today's places jointly so NPCs never overlap or cluster.
+
+    Event participants are placed first, then all remaining NPCs in stable ID
+    order. This preserves story relevance and makes results independent of DB
+    row order.
+    """
+    entries = sorted(
+        profiles,
+        key=lambda entry: (0 if active_events.get(entry["id"]) else 1, entry["id"]),
+    )
+    occupied: list[tuple[int, int]] = []
+    result: dict[str, str | None] = {}
+    for entry in entries:
+        npc_id, profile = entry["id"], entry["profile"]
+        home = HOME_SLOTS[homes[npc_id]]
+        candidates = _location_candidates(player_id, npc_id, profile, active_events.get(npc_id), day)
+        selected = next(
+            (candidate for candidate in candidates if _far_enough(_coordinates(candidate, home), occupied)),
+            None,
+        )
+        # The five widely spaced fallback anchors make this branch unreachable
+        # for the product's five-character cap. Keep a defensive best-effort path
+        # if legacy/corrupt data contains more residents.
+        if selected is None and not _far_enough(home, occupied):
+            selected = max(
+                candidates,
+                key=lambda candidate: _nearest_distance_squared(_coordinates(candidate, home), occupied),
+            )
+        result[npc_id] = selected
+        occupied.append(_coordinates(selected, home))
+    return result
+
+
 def city_payload(player_id: str, profiles: Sequence[dict], active_events: dict[str, object],
                  on_date: date | None = None) -> dict:
     day = on_date or date.today()
     assignments = _home_assignments(player_id, [entry["id"] for entry in profiles])
+    daily_assignments = _daily_assignments(player_id, profiles, active_events, assignments, day)
     residents = []
     for entry in profiles:
         npc_id, profile = entry["id"], entry["profile"]
         slot = assignments[npc_id]
         home_x, home_y = HOME_SLOTS[slot]
         active = active_events.get(npc_id)
-        location_id = daily_location_id(player_id, npc_id, profile, active, day)
+        location_id = daily_assignments[npc_id]
         location = LOCATION_BY_ID.get(location_id) if location_id else None
         residents.append({
             "id": npc_id,
