@@ -14,6 +14,9 @@ type Props={
  place:string
  locationId?:string
  locationKind?:string
+ locationBackground?:string
+ locationBackgroundPosition?:string
+ locationAccent?:string
  messages:Message[]
  liveSpeech:LiveSpeech|null
  historyOpen:boolean
@@ -44,11 +47,12 @@ function sceneKind(kind?:string,locationId?:string){
  return palettes[kind||'']?kind||'default':'default'
 }
 
-function LocationBackdrop({kind,locationId,place}:{kind?:string;locationId?:string;place:string}){
+function LocationBackdrop({kind,locationId,place,background,backgroundPosition,accent}:{kind?:string;locationId?:string;place:string;background?:string;backgroundPosition?:string;accent?:string}){
  const variant=sceneKind(kind,locationId),palette=palettes[variant]||palettes.default
- const style={'--scene-deep':palette[0],'--scene-light':palette[1],'--scene-shadow':palette[2],'--scene-accent':palette[3]} as CSSProperties
+ const style={'--scene-deep':palette[0],'--scene-light':palette[1],'--scene-shadow':palette[2],'--scene-accent':accent||palette[3]} as CSSProperties
  const outdoors=variant==='park'||variant==='waterfront'||variant==='plaza'
  return <div className={`location-backdrop location-backdrop--${variant}`} style={style} aria-hidden="true">
+  {background&&<div className="location-backdrop__art" style={{backgroundImage:`url(${background})`,backgroundPosition:backgroundPosition||'center'}}/>}
   <svg viewBox="0 0 1200 720" preserveAspectRatio="xMidYMid slice">
    <defs><linearGradient id="scene-sky" x1="0" y1="0" x2="0" y2="1"><stop stopColor="var(--scene-light)"/><stop offset="1" stopColor="var(--scene-deep)"/></linearGradient><linearGradient id="scene-floor" x1="0" y1="0" x2="1" y2="1"><stop stopColor="var(--scene-shadow)"/><stop offset="1" stopColor="var(--scene-deep)"/></linearGradient><filter id="scene-soft"><feGaussianBlur stdDeviation="10"/></filter></defs>
    <rect width="1200" height="720" fill="url(#scene-sky)"/>
@@ -95,13 +99,13 @@ function PlayerHead({name}:{name:string}){
  </motion.div>
 }
 
-export function ConversationScene({npcName,playerName,avatar,mood,place,locationId,locationKind,messages,liveSpeech,historyOpen,olderCount,showOlder,ready,story,editLabel,agentLabel,language,onHistoryOpen,onHistoryClose,onToggleOlder,onEdit,onAgent}:Props){
+export function ConversationScene({npcName,playerName,avatar,mood,place,locationId,locationKind,locationBackground,locationBackgroundPosition,locationAccent,messages,liveSpeech,historyOpen,olderCount,showOlder,ready,story,editLabel,agentLabel,language,onHistoryOpen,onHistoryClose,onToggleOlder,onEdit,onAgent}:Props){
  const reduce=useReducedMotion(),historyRef=useRef<HTMLDivElement>(null),zh=language==='zh'
  useEffect(()=>{if(historyOpen)requestAnimationFrame(()=>historyRef.current?.scrollTo({top:historyRef.current.scrollHeight,behavior:reduce?'auto':'smooth'}))},[historyOpen,messages,reduce])
  useEffect(()=>{if(!historyOpen)return;const close=(event:KeyboardEvent)=>{if(event.key==='Escape')onHistoryClose()};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close)},[historyOpen,onHistoryClose])
  const ghost=messages.slice(-5)
  return <section className={`dialogue-scene ${historyOpen?'is-reviewing':''}`} aria-label={zh?`在${place}与${npcName}对话`:`Conversation with ${npcName} at ${place}`}>
-  <LocationBackdrop kind={locationKind} locationId={locationId} place={place}/>
+  <LocationBackdrop kind={locationKind} locationId={locationId} place={place} background={locationBackground} backgroundPosition={locationBackgroundPosition} accent={locationAccent}/>
   <button className="scene-history-trigger" type="button" onClick={onHistoryOpen} aria-label={zh?'打开历史回顾':'Open conversation history'}><span>{zh?'点击背景回顾对话':'Tap the scene to revisit your conversation'}</span></button>
   <div className="scene-ghost-history" aria-hidden="true">{ghost.map((item,index)=><motion.p key={`${item.created_at||'ghost'}-${index}`} layout initial={reduce?false:{opacity:0,y:10}} animate={{opacity:1,y:0}} className={item.speaker}><b>{item.speaker==='player'?playerName:npcName}</b>{item.text||'…'}</motion.p>)}</div>
   <PlayerHead name={playerName}/>

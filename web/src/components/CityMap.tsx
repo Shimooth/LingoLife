@@ -1,15 +1,19 @@
-import {useCallback,useEffect,useRef,useState} from 'react'
+import {AnimatePresence,motion,useReducedMotion} from 'motion/react'
+import {useCallback,useEffect,useMemo,useRef,useState} from 'react'
+import {DISTRICT_NAMES,getLocationAsset,HOME_LOCATION_ASSET,locationCopy,type LocationAsset} from '../locationAssets'
+import {LocationIcon} from './LocationIcon'
 import './CityMap.css'
 import './CityMapExpansion.css'
 
 export type CityPoint={x:number;y:number}
-export type CityLandmark=CityPoint&{id:string;name:string;kind:string}
+export type CityLandmark=CityPoint&{id:string;name:string;kind:string;district?:string}
 export type CityCharacter={
   id:string
   name:string
   avatar?:{skin?:string;hairColor?:string;outfitColor?:string}
   home:CityPoint
   location:CityPoint&{place?:string}
+  locationId?:string
 }
 export type CityMapProps={
   characters:CityCharacter[]
@@ -36,10 +40,10 @@ function Portrait({character}:{character:CityCharacter}){
  return <span className="city-avatar__portrait" aria-hidden><svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="23" fill="#fff"/><path d="M7 48q2-17 17-17t17 17" fill={outfit}/><ellipse cx="24" cy="22" rx="11" ry="13" fill={skin}/><path d="M13 22Q12 7 24 7t12 15q-8-2-14-8-2 6-9 8" fill={hair}/><circle cx="20" cy="22" r="1"/><circle cx="28" cy="22" r="1"/><path d="M21 27q3 2 6 0" fill="none" stroke="#9b5960" strokeWidth="1.5" strokeLinecap="round"/></svg></span>
 }
 
-function HomeMarker({character,homeLabel}:{character:CityCharacter;homeLabel:string}){
- return <span className="city-home-marker" style={{left:`${clamp(character.home.x,24,1176)/12}%`,top:`${clamp(character.home.y,35,725)/7.6}%`}} aria-label={`${character.name} · ${homeLabel}`}>
+function HomeMarker({character,homeLabel,onSelect}:{character:CityCharacter;homeLabel:string;onSelect:()=>void}){
+ return <button type="button" className="city-home-marker" style={{left:`${clamp(character.home.x,24,1176)/12}%`,top:`${clamp(character.home.y,35,725)/7.6}%`}} aria-label={`${character.name} · ${homeLabel}`} onClick={onSelect}>
   <i aria-hidden/><small>{character.name} · {homeLabel}</small>
- </span>
+ </button>
 }
 
 function CharacterPin({character,active,onSelect}:{character:CityCharacter;active:boolean;onSelect:()=>void}){
@@ -67,9 +71,12 @@ function CityFabric(){
 }
 
 export function CityMap({characters,landmarks=DEFAULT_LANDMARKS,activeCharacterId,language='zh',onCharacterClick,className=''}:CityMapProps){
+  const reduce=useReducedMotion()
   const viewport=useRef<HTMLDivElement>(null)
   const gesture=useRef<{x:number;y:number;panX:number;panY:number;distance?:number}|null>(null)
   const [view,setView]=useState({zoom:1,panX:0,panY:0})
+  const [selected,setSelected]=useState<{landmark?:CityLandmark;homeCharacter?:CityCharacter}|null>(null)
+  const selectedAsset=useMemo(()=>selected?.landmark?getLocationAsset(selected.landmark.id,selected.landmark.kind):selected?.homeCharacter?HOME_LOCATION_ASSET:null,[selected])
   const copy=language==='zh'?{label:'城市地图',home:'家',park:'绿荫公园',cafe:'橘子咖啡',school:'城市学校',hospital:'中心医院',shops:'商业街',station:'中央车站',office:'创意办公区',river:'月川',plus:'放大地图',minus:'缩小地图',reset:'重置地图'}:{label:'City map',home:'Home',park:'Green Park',cafe:'Orange Café',school:'City School',hospital:'Central Hospital',shops:'Market Street',station:'Central Station',office:'Creative District',river:'Moon River',plus:'Zoom in',minus:'Zoom out',reset:'Reset map'}
   const constrain=useCallback((zoom:number,panX:number,panY:number)=>{
     const el=viewport.current;if(!el)return {zoom,panX,panY}
@@ -78,6 +85,7 @@ export function CityMap({characters,landmarks=DEFAULT_LANDMARKS,activeCharacterI
   },[])
   const zoomBy=useCallback((amount:number)=>setView(v=>constrain(clamp(v.zoom+amount,MIN_ZOOM,MAX_ZOOM),v.panX,v.panY)),[constrain])
   useEffect(()=>{const el=viewport.current;if(!el)return;const wheel=(event:WheelEvent)=>{event.preventDefault();zoomBy(event.deltaY>0?-.16:.16)};el.addEventListener('wheel',wheel,{passive:false});return()=>el.removeEventListener('wheel',wheel)},[zoomBy])
+  useEffect(()=>{if(!selected)return;const close=(event:KeyboardEvent)=>{if(event.key==='Escape')setSelected(null)};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close)},[selected])
   const distance=(touches:React.TouchList)=>Math.hypot(touches[0].clientX-touches[1].clientX,touches[0].clientY-touches[1].clientY)
   return <section className={`city-map ${className}`} aria-label={copy.label}>
     <div className="city-map__toolbar" aria-label={copy.label}>
@@ -104,20 +112,39 @@ export function CityMap({characters,landmarks=DEFAULT_LANDMARKS,activeCharacterI
           <g className="city-roads city-roads--minor"><path d="M18 167H1180M18 336H1180M20 542H1170M18 681H1170M181 8V690M394 12V738M724 12V740M948 9V735M1176 140v575"/><path d="M5 278h395m315 0h480M209 525v179m820-210v200"/></g>
           <g className="city-road-lines"><path d="M64 144H1130M68 365H1140M160 38V555M412 35V680M705 45V700M968 40V570"/><path d="M35 510L1160 250"/></g>
           <CityFabric/>
-          <g filter="url(#city-shadow)"><path className="city-park" d="M462 186h190q25 0 25 25v105q0 25-25 25H462q-25 0-25-25V211q0-25 25-25z"/><g className="city-tree"><circle cx="491" cy="234" r="17"/><circle cx="536" cy="284" r="20"/><circle cx="620" cy="228" r="22"/><circle cx="639" cy="296" r="15"/></g><path d="M462 314q90-102 187-99" fill="none" stroke="#e4d9ae" strokeWidth="9" strokeLinecap="round"/><text x="550" y="250" className="city-place-label">{copy.park}</text></g>
-          <g className="city-building city-school" transform="translate(212 188)"><path d="M0 40L76 0l76 40v105H0z"/><path d="M18 62h116M61 65h31v80H61z"/><text x="76" y="172">{copy.school}</text></g>
-          <g className="city-building city-hospital" transform="translate(1014 178)"><rect width="130" height="140" rx="10"/><path d="M65 32v66M32 65h66"/><text x="65" y="168">{copy.hospital}</text></g>
-          <g className="city-building city-cafe" transform="translate(224 402)"><rect width="132" height="100" rx="12"/><path d="M0 30h132M22 0v30m24-30v30m24-30v30m24-30v30"/><path d="M45 56h43v24H45m43-18h9q13 0 3 14H88" fill="none"/><text x="66" y="128">{copy.cafe}</text></g>
-          <g className="city-building city-shops" transform="translate(758 400)"><rect width="160" height="104" rx="10"/><path d="M0 32h160M22 0v32m38-32v32m40-32v32m38-32v32M27 58h42v46M92 58h42v25H92z"/><text x="80" y="132">{copy.shops}</text></g>
-          <g className="city-building city-office" transform="translate(756 186)"><rect width="162" height="132" rx="8"/><path d="M28 22h28v24H28zm52 0h28v24H80zm52 0h16v24h-16zM28 62h28v24H28zm52 0h28v24H80zm52 0h16v24h-16z"/><text x="81" y="160">{copy.office}</text></g>
-          <g className="city-building city-station" transform="translate(488 434)"><path d="M0 82V18Q0 0 18 0h164q18 0 18 18v64z"/><path d="M22 82V34h156v48M47 18h106M50 103h100M62 82l-14 42m90-42 14 42"/><text x="100" y="153">{copy.station}</text></g>
+          <g filter="url(#city-shadow)"><path className="city-park" d="M462 186h190q25 0 25 25v105q0 25-25 25H462q-25 0-25-25V211q0-25 25-25z"/><g className="city-tree"><circle cx="491" cy="234" r="17"/><circle cx="536" cy="284" r="20"/><circle cx="620" cy="228" r="22"/><circle cx="639" cy="296" r="15"/></g><path d="M462 314q90-102 187-99" fill="none" stroke="#e4d9ae" strokeWidth="9" strokeLinecap="round"/></g>
+          <g className="city-building city-school" transform="translate(212 188)"><path d="M0 40L76 0l76 40v105H0z"/><path d="M18 62h116M61 65h31v80H61z"/></g>
+          <g className="city-building city-hospital" transform="translate(1014 178)"><rect width="130" height="140" rx="10"/><path d="M65 32v66M32 65h66"/></g>
+          <g className="city-building city-cafe" transform="translate(224 402)"><rect width="132" height="100" rx="12"/><path d="M0 30h132M22 0v30m24-30v30m24-30v30m24-30v30"/><path d="M45 56h43v24H45m43-18h9q13 0 3 14H88" fill="none"/></g>
+          <g className="city-building city-shops" transform="translate(758 400)"><rect width="160" height="104" rx="10"/><path d="M0 32h160M22 0v32m38-32v32m40-32v32m38-32v32M27 58h42v46M92 58h42v25H92z"/></g>
+          <g className="city-building city-office" transform="translate(756 186)"><rect width="162" height="132" rx="8"/><path d="M28 22h28v24H28zm52 0h28v24H80zm52 0h16v24h-16zM28 62h28v24H28zm52 0h28v24H80zm52 0h16v24h-16z"/></g>
+          <g className="city-building city-station" transform="translate(488 434)"><path d="M0 82V18Q0 0 18 0h164q18 0 18 18v64z"/><path d="M22 82V34h156v48M47 18h106M50 103h100M62 82l-14 42m90-42 14 42"/></g>
         </svg>
-        <div className="city-landmarks" aria-hidden>{landmarks.filter(place=>!['central_station','business_center','city_hospital','riverside_park','old_town_market','moonlight_cafe','community_school'].includes(place.id)).map(place=><span key={place.id} className={`city-landmark city-landmark--${place.kind}`} style={{left:`${place.x/12}%`,top:`${place.y/7.6}%`}}><i>{place.kind==='culture'?'◆':place.kind==='education'?'▤':place.kind==='fitness'?'●':place.kind==='civic'?'★':place.kind==='health'?'+':'•'}</i><b>{place.name}</b></span>)}</div>
+        <div className="city-landmarks">{landmarks.map(place=>{const resource=getLocationAsset(place.id,place.kind);return <motion.button type="button" key={place.id} className={`city-landmark city-landmark--${place.kind}`} style={{left:`${place.x/12}%`,top:`${place.y/7.6}%`,'--landmark-accent':resource.accent} as React.CSSProperties} onClick={()=>setSelected({landmark:place})} aria-label={language==='zh'?`查看${place.name}详情`:`View details for ${place.name}`} whileHover={reduce?undefined:{y:-3,scale:1.07}} whileTap={reduce?undefined:{scale:.94}}><i><LocationIcon name={resource.icon}/></i><b>{place.name}</b></motion.button>})}</div>
         <div className="city-map__characters">
-          {characters.slice(0,5).map(c=><HomeMarker key={`home-${c.id}`} character={c} homeLabel={copy.home}/>)}
+          {characters.slice(0,5).map(c=><HomeMarker key={`home-${c.id}`} character={c} homeLabel={copy.home} onSelect={()=>setSelected({homeCharacter:c})}/>)}
           {characters.slice(0,5).map(c=><CharacterPin key={c.id} character={c} active={c.id===activeCharacterId} onSelect={()=>onCharacterClick(c.id)}/>)}
         </div>
       </div>
     </div>
+    <AnimatePresence>{selected&&selectedAsset&&<LocationDetail asset={selectedAsset} landmark={selected.landmark} homeCharacter={selected.homeCharacter} characters={characters} language={language} reduce={Boolean(reduce)} onClose={()=>setSelected(null)} onCharacterClick={onCharacterClick}/>}</AnimatePresence>
   </section>
+}
+
+function LocationDetail({asset,landmark,homeCharacter,characters,language,reduce,onClose,onCharacterClick}:{asset:LocationAsset;landmark?:CityLandmark;homeCharacter?:CityCharacter;characters:CityCharacter[];language:'zh'|'en';reduce:boolean;onClose:()=>void;onCharacterClick:(id:string)=>void}){
+ const base=locationCopy(asset,language)
+ const name=homeCharacter?(language==='zh'?`${homeCharacter.name}的家`:`${homeCharacter.name}'s home`):landmark?.name||base.name
+ const district=landmark?.district?(DISTRICT_NAMES[landmark.district]?.[language]||landmark.district):(language==='zh'?'住宅区':'Residential district')
+ const visitors=homeCharacter?[homeCharacter]:characters.filter(character=>character.locationId===landmark?.id)
+ return <motion.aside className="location-detail" role="dialog" aria-modal="false" aria-label={language==='zh'?`${name}详情`:`Details for ${name}`} initial={reduce?{opacity:0}:{opacity:0,x:35,scale:.96}} animate={{opacity:1,x:0,scale:1}} exit={reduce?{opacity:0}:{opacity:0,x:25,scale:.97}} transition={{type:'spring',stiffness:230,damping:26}}>
+  <div className="location-detail__hero" style={{'--location-accent':asset.accent,backgroundImage:`linear-gradient(180deg,transparent 25%,${asset.accent}e6 100%),url(${asset.image})`,backgroundPosition:asset.imagePosition||'center'} as React.CSSProperties}>
+   <button type="button" onClick={onClose} aria-label={language==='zh'?'关闭地点详情':'Close location details'}>×</button>
+   <div><span><LocationIcon name={asset.icon}/></span><p>{base.category}</p><h2>{name}</h2><small>⌖ {district}</small></div>
+  </div>
+  <div className="location-detail__body">
+   <p>{homeCharacter?(language==='zh'?`这是 ${homeCharacter.name} 在城市里的私人空间。熟悉的收藏、窗景和生活痕迹，让这里的谈话更放松也更亲密。`:`This is ${homeCharacter.name}'s private place in the city. Familiar objects and everyday traces make conversations here quieter and more intimate.`):base.description}</p>
+   <dl><div><dt>{language==='zh'?'开放时间':'Hours'}</dt><dd>{base.hours}</dd></div><div><dt>{language==='zh'?'地点特色':'Highlights'}</dt><dd>{base.highlights.join(' · ')}</dd></div></dl>
+   <section><h3>{language==='zh'?'今天在这里':'Here today'}</h3>{visitors.length?<div className="location-detail__visitors">{visitors.map(character=><button type="button" key={character.id} onClick={()=>{onClose();onCharacterClick(character.id)}}><Portrait character={character}/><span><b>{character.name}</b><small>{language==='zh'?'开始对话':'Start conversation'} →</small></span></button>)}</div>:<p className="location-detail__quiet">{language==='zh'?'现在没有熟悉的角色在这里，也许晚些时候再来看看。':'No familiar character is here right now. The place may feel different later.'}</p>}</section>
+  </div>
+ </motion.aside>
 }
