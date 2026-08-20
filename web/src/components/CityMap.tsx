@@ -135,7 +135,7 @@ function LocationDetail({asset,landmark,homeCharacter,characters,language,reduce
  const base=locationCopy(asset,language)
  const name=homeCharacter?(language==='zh'?`${homeCharacter.name}的家`:`${homeCharacter.name}'s home`):landmark?.name||base.name
  const district=landmark?.district?(DISTRICT_NAMES[landmark.district]?.[language]||landmark.district):(language==='zh'?'住宅区':'Residential district')
- const visitors=homeCharacter?[homeCharacter]:characters.filter(character=>character.locationId===landmark?.id)
+ const visitors=homeCharacter?(homeCharacter.locationId?[]:[homeCharacter]):characters.filter(character=>character.locationId===landmark?.id)
  return <motion.aside className="location-detail" role="dialog" aria-modal="false" aria-label={language==='zh'?`${name}详情`:`Details for ${name}`} initial={reduce?{opacity:0}:{opacity:0,x:35,scale:.96}} animate={{opacity:1,x:0,scale:1}} exit={reduce?{opacity:0}:{opacity:0,x:25,scale:.97}} transition={{type:'spring',stiffness:230,damping:26}}>
   <div className="location-detail__hero" style={{'--location-accent':asset.accent,backgroundImage:`linear-gradient(180deg,transparent 25%,${asset.accent}e6 100%),url(${asset.image})`,backgroundPosition:asset.imagePosition||'center'} as React.CSSProperties}>
    <button type="button" onClick={onClose} aria-label={language==='zh'?'关闭地点详情':'Close location details'}>×</button>
