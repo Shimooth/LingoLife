@@ -1,6 +1,6 @@
 import {AnimatePresence,motion,useReducedMotion} from 'motion/react'
 import {useCallback,useEffect,useMemo,useRef,useState} from 'react'
-import {DISTRICT_NAMES,getLocationAsset,HOME_LOCATION_ASSET,locationCopy,type LocationAsset} from '../locationAssets'
+import {DISTRICT_NAMES,getHomeLocationAsset,getLocationAsset,locationCopy,type LocationAsset} from '../locationAssets'
 import {LocationIcon} from './LocationIcon'
 import './CityMap.css'
 import './CityMapExpansion.css'
@@ -76,7 +76,7 @@ export function CityMap({characters,landmarks=DEFAULT_LANDMARKS,activeCharacterI
   const gesture=useRef<{x:number;y:number;panX:number;panY:number;distance?:number}|null>(null)
   const [view,setView]=useState({zoom:1,panX:0,panY:0})
   const [selected,setSelected]=useState<{landmark?:CityLandmark;homeCharacter?:CityCharacter}|null>(null)
-  const selectedAsset=useMemo(()=>selected?.landmark?getLocationAsset(selected.landmark.id,selected.landmark.kind):selected?.homeCharacter?HOME_LOCATION_ASSET:null,[selected])
+  const selectedAsset=useMemo(()=>selected?.landmark?getLocationAsset(selected.landmark.id,selected.landmark.kind):selected?.homeCharacter?getHomeLocationAsset(selected.homeCharacter.id):null,[selected])
   const copy=language==='zh'?{label:'城市地图',home:'家',park:'绿荫公园',cafe:'橘子咖啡',school:'城市学校',hospital:'中心医院',shops:'商业街',station:'中央车站',office:'创意办公区',river:'月川',plus:'放大地图',minus:'缩小地图',reset:'重置地图'}:{label:'City map',home:'Home',park:'Green Park',cafe:'Orange Café',school:'City School',hospital:'Central Hospital',shops:'Market Street',station:'Central Station',office:'Creative District',river:'Moon River',plus:'Zoom in',minus:'Zoom out',reset:'Reset map'}
   const constrain=useCallback((zoom:number,panX:number,panY:number)=>{
     const el=viewport.current;if(!el)return {zoom,panX,panY}
@@ -120,7 +120,8 @@ export function CityMap({characters,landmarks=DEFAULT_LANDMARKS,activeCharacterI
           <g className="city-building city-office" transform="translate(756 186)"><rect width="162" height="132" rx="8"/><path d="M28 22h28v24H28zm52 0h28v24H80zm52 0h16v24h-16zM28 62h28v24H28zm52 0h28v24H80zm52 0h16v24h-16z"/></g>
           <g className="city-building city-station" transform="translate(488 434)"><path d="M0 82V18Q0 0 18 0h164q18 0 18 18v64z"/><path d="M22 82V34h156v48M47 18h106M50 103h100M62 82l-14 42m90-42 14 42"/></g>
         </svg>
-        <div className="city-landmarks">{landmarks.map(place=>{const resource=getLocationAsset(place.id,place.kind);return <motion.button type="button" key={place.id} className={`city-landmark city-landmark--${place.kind}`} style={{left:`${place.x/12}%`,top:`${place.y/7.6}%`,'--landmark-accent':resource.accent} as React.CSSProperties} onClick={()=>setSelected({landmark:place})} aria-label={language==='zh'?`查看${place.name}详情`:`View details for ${place.name}`} whileHover={reduce?undefined:{y:-3,scale:1.07}} whileTap={reduce?undefined:{scale:.94}}><i><LocationIcon name={resource.icon}/></i><b>{place.name}</b></motion.button>})}</div>
+        <img className="city-map__art" src="/assets/city/city-map-v2.jpg" alt="" draggable={false}/>
+        <div className="city-landmarks">{landmarks.map(place=>{const resource=getLocationAsset(place.id,place.kind);return <button type="button" key={place.id} className={`city-landmark city-landmark--${place.kind}`} style={{left:`${place.x/12}%`,top:`${place.y/7.6}%`,'--landmark-accent':resource.accent} as React.CSSProperties} onClick={()=>setSelected({landmark:place})} aria-label={language==='zh'?`查看${place.name}详情`:`View details for ${place.name}`}><i><LocationIcon name={resource.icon}/></i><b>{place.name}</b></button>})}</div>
         <div className="city-map__characters">
           {characters.slice(0,5).map(c=><HomeMarker key={`home-${c.id}`} character={c} homeLabel={copy.home} onSelect={()=>setSelected({homeCharacter:c})}/>)}
           {characters.slice(0,5).map(c=><CharacterPin key={c.id} character={c} active={c.id===activeCharacterId} onSelect={()=>onCharacterClick(c.id)}/>)}

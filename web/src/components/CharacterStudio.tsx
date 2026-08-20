@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { NpcProfile } from "../types";
 import { AvatarStage } from "./AvatarStage";
@@ -10,24 +10,18 @@ const opts = {
     "bun",
     "braids",
     "curly",
-    "ponytail",
-    "locs",
-    "straight",
-    "mohawk",
   ],
-  face: ["oval", "round", "heart", "square", "long"],
-  eyes: ["round", "soft", "wide", "sleepy"],
+  face: ["oval", "round", "heart", "square"],
+  eyes: ["soft", "round", "sleepy", "wide"],
   brows: ["soft", "straight", "bold"],
   nose: ["button", "long", "wide"],
-  mouth: ["soft", "smile", "bold", "tiny"],
+  mouth: ["soft", "tiny", "bold", "smile"],
   outfit: [
     "sweater",
     "hoodie",
     "blazer",
     "dress",
-    "tee",
     "overalls",
-    "cardigan",
     "jacket",
   ],
   accessory: [
@@ -35,13 +29,32 @@ const opts = {
     "glasses",
     "earrings",
     "headphones",
-    "hairclip",
-    "necklace",
     "scarf",
     "beanie",
-    "freckles",
   ],
 };
+
+const sheets:Record<string,{src:string;columns:number;rows:number;order:string[]}>= {
+  hair:{src:'/assets/avatar/v2/hair.jpg',columns:3,rows:2,order:opts.hair},
+  face:{src:'/assets/avatar/v2/face.jpg',columns:2,rows:2,order:opts.face},
+  eyes:{src:'/assets/avatar/v2/eyes.jpg',columns:4,rows:1,order:opts.eyes},
+  brows:{src:'/assets/avatar/v2/brows.jpg',columns:3,rows:1,order:opts.brows},
+  nose:{src:'/assets/avatar/v2/nose.jpg',columns:3,rows:1,order:opts.nose},
+  mouth:{src:'/assets/avatar/v2/mouth.jpg',columns:4,rows:1,order:opts.mouth},
+  outfit:{src:'/assets/avatar/v2/outfit.jpg',columns:3,rows:2,order:opts.outfit},
+  accessory:{src:'/assets/avatar/v2/accessory.jpg',columns:3,rows:2,order:opts.accessory},
+};
+
+function previewStyle(group:string,value:string):CSSProperties|undefined{
+  const sheet=sheets[group],index=sheet?.order.indexOf(value)??-1
+  if(!sheet||index<0)return undefined
+  const column=index%sheet.columns,row=Math.floor(index/sheet.columns)
+  return {
+    backgroundImage:`url(${sheet.src})`,
+    backgroundSize:`${sheet.columns*100}% ${sheet.rows*100}%`,
+    backgroundPosition:`${sheet.columns===1?0:(column/(sheet.columns-1))*100}% ${sheet.rows===1?0:(row/(sheet.rows-1))*100}%`,
+  }
+}
 const label = (s: string) => s[0].toUpperCase() + s.slice(1);
 const zhLabels: Record<string, string> = {
   hair: "发型",
@@ -310,7 +323,10 @@ export function CharacterStudio({
                         />
                       </label>
                     </div>
-                    {Object.entries(opts).map(([key, values]) => (
+                    {Object.entries(opts).map(([key, curated]) => {
+                      const current=String(profile.avatar[key as keyof typeof profile.avatar]||'')
+                      const values=curated.includes(current)?curated:[current,...curated]
+                      return (
                       <fieldset key={key}>
                         <legend>{optionLabel(key)}</legend>
                         <div className="preset-grid">
@@ -326,13 +342,13 @@ export function CharacterStudio({
                               onClick={() => avatar(key, x)}
                               key={x}
                             >
-                              <i className={`preset-dot ${key}-${x}`} />
-                              {optionLabel(x, key)}
+                              <i className={`preset-art ${previewStyle(key,x)?'':'is-legacy'}`} style={previewStyle(key,x)} />
+                              <span>{optionLabel(x, key)}</span>
                             </button>
                           ))}
                         </div>
                       </fieldset>
-                    ))}
+                    )})}
                   </>
                 )}
               </motion.div>

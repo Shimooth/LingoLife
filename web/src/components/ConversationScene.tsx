@@ -43,7 +43,7 @@ const palettes:Record<string,[string,string,string,string]>={
 }
 
 function sceneKind(kind?:string,locationId?:string){
- if(locationId?.startsWith('home-'))return 'home'
+ if(locationId==='home'||locationId?.startsWith('home-'))return 'home'
  return palettes[kind||'']?kind||'default':'default'
 }
 
