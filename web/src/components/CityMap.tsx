@@ -2,6 +2,8 @@ import {AnimatePresence,motion,useReducedMotion} from 'motion/react'
 import {useCallback,useEffect,useMemo,useRef,useState} from 'react'
 import {DISTRICT_NAMES,getHomeLocationAsset,getLocationAsset,locationCopy,type LocationAsset} from '../locationAssets'
 import {LocationIcon} from './LocationIcon'
+import {AvatarStage} from './AvatarStage'
+import type {AvatarConfig} from '../types'
 import './CityMap.css'
 import './CityMapExpansion.css'
 
@@ -10,7 +12,7 @@ export type CityLandmark=CityPoint&{id:string;name:string;kind:string;district?:
 export type CityCharacter={
   id:string
   name:string
-  avatar?:{skin?:string;hairColor?:string;outfitColor?:string}
+  avatar?:AvatarConfig
   home:CityPoint
   location:CityPoint&{place?:string}
   locationId?:string
@@ -36,8 +38,7 @@ const DEFAULT_LANDMARKS:CityLandmark[]=[
 const clamp=(value:number,min:number,max:number)=>Math.min(max,Math.max(min,value))
 
 function Portrait({character}:{character:CityCharacter}){
- const skin=character.avatar?.skin||'#e8b99a',hair=character.avatar?.hairColor||'#4b342d',outfit=character.avatar?.outfitColor||'#738ca5'
- return <span className="city-avatar__portrait" aria-hidden><svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="23" fill="#fff"/><path d="M7 48q2-17 17-17t17 17" fill={outfit}/><ellipse cx="24" cy="22" rx="11" ry="13" fill={skin}/><path d="M13 22Q12 7 24 7t12 15q-8-2-14-8-2 6-9 8" fill={hair}/><circle cx="20" cy="22" r="1"/><circle cx="28" cy="22" r="1"/><path d="M21 27q3 2 6 0" fill="none" stroke="#9b5960" strokeWidth="1.5" strokeLinecap="round"/></svg></span>
+ return <span className="city-avatar__portrait" aria-hidden>{character.avatar&&<AvatarStage avatar={character.avatar} preview="head" compact staticPreview/>}</span>
 }
 
 function HomeMarker({character,homeLabel,onSelect}:{character:CityCharacter;homeLabel:string;onSelect:()=>void}){
@@ -76,7 +77,7 @@ export function CityMap({characters,landmarks=DEFAULT_LANDMARKS,activeCharacterI
   const gesture=useRef<{x:number;y:number;panX:number;panY:number;distance?:number}|null>(null)
   const [view,setView]=useState({zoom:1,panX:0,panY:0})
   const [selected,setSelected]=useState<{landmark?:CityLandmark;homeCharacter?:CityCharacter}|null>(null)
-  const selectedAsset=useMemo(()=>selected?.landmark?getLocationAsset(selected.landmark.id,selected.landmark.kind):selected?.homeCharacter?getHomeLocationAsset(selected.homeCharacter.id):null,[selected])
+  const selectedAsset=useMemo(()=>selected?.landmark?getLocationAsset(selected.landmark.id,selected.landmark.kind):selected?.homeCharacter?getHomeLocationAsset(selected.homeCharacter.id,selected.homeCharacter.avatar?.homeBackground):null,[selected])
   const copy=language==='zh'?{label:'城市地图',home:'家',park:'绿荫公园',cafe:'橘子咖啡',school:'城市学校',hospital:'中心医院',shops:'商业街',station:'中央车站',office:'创意办公区',river:'月川',plus:'放大地图',minus:'缩小地图',reset:'重置地图'}:{label:'City map',home:'Home',park:'Green Park',cafe:'Orange Café',school:'City School',hospital:'Central Hospital',shops:'Market Street',station:'Central Station',office:'Creative District',river:'Moon River',plus:'Zoom in',minus:'Zoom out',reset:'Reset map'}
   const constrain=useCallback((zoom:number,panX:number,panY:number)=>{
     const el=viewport.current;if(!el)return {zoom,panX,panY}

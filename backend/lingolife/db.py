@@ -39,7 +39,7 @@ class Database:
             CREATE TABLE IF NOT EXISTS messages (
               id INTEGER PRIMARY KEY AUTOINCREMENT, player_id TEXT NOT NULL,
               speaker TEXT NOT NULL CHECK(speaker IN ('player','npc')), text TEXT NOT NULL,
-              npc_id TEXT NOT NULL DEFAULT 'emma',
+              npc_id TEXT NOT NULL DEFAULT 'emma', translation TEXT,
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
             CREATE TABLE IF NOT EXISTS chat_requests (
               idempotency_key TEXT NOT NULL, player_id TEXT NOT NULL, response_json TEXT NOT NULL,
@@ -123,6 +123,8 @@ class Database:
             columns = {row[1] for row in self._connection.execute("PRAGMA table_info(messages)")}
             if "npc_id" not in columns:
                 self._connection.execute("ALTER TABLE messages ADD COLUMN npc_id TEXT NOT NULL DEFAULT 'emma'")
+            if "translation" not in columns:
+                self._connection.execute("ALTER TABLE messages ADD COLUMN translation TEXT")
             user_columns = {row[1] for row in self._connection.execute("PRAGMA table_info(users)")}
             if "password_hash" not in user_columns:
                 self._connection.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
@@ -367,7 +369,7 @@ class Database:
     def messages(self, player_id: str, limit: int, npc_id: str = "emma") -> list[dict]:
         self.ensure_player(player_id)
         rows = self._connection.execute(
-            "SELECT speaker,text,created_at FROM (SELECT id,speaker,text,created_at FROM messages WHERE player_id=? AND npc_id=? ORDER BY id DESC LIMIT ?) ORDER BY id",
+            "SELECT speaker,text,translation,created_at FROM (SELECT id,speaker,text,translation,created_at FROM messages WHERE player_id=? AND npc_id=? ORDER BY id DESC LIMIT ?) ORDER BY id",
             (player_id, npc_id, limit),
         ).fetchall()
         return [dict(r) for r in rows]
@@ -404,7 +406,7 @@ class Database:
                 (stats["relationship"], stats["mood"], stats["english_xp"], player_id, npc_id),
             )
             self._connection.execute("INSERT INTO messages(player_id,speaker,text,npc_id) VALUES (?,'player',?,?)", (player_id, message, npc_id))
-            self._connection.execute("INSERT INTO messages(player_id,speaker,text,npc_id) VALUES (?,'npc',?,?)", (player_id, response["npc_reply"], npc_id))
+            self._connection.execute("INSERT INTO messages(player_id,speaker,text,npc_id,translation) VALUES (?,'npc',?,?,?)", (player_id, response["npc_reply"], npc_id, response.get("npc_reply_zh") or None))
             self._connection.execute("INSERT INTO chat_requests(idempotency_key,player_id,response_json) VALUES (?,?,?)", (key, player_id, json.dumps(response)))
             return response, True
 

@@ -41,10 +41,10 @@ DEFAULT_NPC_PROFILE = {
     "personality": ["kind", "thoughtful", "quiet"],
     "interests": ["art", "music", "photography"], "occupation": "Designer",
     "longTermGoal": "Open a small independent design studio.",
-    "avatar": {"hair": "waves", "hairColor": "#4A3028", "face": "oval",
-               "skin": "#E8B895", "eyes": "soft", "brows": "soft", "nose": "button",
-               "mouth": "soft", "outfit": "sweater", "outfitColor": "#A86555",
-               "accessory": "none", "strokes": []},
+    "avatar": {"hair": "swoop", "hairColor": "#563B38", "face": "round",
+               "skin": "#EFB99B", "eyes": "dot", "brows": "soft", "nose": "button",
+               "mouth": "smile", "outfit": "jumper", "outfitColor": "#D87362",
+               "pants": "balloon", "accessory": "none", "homeBackground": "bubble", "strokes": []},
 }
 
 
@@ -419,6 +419,11 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
                 next_stage = event_engine.stage(transition.event)
                 result.npc_reply = f"{result.npc_reply}\n\n{next_stage.prompt.replace('Emma', profile['name'])}"
             active = transition.event
+        if hasattr(provider, "translate"):
+            try:
+                result.npc_reply_zh = provider.translate(result.npc_reply)  # type: ignore[attr-defined]
+            except Exception:
+                result.npc_reply_zh = ""
         understandable = result.english_feedback.is_understandable
         rel = max(-10, min(10, max(-5, min(5, result.relationship_change)) + event_rel))
         if rel > 0:

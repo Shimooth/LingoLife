@@ -103,6 +103,18 @@ Dialogue rules:
 
 
 class FallbackProvider:
+    _translations = {
+        "I heard you. Give me a moment—I would rather answer honestly than say something easy.": "我听到了。给我一点时间——我宁愿认真回答，也不想随便说些轻巧的话。",
+        "I'm really glad you asked. I have plenty to say, but I want to hear what sparked the question too.": "我真的很高兴你问了。我有好多话想说，不过我也想知道是什么让你想到这个问题。",
+        "I do have an answer. Whether it's a sensible one is still under review.": "答案我是有的，至于它靠不靠谱，还在审核中。",
+        "I'm still finding the words, but I do want to talk about it with you.": "我还在想该怎么说，但我确实想和你聊聊这件事。",
+        "I have a clear opinion about that, though I want to hear your side too.": "对此我有很明确的看法，不过我也想听听你的想法。",
+        "I'm glad you brought that up. I've been thinking about it more than I expected.": "很高兴你提起这件事。我发现自己想它的次数比预料中还多。",
+    }
+
+    def translate(self, text: str) -> str:
+        return self._translations.get(text.strip(), "")
+
     def analyze(self, message: str, context: dict[str, Any] | None = None) -> TurnAnalysis:
         understandable = re.search(r"[A-Za-z]", message) is not None
         lowered = message.lower()
@@ -244,6 +256,25 @@ class DeepSeekProvider:
                 last_error = error
         raise RuntimeError("analysis unavailable") from last_error
 
+    def translate(self, text: str) -> str:
+        payload = {"model": self.settings.deepseek_model,
+                   "messages": [{"role": "system", "content": "Translate the following NPC dialogue into natural Simplified Chinese. Preserve the character's tone, humor, names, paragraph breaks, and implied emotion. Return only the translation, with no labels or explanation."},
+                                {"role": "user", "content": text}],
+                   "max_tokens": min(600, self.settings.deepseek_max_tokens), "temperature": 0.1}
+        last_error: Exception | None = None
+        for _ in range(self.settings.deepseek_retry_count + 1):
+            try:
+                with httpx.Client(timeout=self.settings.deepseek_timeout) as client:
+                    response = client.post(self.endpoint, headers=self.headers, json=payload)
+                    response.raise_for_status()
+                    translated = response.json()["choices"][0]["message"]["content"].strip()
+                if not translated:
+                    raise ValueError("empty translation")
+                return translated[:1200]
+            except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as error:
+                last_error = error
+        raise RuntimeError("translation unavailable") from last_error
+
     def reply(self, message: str, stats: Stats, history: list[dict],
               context: dict[str, Any] | None = None,
               on_chunk: Callable[[str], None] | None = None) -> AIResult:
@@ -290,3 +321,13 @@ class ResilientProvider:
         result = self.fallback.reply(message, stats, history, context) if context is not None else self.fallback.reply(message, stats, history)
         if on_chunk: on_chunk(result.npc_reply)
         return result
+
+    def translate(self, text: str) -> str:
+        if self.primary and hasattr(self.primary, "translate"):
+            try:
+                return self.primary.translate(text)  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        if hasattr(self.fallback, "translate"):
+            return self.fallback.translate(text)  # type: ignore[attr-defined]
+        return ""

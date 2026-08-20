@@ -83,27 +83,27 @@ export const LOCATION_ASSETS:Record<KnownLocationId,LocationAsset>=Object.fromEn
 ) as Record<KnownLocationId,LocationAsset>
 
 export const HOME_LOCATION_ASSET:LocationAsset={
- id:'home',icon:'community',image:'/assets/locations/v2/home-artistic.jpg',accent:'#b66e4d',
+ id:'home',icon:'community',image:'/assets/homes/v3/bubble.jpg',accent:'#b66e4d',
  zh:{name:'角色的家',category:'私人住宅',description:'属于角色自己的生活空间。熟悉的物件和窗外的城市，让在这里发生的对话更私人也更放松。',hours:'私人空间',highlights:['城市窗景','生活收藏','安静客厅']},
  en:{name:'Character home',category:'Private residence',description:'A personal living space where familiar objects and the city outside make conversations quieter and more intimate.',hours:'Private',highlights:['City view','Personal collection','Quiet living room']},
 }
 
-const HOME_SCENES=['artistic','bookish','modern','garden','harbor'] as const
+const HOME_SCENES=['bubble','book','plant','retro','space','harbor'] as const
 
-export function getHomeLocationAsset(npcId?:string|null):LocationAsset{
+export function getHomeLocationAsset(npcId?:string|null,selected?:string|null):LocationAsset{
  const key=npcId||'default'
  let hash=2166136261
  for(let index=0;index<key.length;index++)hash=Math.imul(hash^key.charCodeAt(index),16777619)
- const scene=HOME_SCENES[Math.abs(hash)%HOME_SCENES.length]
- return {...HOME_LOCATION_ASSET,image:`/assets/locations/v2/home-${scene}.jpg`}
+ const scene=HOME_SCENES.includes(selected as typeof HOME_SCENES[number])?selected as typeof HOME_SCENES[number]:HOME_SCENES[Math.abs(hash)%HOME_SCENES.length]
+ return {...HOME_LOCATION_ASSET,image:`/assets/homes/v3/${scene}.jpg`}
 }
 
 export const DISTRICT_NAMES:Record<string,{zh:string;en:string}>={
  'North Gate':{zh:'北门区',en:'North Gate'},'Canal Quarter':{zh:'运河区',en:'Canal Quarter'},Eastside:{zh:'东区',en:'Eastside'},'West End':{zh:'西区',en:'West End'},Central:{zh:'市中心',en:'Central'},'Old Town':{zh:'老城区',en:'Old Town'},Harbor:{zh:'港湾区',en:'Harbor'},Southbank:{zh:'南岸区',en:'Southbank'},Southwest:{zh:'西南区',en:'Southwest'},'University Quarter':{zh:'大学区',en:'University Quarter'},Greenway:{zh:'绿道区',en:'Greenway'},
 }
 
-export function getLocationAsset(id?:string|null,kind?:string,npcId?:string|null):LocationAsset{
- if(id?.startsWith('home-')||id==='home')return getHomeLocationAsset(npcId||id)
+export function getLocationAsset(id?:string|null,kind?:string,npcId?:string|null,homeBackground?:string|null):LocationAsset{
+ if(id?.startsWith('home-')||id==='home')return getHomeLocationAsset(npcId||id,homeBackground)
  if(id&&id in LOCATION_ASSETS)return LOCATION_ASSETS[id as KnownLocationId]
  const fallbackId=KNOWN_LOCATION_IDS.find(candidate=>{
   const scene=seeds[candidate].scene

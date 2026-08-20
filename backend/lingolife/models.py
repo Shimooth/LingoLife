@@ -59,6 +59,7 @@ class TurnAnalysis(BaseModel):
 
 class AIResult(BaseModel):
     npc_reply: str = Field(min_length=1, max_length=1000)
+    npc_reply_zh: str = Field(default="", max_length=1200)
     relationship_change: int
     mood_change: int
     english_xp_change: int
@@ -101,7 +102,9 @@ class AvatarConfig(BaseModel):
     mouth: str = Field(max_length=24)
     outfit: str = Field(max_length=24)
     outfitColor: str = Field(pattern=r"^#[0-9A-Fa-f]{6}$")
+    pants: str = Field(default="balloon", max_length=24)
     accessory: str = Field(max_length=24)
+    homeBackground: str = Field(default="bubble", max_length=24)
     strokes: list[AvatarStroke] = Field(default_factory=list, max_length=20)
 
 

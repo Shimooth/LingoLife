@@ -1,63 +1,24 @@
-import { useState, type CSSProperties } from "react";
+import { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { NpcProfile } from "../types";
 import { AvatarStage } from "./AvatarStage";
 const opts = {
-  hair: [
-    "waves",
-    "bob",
-    "pixie",
-    "bun",
-    "braids",
-    "curly",
-  ],
-  face: ["oval", "round", "heart", "square"],
-  eyes: ["soft", "round", "sleepy", "wide"],
-  brows: ["soft", "straight", "bold"],
-  nose: ["button", "long", "wide"],
-  mouth: ["soft", "tiny", "bold", "smile"],
-  outfit: [
-    "sweater",
-    "hoodie",
-    "blazer",
-    "dress",
-    "overalls",
-    "jacket",
-  ],
-  accessory: [
-    "none",
-    "glasses",
-    "earrings",
-    "headphones",
-    "scarf",
-    "beanie",
-  ],
+  hair: ["swoop", "bob", "sprout", "bun", "curls", "shaggy"],
+  face: ["round", "oval", "bean", "square", "heart"],
+  eyes: ["dot", "oval", "sleepy", "wink", "sparkle", "curious"],
+  brows: ["tiny", "straight", "worried", "bold", "soft"],
+  nose: ["button", "dot", "triangle", "round", "heart"],
+  mouth: ["smile", "open", "cat", "pout", "tongue"],
+  outfit: ["jumper", "hoodie", "jacket", "playful", "overalls", "blazer"],
+  pants: ["balloon", "straight", "wide", "shorts", "cargo", "pleated"],
+  accessory: ["none", "glasses", "earrings", "headphones", "scarf", "beanie", "frogclip"],
 };
-
-const sheets:Record<string,{src:string;columns:number;rows:number;order:string[]}>= {
-  hair:{src:'/assets/avatar/v2/hair.jpg',columns:3,rows:2,order:opts.hair},
-  face:{src:'/assets/avatar/v2/face.jpg',columns:2,rows:2,order:opts.face},
-  eyes:{src:'/assets/avatar/v2/eyes.jpg',columns:4,rows:1,order:opts.eyes},
-  brows:{src:'/assets/avatar/v2/brows.jpg',columns:3,rows:1,order:opts.brows},
-  nose:{src:'/assets/avatar/v2/nose.jpg',columns:3,rows:1,order:opts.nose},
-  mouth:{src:'/assets/avatar/v2/mouth.jpg',columns:4,rows:1,order:opts.mouth},
-  outfit:{src:'/assets/avatar/v2/outfit.jpg',columns:3,rows:2,order:opts.outfit},
-  accessory:{src:'/assets/avatar/v2/accessory.jpg',columns:3,rows:2,order:opts.accessory},
-};
-
-function previewStyle(group:string,value:string):CSSProperties|undefined{
-  const sheet=sheets[group],index=sheet?.order.indexOf(value)??-1
-  if(!sheet||index<0)return undefined
-  const column=index%sheet.columns,row=Math.floor(index/sheet.columns)
-  return {
-    backgroundImage:`url(${sheet.src})`,
-    backgroundSize:`${sheet.columns*100}% ${sheet.rows*100}%`,
-    backgroundPosition:`${sheet.columns===1?0:(column/(sheet.columns-1))*100}% ${sheet.rows===1?0:(row/(sheet.rows-1))*100}%`,
-  }
-}
+const skinTones=["#f7d7c4","#efb99b","#d99772","#b87352","#8b533b","#57372f"]
+const homeBackgrounds=["bubble","book","plant","retro","space","harbor"]
 const label = (s: string) => s[0].toUpperCase() + s.slice(1);
 const zhLabels: Record<string, string> = {
   hair: "发型",
+  swoop:"俏皮侧分",sprout:"小芽短发",curls:"蓬松卷发",shaggy:"乱翘短发",
   waves: "波浪长发",
   bob: "波波头",
   pixie: "精灵短发",
@@ -83,9 +44,11 @@ const zhLabels: Record<string, string> = {
   nose: "鼻子",
   button: "小巧",
   mouth: "嘴型",
+  open:"开心张嘴",cat:"猫猫嘴",pout:"嘟嘟嘴",tongue:"吐舌头",
   smile: "微笑",
   tiny: "小巧",
   outfit: "穿着",
+  jumper:"软糯套头衫",playful:"搞怪上衣",
   sweater: "毛衣",
   hoodie: "连帽衫",
   blazer: "西装",
@@ -94,6 +57,7 @@ const zhLabels: Record<string, string> = {
   overalls: "背带装",
   cardigan: "开衫",
   jacket: "夹克",
+  pants:"裤子",balloon:"灯笼裤",shorts:"短裤",cargo:"工装裤",pleated:"百褶短裤",
   accessory: "配饰",
   none: "无",
   glasses: "眼镜",
@@ -104,6 +68,9 @@ const zhLabels: Record<string, string> = {
   scarf: "围巾",
   beanie: "针织帽",
   freckles: "雀斑",
+  frogclip:"青蛙发夹",
+  bean:"豆豆脸",dot:"小圆点",sparkle:"星星眼",curious:"好奇眼",wink:"眨眨眼",worried:"八字眉",triangle:"三角鼻",
+  homeBackground:"家的背景",bubble:"糖果阁楼",book:"书香小窝",plant:"奇趣植物屋",retro:"复古波普屋",space:"太空舱",harbor:"海港木屋",
 };
 const enLabels: Record<string, string> = {
   hair: "Hair",
@@ -114,6 +81,7 @@ const enLabels: Record<string, string> = {
   mouth: "Mouth",
   outfit: "Clothing",
   accessory: "Accessories",
+  pants:"Pants",homeBackground:"Home background",swoop:"Swoop",sprout:"Sprout",curls:"Curls",shaggy:"Shaggy",bean:"Bean",dot:"Dot",sparkle:"Sparkle",curious:"Curious",wink:"Wink",tiny:"Tiny",worried:"Worried",triangle:"Triangle",open:"Open smile",cat:"Cat mouth",pout:"Pout",tongue:"Tongue",jumper:"Jumper",playful:"Playful top",balloon:"Balloon pants",straight:"Straight pants",shorts:"Shorts",cargo:"Cargo pants",pleated:"Pleated shorts",frogclip:"Frog clip",bubble:"Candy loft",book:"Book nest",plant:"Plant lab",retro:"Retro pop",space:"Space pod",harbor:"Harbor cabin",
   hairclip: "Hair clip",
   tee: "T-shirt",
   locs: "Locs",
@@ -122,13 +90,19 @@ const zhContext: Record<string, string> = {
   "face.round": "圆脸",
   "face.long": "长形脸",
   "eyes.round": "圆眼",
+  "eyes.oval": "椭圆眼",
+  "eyes.dot": "豆豆眼",
   "eyes.soft": "柔和眼",
   "eyes.wide": "大眼",
   "brows.soft": "柔和眉",
   "brows.bold": "浓眉",
+  "brows.tiny": "小弯眉",
+  "pants.straight": "直筒裤",
   "nose.button": "小巧鼻",
   "nose.long": "修长鼻",
   "nose.wide": "宽鼻",
+  "nose.round": "圆圆鼻",
+  "nose.heart": "爱心鼻",
   "mouth.soft": "自然嘴型",
   "mouth.bold": "饱满嘴型",
   "mouth.tiny": "小巧嘴型",
@@ -162,6 +136,7 @@ export function CharacterStudio({
     onChange({ ...profile, [key]: value });
   const avatar = (key: string, value: string) =>
     set("avatar", { ...profile.avatar, [key]: value, strokes: [] });
+  const previewAvatar=(key:string,value:string)=>({...profile.avatar,[key]:value,strokes:[]})
   const optionLabel = (value: string, group?: string) =>
     zh
       ? zhContext[`${group}.${value}`] || zhLabels[value] || value
@@ -295,15 +270,13 @@ export function CharacterStudio({
                   </>
                 ) : (
                   <>
-                    <div className="field-grid">
-                      <label>
-                        {zh ? "肤色" : "Skin tone"}
-                        <input
-                          type="color"
-                          value={profile.avatar.skin}
-                          onChange={(e) => avatar("skin", e.target.value)}
-                        />
-                      </label>
+                    <fieldset>
+                      <legend>{zh ? "肤色" : "Skin tone"}</legend>
+                      <div className="avatar-option-grid avatar-option-grid--skin">
+                        {skinTones.map(value=><button type="button" className={profile.avatar.skin===value?'chosen':''} onClick={()=>avatar('skin',value)} key={value}><span className="skin-swatch" style={{background:value}}/><AvatarStage avatar={previewAvatar('skin',value)} preview="head" compact staticPreview/><span>{zh?'肤色':'Tone'}</span></button>)}
+                      </div>
+                    </fieldset>
+                    <div className="field-grid color-fields">
                       <label>
                         {zh ? "发色" : "Hair color"}
                         <input
@@ -329,9 +302,10 @@ export function CharacterStudio({
                       return (
                       <fieldset key={key}>
                         <legend>{optionLabel(key)}</legend>
-                        <div className="preset-grid">
+                        <div className="avatar-option-grid">
                           {values.map((x) => (
                             <button
+                              type="button"
                               className={
                                 profile.avatar[
                                   key as keyof typeof profile.avatar
@@ -342,13 +316,19 @@ export function CharacterStudio({
                               onClick={() => avatar(key, x)}
                               key={x}
                             >
-                              <i className={`preset-art ${previewStyle(key,x)?'':'is-legacy'}`} style={previewStyle(key,x)} />
+                              <span className="avatar-option-visual"><AvatarStage avatar={previewAvatar(key,x)} preview={key==='outfit'||key==='pants'?'body':'head'} compact staticPreview/></span>
                               <span>{optionLabel(x, key)}</span>
                             </button>
                           ))}
                         </div>
                       </fieldset>
                     )})}
+                    <fieldset>
+                      <legend>{optionLabel('homeBackground')}</legend>
+                      <div className="home-option-grid">
+                        {homeBackgrounds.map(value=><button type="button" className={profile.avatar.homeBackground===value?'chosen':''} onClick={()=>avatar('homeBackground',value)} key={value}><img src={`/assets/homes/v3/${value}.jpg`} alt=""/><span>{optionLabel(value,'homeBackground')}</span></button>)}
+                      </div>
+                    </fieldset>
                   </>
                 )}
               </motion.div>
