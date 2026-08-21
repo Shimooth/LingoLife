@@ -1,5 +1,6 @@
 import {Canvas} from '@react-three/fiber'
 import {Suspense,useCallback,useEffect,useMemo,useRef,useState} from 'react'
+import * as THREE from 'three'
 import type {CityCharacter,CityLandmark} from '../../components/CityMap'
 import {WorldErrorBoundary,supportsWebGL} from './WorldErrorBoundary'
 import {WorldScene,type WorldQuality,type WorldViewMode} from './WorldScene'
@@ -115,8 +116,8 @@ export function WorldObserver3D({characters,landmarks=DEFAULT_WORLD_LANDMARKS,ac
      onCreated={({gl})=>{
       gl.setClearColor(timeSlot==='evening'?'#21384f':timeSlot==='morning'?'#bce7e2':'#9bd4e0',1)
       gl.outputColorSpace='srgb'
-      gl.toneMapping=3
-      gl.toneMappingExposure=1.05
+      gl.toneMapping=THREE.ACESFilmicToneMapping
+      gl.toneMappingExposure=.88
       gl.domElement.addEventListener('webglcontextlost',event=>{event.preventDefault();setWebglAvailable(false)},{once:true})
       // Keep the loading cover until at least one complete scene frame has had
       // a chance to reach the compositor.

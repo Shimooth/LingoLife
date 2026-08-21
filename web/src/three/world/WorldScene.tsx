@@ -239,7 +239,7 @@ function Lighthouse({night,quality}:{night:boolean;quality:Quality}){
 function Clouds({reducedMotion}:{reducedMotion:boolean}){
  return <group>
   {[[-9,8,-8],[7,10,-7],[12,7,2]].map(([x,y,z],index)=><Float key={index} speed={reducedMotion?0:.45+index*.1} rotationIntensity={reducedMotion?0:.08} floatIntensity={reducedMotion?0:.45}>
-   <group position={[x,y,z]} scale={1+index*.18}>{[-.55,0,.55].map((offset,part)=><mesh key={part} position={[offset,part%2*.15,0]}><sphereGeometry args={[.72+(part%2)*.16,12,8]}/><meshStandardMaterial color="#fffaf0" transparent opacity={.82}/></mesh>)}</group>
+   <group position={[x,y,z]} scale={1+index*.18}>{[-.55,0,.55].map((offset,part)=><mesh key={part} position={[offset,part%2*.15,0]}><sphereGeometry args={[.72+(part%2)*.16,12,8]}/><meshStandardMaterial color="#fffaf0" transparent opacity={.64} depthWrite={false} roughness={1}/></mesh>)}</group>
   </Float>)}
  </group>
 }
@@ -249,10 +249,9 @@ export function WorldScene({characters,landmarks,activeCharacterId,language,time
  const stars=useMemo(()=>night?(quality==='high'?140:60):0,[night,quality])
  return <>
   <color attach="background" args={[night?'#21384f':timeSlot==='morning'?'#bce7e2':'#9bd4e0']}/>
-  <fog attach="fog" args={[night?'#29465a':'#b9dfda',32,68]}/>
-  <ambientLight intensity={night ? .55 : 1.15} color={night?'#7891c8':'#fff7e8'}/>
-  <hemisphereLight args={[night?'#5b72aa':'#e7fbff',night?'#25362f':'#6a8c58',night ? .7 : 1.25]}/>
-  <directionalLight castShadow={quality==='high'} position={night?[-9,15,-8]:[10,18,8]} intensity={night ? .8 : 2.1} color={night?'#91a7dd':'#fff0cd'} shadow-mapSize={[quality==='high'?1536:512,quality==='high'?1536:512]} shadow-camera-far={50} shadow-camera-left={-22} shadow-camera-right={22} shadow-camera-top={18} shadow-camera-bottom={-18}/>
+  <ambientLight intensity={night ? .38 : .58} color={night?'#7891c8':'#fff7e8'}/>
+  <hemisphereLight args={[night?'#5b72aa':'#d9f3f4',night?'#25362f':'#58774d',night ? .52 : .78]}/>
+  <directionalLight castShadow={quality==='high'} position={night?[-9,15,-8]:[10,18,8]} intensity={night ? .72 : 1.45} color={night?'#91a7dd':'#ffe8bd'} shadow-mapSize={[quality==='high'?1536:512,quality==='high'?1536:512]} shadow-camera-far={50} shadow-camera-left={-22} shadow-camera-right={22} shadow-camera-top={18} shadow-camera-bottom={-18}/>
   <Ocean night={night} reducedMotion={reducedMotion}/>
   <IslandBase/>
   <DistrictGround language={language}/>
