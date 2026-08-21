@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 
 from .ai import DeepSeekProvider, DialogueProvider, ResilientProvider
 from .agent import (advance_goal, advance_relationship, advance_runtime, compile_goal,
@@ -610,7 +611,13 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
     # escape this directory and serves index.html for the root request.
     web_root = Path(settings.web_root).resolve()
     if web_root.is_dir():
-        app.mount("/", StaticFiles(directory=web_root, html=True), name="web")
+        # Compress only static files, leaving the NDJSON chat stream untouched.
+        static_app = GZipMiddleware(
+            StaticFiles(directory=web_root, html=True),
+            minimum_size=1024,
+            compresslevel=6,
+        )
+        app.mount("/", static_app, name="web")
 
     app.state.db = db
     return app

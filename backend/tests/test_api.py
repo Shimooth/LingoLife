@@ -43,6 +43,22 @@ def test_serves_web_root_and_static_assets_without_shadowing_api(tmp_path):
     assert c.get("/api/v1/health").json() == {"status": "ok", "version": "0.1.0"}
 
 
+def test_compresses_large_static_assets_without_touching_api(tmp_path):
+    web_root = tmp_path / "web" / "dist"
+    web_root.mkdir(parents=True)
+    (web_root / "index.html").write_text("<main>LingoLife</main>", encoding="utf-8")
+    (web_root / "large.js").write_text("const island = true;\n" * 500, encoding="utf-8")
+    c = client(tmp_path, web_root=web_root)
+
+    asset = c.get("/large.js", headers={"Accept-Encoding": "gzip"})
+    health = c.get("/api/v1/health", headers={"Accept-Encoding": "gzip"})
+
+    assert asset.status_code == 200
+    assert asset.headers["content-encoding"] == "gzip"
+    assert health.status_code == 200
+    assert "content-encoding" not in health.headers
+
+
 def test_missing_web_root_leaves_api_available(tmp_path):
     c = client(tmp_path)
     assert c.get("/").status_code == 404
