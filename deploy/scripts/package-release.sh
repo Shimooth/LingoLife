@@ -27,6 +27,6 @@ TEMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TEMP_DIR}"' EXIT
 ARCHIVE="${TEMP_DIR}/release.tar"
 git archive --format=tar --output="${ARCHIVE}" HEAD
-tar --append --file="${ARCHIVE}" web/dist
+COPYFILE_DISABLE=1 tar --format ustar --no-xattrs --append --file="${ARCHIVE}" web/dist
 mv "${ARCHIVE}" "${TARGET}"
 echo "Release package created: ${TARGET} (${REVISION})"
