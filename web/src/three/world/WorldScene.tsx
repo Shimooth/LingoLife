@@ -29,6 +29,10 @@ const BUILDING_COLORS=[
  ['#f7dfbd','#c56d5c'],['#d9ebdd','#668c7b'],['#e9d9ef','#8675a3'],['#f4e7bf','#d08b5d'],
 ] as const
 
+// World Html overlays intentionally have no distanceFactor. Drei multiplies
+// it by orthographic camera zoom, which can turn a small label into a
+// viewport-covering translucent surface.
+
 function CameraRig({focus,focusVersion,reducedMotion,viewMode}:{focus:WorldPoint|null;focusVersion:number;reducedMotion:boolean;viewMode:WorldViewMode}){
  const {camera}=useThree()
  const controls=useRef<ComponentRef<typeof OrbitControls>>(null)
@@ -125,7 +129,7 @@ function DistrictGround({language}:{language:'zh'|'en'}){
    <mesh rotation-x={-Math.PI/2} scale={[index===0 ? 1.2 : 1,index===5 ? .75 : 1,1]}>
     <circleGeometry args={[3.5,32]}/><meshStandardMaterial color={district.color} transparent opacity={.34} depthWrite={false}/>
    </mesh>
-   <Html center position={[0,.12,0]} distanceFactor={24} zIndexRange={[5,0]}>
+   <Html center position={[0,.12,0]} zIndexRange={[5,0]}>
     <span className="world3d-district-label" style={{'--district-accent':district.accent} as React.CSSProperties}>{district.name[language]}</span>
    </Html>
   </group>)}
@@ -187,7 +191,7 @@ function LandmarkBuilding({landmark,selected,language,night,quality,onSelect}:{l
    <planeGeometry args={[.22,.3]}/><meshBasicMaterial color={night?colors.glow:'#79b9c8'} toneMapped={false}/>
   </mesh>)}
   <mesh position={[0,.22,width*.42+.015]}><planeGeometry args={[.3,.44]}/><meshStandardMaterial color={colors.roof}/></mesh>
-  {(selected||hovered)&&<Html center position={[0,height+1.15,0]} distanceFactor={15} zIndexRange={[30,0]}>
+  {(selected||hovered)&&<Html center position={[0,height+1.15,0]} zIndexRange={[30,0]}>
    <button type="button" className={`world3d-pin world3d-pin--place ${selected?'is-selected':''}`} onClick={event=>{event.stopPropagation();onSelect()}}>
     <span aria-hidden>{landmark.kind==='nature'?'✦':'⌂'}</span><strong>{landmark.name}</strong><small>{language==='zh'?'查看地点':'View place'}</small>
    </button>
@@ -206,7 +210,7 @@ function CharacterMarker({character,active,language,onClick}:{character:CityChar
   <mesh position-y={-.54} rotation-x={-Math.PI/2}>
    <ringGeometry args={[.42,.53,24]}/><meshBasicMaterial color={active?'#ff8d5b':color} transparent opacity={active ? .95 : .62} side={THREE.DoubleSide}/>
   </mesh>
-  <Html center position={[0,.35,0]} distanceFactor={13} zIndexRange={[40,10]}>
+  <Html center position={[0,.35,0]} zIndexRange={[40,10]}>
    <button type="button" className={`world3d-character ${active?'is-active':''}`} style={{'--character-color':color} as React.CSSProperties} onClick={event=>{event.stopPropagation();onClick()}} aria-label={`${language==='zh'?'与':'Talk to '}${character.name}${language==='zh'?'互动':''}`}>
     <span aria-hidden>{initials}<i/></span>
     <b>{character.name}</b>
