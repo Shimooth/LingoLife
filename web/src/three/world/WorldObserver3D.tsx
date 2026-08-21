@@ -20,6 +20,10 @@ export type WorldObserver3DProps={
  className?:string
 }
 
+const HIGH_DPR:[number,number]=[1,1.75]
+const LOW_DPR:[number,number]=[1,1.25]
+const WEBGL_OPTIONS={antialias:true,alpha:false,powerPreference:'high-performance' as const}
+
 type Copy={
  title:string;subtitle:string;loading:string;overview:string;top:string;isometric:string;quality:string
  instructions:string;fallbackTitle:string;fallbackBody:string;places:string;residents:string;close:string
@@ -47,8 +51,10 @@ export function WorldObserver3D({characters,landmarks=DEFAULT_WORLD_LANDMARKS,ac
  const reducedMotion=useMemo(()=>typeof window!=='undefined'&&window.matchMedia('(prefers-reduced-motion: reduce)').matches,[])
  const [webglAvailable,setWebglAvailable]=useState(supportsWebGL)
  const [ready,setReady]=useState(false)
- const [autoQuality,setAutoQuality]=useState<'low'|'high'>(()=>typeof navigator!=='undefined'&&(navigator.hardwareConcurrency??8)<=4?'low':'high')
- const quality=qualityMode==='auto'?autoQuality:qualityMode
+ // Auto deliberately means full quality. Runtime quality oscillation can force
+ // WebGL buffers to resize repeatedly on some devices and produce visible
+ // white/green flashes. Only an explicit battery-saver choice lowers detail.
+ const quality=qualityMode==='low'?'low':'high'
  const [selectedLandmark,setSelectedLandmark]=useState<CityLandmark|null>(null)
  const [dismissedActiveLandmarkId,setDismissedActiveLandmarkId]=useState<string>()
  const previousActiveLandmarkId=useRef(activeLandmarkId)
@@ -102,22 +108,25 @@ export function WorldObserver3D({characters,landmarks=DEFAULT_WORLD_LANDMARKS,ac
     <Canvas
      orthographic
      camera={{position:[24,24,28],zoom:32,near:.1,far:120}}
-     dpr={[1,quality==='high'?1.75:1.25]}
+     dpr={quality==='high'?HIGH_DPR:LOW_DPR}
      shadows={quality==='high'}
      frameloop={reducedMotion?'demand':'always'}
-     gl={{antialias:quality==='high',alpha:false,powerPreference:'high-performance'}}
+     gl={WEBGL_OPTIONS}
      onCreated={({gl})=>{
+      gl.setClearColor(timeSlot==='evening'?'#21384f':timeSlot==='morning'?'#bce7e2':'#9bd4e0',1)
       gl.outputColorSpace='srgb'
       gl.toneMapping=3
       gl.toneMappingExposure=1.05
       gl.domElement.addEventListener('webglcontextlost',event=>{event.preventDefault();setWebglAvailable(false)},{once:true})
-      setReady(true)
+      // Keep the loading cover until at least one complete scene frame has had
+      // a chance to reach the compositor.
+      requestAnimationFrame(()=>requestAnimationFrame(()=>setReady(true)))
      }}
      onPointerMissed={()=>setSelectedLandmark(null)}
      fallback={<WorldFallback characters={characters} landmarks={landmarks} language={language} onCharacterClick={onCharacterClick} onLandmarkClick={onLandmarkClick}/>}
     >
      <Suspense fallback={null}>
-      <WorldScene characters={characters} landmarks={landmarks.slice(0,40)} activeCharacterId={activeCharacterId} language={language} timeSlot={timeSlot} reducedMotion={reducedMotion} selectedLandmarkId={activeLandmarkId!==dismissedActiveLandmarkId?activeLandmarkId:selectedLandmark?.id} focus={externalFocus??focus} focusVersion={focusVersion+(activeLandmarkId!==dismissedActiveLandmarkId&&activeLandmarkId?hashString(activeLandmarkId):0)} viewMode={viewMode} qualityMode={qualityMode} onCharacterClick={selectCharacter} onLandmarkSelect={selectLandmark} onQualityChange={setAutoQuality}/>
+      <WorldScene characters={characters} landmarks={landmarks.slice(0,40)} activeCharacterId={activeCharacterId} language={language} timeSlot={timeSlot} reducedMotion={reducedMotion} selectedLandmarkId={activeLandmarkId!==dismissedActiveLandmarkId?activeLandmarkId:selectedLandmark?.id} focus={externalFocus??focus} focusVersion={focusVersion+(activeLandmarkId!==dismissedActiveLandmarkId&&activeLandmarkId?hashString(activeLandmarkId):0)} viewMode={viewMode} quality={quality} onCharacterClick={selectCharacter} onLandmarkSelect={selectLandmark}/>
      </Suspense>
     </Canvas>
     <div className="world3d-controls" aria-label={copy.title}>

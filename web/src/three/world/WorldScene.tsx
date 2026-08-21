@@ -1,4 +1,4 @@
-import {Float,Html,Instances,Instance,OrbitControls,PerformanceMonitor,Sparkles,useCursor} from '@react-three/drei'
+import {Float,Html,Instances,Instance,OrbitControls,Sparkles,useCursor} from '@react-three/drei'
 import {useFrame,useThree,type ThreeEvent} from '@react-three/fiber'
 import {useEffect,useMemo,useRef,useState,type ComponentRef} from 'react'
 import * as THREE from 'three'
@@ -20,10 +20,9 @@ type SceneProps={
  focus:WorldPoint|null
  focusVersion:number
  viewMode:WorldViewMode
- qualityMode:WorldQuality
+ quality:Quality
  onCharacterClick:(id:string)=>void
  onLandmarkSelect:(landmark:CityLandmark)=>void
- onQualityChange:(quality:Quality)=>void
 }
 
 const BUILDING_COLORS=[
@@ -245,18 +244,10 @@ function Clouds({reducedMotion}:{reducedMotion:boolean}){
  </group>
 }
 
-export function WorldScene({characters,landmarks,activeCharacterId,language,timeSlot,reducedMotion,selectedLandmarkId,focus,focusVersion,viewMode,qualityMode,onCharacterClick,onLandmarkSelect,onQualityChange}:SceneProps){
- const [autoQuality,setAutoQuality]=useState<Quality>(()=>typeof navigator!=='undefined'&&(navigator.hardwareConcurrency??8)<=4?'low':'high')
- const quality=qualityMode==='auto'?autoQuality:qualityMode
+export function WorldScene({characters,landmarks,activeCharacterId,language,timeSlot,reducedMotion,selectedLandmarkId,focus,focusVersion,viewMode,quality,onCharacterClick,onLandmarkSelect}:SceneProps){
  const night=timeSlot==='evening'
- const setSceneQuality=(next:Quality)=>{
-  if(qualityMode!=='auto')return
-  setAutoQuality(next)
-  onQualityChange(next)
- }
  const stars=useMemo(()=>night?(quality==='high'?140:60):0,[night,quality])
  return <>
-  {qualityMode==='auto'&&<PerformanceMonitor flipflops={2} onDecline={()=>setSceneQuality('low')} onIncline={()=>setSceneQuality('high')}/>} 
   <color attach="background" args={[night?'#21384f':timeSlot==='morning'?'#bce7e2':'#9bd4e0']}/>
   <fog attach="fog" args={[night?'#29465a':'#b9dfda',32,68]}/>
   <ambientLight intensity={night ? .55 : 1.15} color={night?'#7891c8':'#fff7e8'}/>
