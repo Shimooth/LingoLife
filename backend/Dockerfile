@@ -1,4 +1,5 @@
 FROM node:22-alpine AS web-builder
+ENV NODE_OPTIONS=--max-old-space-size=768
 WORKDIR /build/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
