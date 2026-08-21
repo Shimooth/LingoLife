@@ -12,6 +12,10 @@ ENV_FILE=/etc/lingolife/lingolife.env
 test -f "${COMPOSE_FILE}"
 test -r "${ENV_FILE}" || { echo "Cannot read ${ENV_FILE}." >&2; exit 1; }
 test "$(stat -c '%a' "${ENV_FILE}")" = 640 || { echo "${ENV_FILE} must have mode 0640." >&2; exit 1; }
+test -s "${PROJECT_ROOT}/web/dist/index.html" || {
+  echo "Prebuilt web/dist is missing. Build and package the release on the development machine." >&2
+  exit 1
+}
 docker compose version >/dev/null
 cd "${PROJECT_ROOT}"
 SOURCE_REVISION="$(git rev-parse --short HEAD 2>/dev/null || echo archive)"

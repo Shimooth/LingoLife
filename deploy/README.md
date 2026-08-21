@@ -80,9 +80,24 @@ DNS 名称不能保护管理端。上线前必须确认未认证请求无法读�
 Docker 组实际上拥有 root 级权限。本方案用它让部署账户无需保存 sudo 密码即可更新服务；
 不要用此账户运行不可信代码，并严格限制 SSH 私钥访问。
 
+## 本地构建发布包
+
+3D 前端必须在开发机或 CI 构建，VPS 不运行 Node/Vite，也不会因为服务器内存大小降低视觉效果。发布脚本会将已提交的源码与本地 `web/dist` 组合成一个不含秘密的 tar 包：
+
+```bash
+deploy/scripts/package-release.sh
+```
+
+该脚本依次执行 `npm ci`、ESLint、TypeScript 和 Vite 生产构建，然后输出
+`/tmp/lingolife-<commit>.tar`。Docker 运行镜像只复制该构建产物。若发布目录缺少
+`web/dist/index.html`，VPS 部署会立即停止且不会替换现有容器。
+
+画面质量由玩家设备上的 `auto / high / low` 设置决定；VPS 只传输静态资源和运行 API。
+
 ## 更新与回滚
 
-更新前创建 SQLite 在线一致性备份，并记录当前 commit 与镜像 ID：
+先在本地运行 `package-release.sh` 并上传/解压同一发布包到
+`/opt/lingolife/app` 和 `/home/lingolife-deploy/lingolife-release`。更新前创建 SQLite 在线一致性备份，并记录当前 commit 与镜像 ID：
 
 ```bash
 cd /opt/lingolife/app
