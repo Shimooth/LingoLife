@@ -26,12 +26,14 @@ from .agent import (advance_goal, advance_relationship, advance_runtime, compile
                     compile_persona, daily_plan, dialogue_objective, initial_relationship,
                     initial_runtime, time_slot)
 from .config import Settings, load_settings
-from .city import city_payload
+from .city import CITY_LOCATIONS, city_payload
 from .db import Database
 from .events import ActiveEvent, EventEngine, NPCEventContext
 from .learning import Evidence, LearningEngine
 from .models import (AdminLoginRequest, AdminUserPatch, ChatRequest, ChatResponse,
-                     InviteCreateRequest, LoginRequest, NpcProfile, PasswordChangeRequest, RegisterRequest)
+                     InviteCreateRequest, LoginRequest, NpcProfile, PasswordChangeRequest, RegisterRequest,
+                     SocialInterventionRequest)
+from .social import SocialWorldEngine
 
 KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$")
 USERNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{2,31}$")
@@ -53,6 +55,7 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
     db = Database(settings.database_url, settings.admin_session_secret)
     learning_engine = LearningEngine()
     event_engine = EventEngine(db)
+    social_engine = SocialWorldEngine(db)
     try:
         game_zone = ZoneInfo(settings.game_timezone)
     except ZoneInfoNotFoundError as exc:
@@ -167,6 +170,19 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
                 "goal": goal, "daily_plan": plan, "current_slot": time_slot(datetime.now(game_zone).hour),
                 "language_controller": language_controller}
 
+    def daily_social_world(player_id: str, profiles: list[dict], agents: dict[str, dict] | None = None) -> list[dict]:
+        bundles = agents or {}
+        for entry in profiles:
+            npc_id, profile = entry["id"], entry["profile"]
+            if npc_id not in bundles:
+                bundles[npc_id] = agent_bundle(player_id, npc_id, profile, db.state(player_id, npc_id),
+                                                db.get_learning_state(player_id))
+        slot = time_slot(datetime.now(game_zone).hour)
+        plans = {npc_id: bundle["daily_plan"] for npc_id, bundle in bundles.items()}
+        runtime_states = {npc_id: bundle["runtime_state"] for npc_id, bundle in bundles.items()}
+        names = {location.id: location.name for location in CITY_LOCATIONS}
+        return social_engine.ensure_daily(player_id, profiles, plans, game_today(), slot, names, runtime_states)
+
     def provider_reply(message: str, stats, history: list[dict], context: dict, on_chunk=None):
         # Preserve compatibility with small test/custom providers implementing the original contract.
         parameters = inspect.signature(provider.reply).parameters
@@ -261,9 +277,11 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         active = event_engine.daily_event(event_context(player_id, npc_id, profile, stats, learning_state,
                                                         agent["runtime_state"]), game_today())
         animation = "sad" if stats.mood < 40 else "happy" if stats.mood >= 60 else "idle"
+        social_events = daily_social_world(player_id, db.list_npc_profiles(player_id), {npc_id: agent})
         return {"room_id": f"{npc_id}-room", "npc": {"id": npc_id, "name": profile["name"], "animation": animation},
                 "stats": stats, "messages": db.messages(player_id, 200, npc_id),
-                "quota": db.quota(user["id"]), "active_event": public_event(active, profile), "agent": agent}
+                "quota": db.quota(user["id"]), "active_event": public_event(active, profile), "agent": agent,
+                "social_interactions": [event for event in social_events if npc_id in event["participant_ids"]]}
 
     @app.get(settings.api_prefix + "/npc/profile")
     def npc_profile(authorization: Optional[str] = Header(None)):
@@ -281,6 +299,7 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         profile_for(player_id)
         return {"npcs": db.list_npc_profiles(player_id), "limit": 5}
 
+    @app.get(settings.api_prefix + "/world")
     @app.get(settings.api_prefix + "/city")
     def city(authorization: Optional[str] = Header(None)):
         user = current_user(authorization); player_id = user["player_id"]
@@ -303,12 +322,42 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
             slot = agent["current_slot"]
             planned_locations[npc_id] = agent["daily_plan"]["slots"][slot]["location_id"]
         payload = city_payload(player_id, profiles, active_events, game_today(), planned_locations)
+        social_events = daily_social_world(player_id, profiles, agents)
         for resident in payload["npcs"]:
             resident["active_event"] = summaries[resident["id"]]
             resident["daily_plan"] = agents[resident["id"]]["daily_plan"]
             resident["current_activity"] = agents[resident["id"]]["daily_plan"]["slots"][agents[resident["id"]]["current_slot"]]["activity"]
+            resident_events = [event for event in social_events if resident["id"] in event["participant_ids"]]
+            resident["social_interaction_ids"] = [event["id"] for event in resident_events]
+            resident["related_npc_ids"] = sorted({npc_id for event in resident_events
+                                                   for npc_id in event["participant_ids"] if npc_id != resident["id"]})
         payload["time_slot"] = time_slot(datetime.now(game_zone).hour)
+        payload["social_interactions"] = social_events
         return payload
+
+    @app.get(settings.api_prefix + "/social-events")
+    def social_events(game_date: Optional[str] = None, npc_id: Optional[str] = None,
+                      authorization: Optional[str] = Header(None)):
+        user = current_user(authorization); player_id = user["player_id"]
+        profiles = db.list_npc_profiles(player_id)
+        if not profiles:
+            profile_for(player_id)
+            profiles = db.list_npc_profiles(player_id)
+        daily_social_world(player_id, profiles)
+        return {"social_interactions": db.list_social_events(player_id, game_date, npc_id)}
+
+    @app.post(settings.api_prefix + "/social-events/{event_id}/intervene")
+    def intervene_social_event(event_id: str, body: SocialInterventionRequest,
+                               authorization: Optional[str] = Header(None)):
+        user = current_user(authorization)
+        try:
+            return social_engine.intervene(user["player_id"], event_id, body.action)
+        except KeyError:
+            raise HTTPException(404, {"code": "SOCIAL_EVENT_NOT_FOUND", "message": "Social event was not found."})
+        except ValueError:
+            raise HTTPException(422, {"code": "INVALID_SOCIAL_ACTION", "message": "This management action is not supported."})
+        except RuntimeError:
+            raise HTTPException(409, {"code": "SOCIAL_EVENT_CLOSED", "message": "This event is no longer open for management."})
 
     @app.post(settings.api_prefix + "/npcs", status_code=201)
     def create_npc(body: NpcProfile, authorization: Optional[str] = Header(None)):
@@ -319,6 +368,7 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         npc_id = "npc-" + uuid.uuid4().hex[:12]
         db.ensure_npc(player_id, npc_id, f"Hi, I'm {body.name}. What would you like to talk about?")
         db.save_npc_profile(player_id, npc_id, body.model_dump())
+        db.ensure_social_edges(player_id, [entry["id"] for entry in db.list_npc_profiles(player_id)])
         return {"id": npc_id, "profile": body.model_dump()}
 
     @app.put(settings.api_prefix + "/npcs/{npc_id}")
@@ -343,7 +393,8 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         edges = db.ensure_social_edges(player_id, [entry["id"] for entry in db.list_npc_profiles(player_id)])
         return {**bundle, "memories": db.list_npc_memories(player_id, npc_id, 50),
                 "conversation_summaries": db.list_conversation_summaries(player_id, npc_id),
-                "social_connections": [edge for edge in edges if npc_id in (edge["npc_a"], edge["npc_b"])]}
+                "social_connections": [edge for edge in edges if edge["npc_a"] == npc_id],
+                "social_interactions": db.list_social_events(player_id, npc_id=npc_id)}
 
     @app.get(settings.api_prefix + "/npcs/{npc_id}/memories")
     def npc_memories(npc_id: str, authorization: Optional[str] = Header(None)):

@@ -13,6 +13,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from .events import ActiveEvent, EventHistory, event_to_dict
 from .learning import LearningState
 from .models import Stats
+from .social import social_status
 
 
 class Database:
@@ -106,9 +107,18 @@ class Database:
               player_id TEXT NOT NULL,npc_id TEXT NOT NULL,game_date TEXT NOT NULL,plan_json TEXT NOT NULL,
               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(player_id,npc_id,game_date));
             CREATE TABLE IF NOT EXISTS npc_social_edges (
-              player_id TEXT NOT NULL,npc_a TEXT NOT NULL,npc_b TEXT NOT NULL,affinity INTEGER NOT NULL DEFAULT 50,
-              status TEXT NOT NULL DEFAULT 'neutral',updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              player_id TEXT NOT NULL,npc_a TEXT NOT NULL,npc_b TEXT NOT NULL,
+              familiarity INTEGER NOT NULL DEFAULT 15,trust INTEGER NOT NULL DEFAULT 50,
+              affinity INTEGER NOT NULL DEFAULT 50,tension INTEGER NOT NULL DEFAULT 5,
+              status TEXT NOT NULL DEFAULT 'stranger',updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               PRIMARY KEY(player_id,npc_a,npc_b));
+            CREATE TABLE IF NOT EXISTS npc_social_events (
+              id TEXT PRIMARY KEY,player_id TEXT NOT NULL,game_date TEXT NOT NULL,event_key TEXT NOT NULL,
+              event_json TEXT NOT NULL,status TEXT NOT NULL,resolution_action TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(player_id,game_date,event_key));
+            CREATE INDEX IF NOT EXISTS idx_social_events_day
+              ON npc_social_events(player_id,game_date,created_at);
             CREATE TABLE IF NOT EXISTS agent_turn_traces (
               id INTEGER PRIMARY KEY AUTOINCREMENT,player_id TEXT NOT NULL,npc_id TEXT NOT NULL,
               request_id TEXT NOT NULL,prompt_version TEXT NOT NULL,persona_version TEXT,
@@ -141,6 +151,21 @@ class Database:
             ):
                 if column not in memory_columns:
                     self._connection.execute(f"ALTER TABLE npc_memories ADD COLUMN {column} {definition}")
+            edge_columns = {row[1] for row in self._connection.execute("PRAGMA table_info(npc_social_edges)")}
+            for column, definition in (
+                ("familiarity", "INTEGER NOT NULL DEFAULT 15"),
+                ("trust", "INTEGER NOT NULL DEFAULT 50"),
+                ("tension", "INTEGER NOT NULL DEFAULT 5"),
+            ):
+                if column not in edge_columns:
+                    self._connection.execute(f"ALTER TABLE npc_social_edges ADD COLUMN {column} {definition}")
+            self._connection.execute(
+                """UPDATE npc_social_edges SET status=CASE
+                   WHEN tension>=60 THEN 'strained'
+                   WHEN trust>=72 AND affinity>=72 AND familiarity>=70 THEN 'close_friend'
+                   WHEN trust>=58 AND affinity>=58 AND familiarity>=45 THEN 'friend'
+                   WHEN familiarity>=25 THEN 'acquaintance' ELSE 'stranger' END"""
+            )
             try:
                 self._connection.execute(
                     "CREATE VIRTUAL TABLE IF NOT EXISTS npc_memory_fts USING fts5(content,player_id UNINDEXED,npc_id UNINDEXED,memory_id UNINDEXED)"
@@ -610,17 +635,157 @@ class Database:
     def ensure_social_edges(self, player_id: str, npc_ids: list[str]) -> list[dict]:
         ordered = sorted(npc_ids)
         with self._lock, self._connection:
-            for index, npc_a in enumerate(ordered):
-                for npc_b in ordered[index + 1:]:
+            for npc_a in ordered:
+                for npc_b in ordered:
+                    if npc_a == npc_b:
+                        continue
+                    digest = hashlib.sha256(f"{player_id}\0{npc_a}\0{npc_b}".encode()).digest()
+                    familiarity = 12 + digest[0] % 9
+                    trust = 45 + digest[1] % 11
+                    affinity = 45 + digest[2] % 11
+                    tension = 3 + digest[3] % 8
                     self._connection.execute(
-                        "INSERT OR IGNORE INTO npc_social_edges(player_id,npc_a,npc_b) VALUES (?,?,?)",
-                        (player_id, npc_a, npc_b),
+                        """INSERT OR IGNORE INTO npc_social_edges(
+                           player_id,npc_a,npc_b,familiarity,trust,affinity,tension,status)
+                           VALUES (?,?,?,?,?,?,?,'stranger')""",
+                        (player_id, npc_a, npc_b, familiarity, trust, affinity, tension),
                     )
         rows = self._connection.execute(
-            "SELECT npc_a,npc_b,affinity,status FROM npc_social_edges WHERE player_id=? ORDER BY npc_a,npc_b",
+            """SELECT npc_a,npc_b,familiarity,trust,affinity,tension,status
+               FROM npc_social_edges WHERE player_id=? ORDER BY npc_a,npc_b""",
             (player_id,),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def save_social_edge(self, player_id: str, npc_a: str, npc_b: str, **values: int) -> dict:
+        if npc_a == npc_b:
+            raise ValueError("a social edge requires two different residents")
+        self.ensure_social_edges(player_id, [npc_a, npc_b])
+        allowed = {key: max(0, min(100, int(value))) for key, value in values.items()
+                   if key in {"familiarity", "trust", "affinity", "tension"}}
+        with self._lock, self._connection:
+            if allowed:
+                assignments = ",".join(f"{key}=?" for key in allowed)
+                self._connection.execute(
+                    f"UPDATE npc_social_edges SET {assignments},updated_at=CURRENT_TIMESTAMP WHERE player_id=? AND npc_a=? AND npc_b=?",
+                    (*allowed.values(), player_id, npc_a, npc_b),
+                )
+            row = self._connection.execute(
+                """SELECT npc_a,npc_b,familiarity,trust,affinity,tension,status
+                   FROM npc_social_edges WHERE player_id=? AND npc_a=? AND npc_b=?""",
+                (player_id, npc_a, npc_b),
+            ).fetchone()
+            value = dict(row)
+            value["status"] = social_status(value)
+            self._connection.execute(
+                "UPDATE npc_social_edges SET status=? WHERE player_id=? AND npc_a=? AND npc_b=?",
+                (value["status"], player_id, npc_a, npc_b),
+            )
+        return value
+
+    @staticmethod
+    def _decode_social_event(row) -> dict:
+        value = json.loads(row["event_json"])
+        value["status"] = row["status"]
+        if row["resolution_action"]:
+            value.setdefault("outcome", {})["action"] = row["resolution_action"]
+        value["created_at"] = row["created_at"]
+        value["updated_at"] = row["updated_at"]
+        return value
+
+    def list_social_events(self, player_id: str, game_date: str | None = None,
+                           npc_id: str | None = None, limit: int = 50) -> list[dict]:
+        query = "SELECT * FROM npc_social_events WHERE player_id=?"
+        parameters: list[object] = [player_id]
+        if game_date is not None:
+            query += " AND game_date=?"
+            parameters.append(game_date)
+        query += " ORDER BY game_date DESC,created_at DESC,id LIMIT ?"
+        parameters.append(max(1, min(200, int(limit))))
+        result = [self._decode_social_event(row) for row in self._connection.execute(query, parameters).fetchall()]
+        if npc_id is not None:
+            result = [event for event in result if npc_id in event.get("participant_ids", [])]
+        return result
+
+    def get_social_event(self, player_id: str, event_id: str) -> dict | None:
+        row = self._connection.execute(
+            "SELECT * FROM npc_social_events WHERE player_id=? AND id=?", (player_id, event_id)
+        ).fetchone()
+        return self._decode_social_event(row) if row else None
+
+    def save_social_event(self, player_id: str, event: dict) -> tuple[dict, bool]:
+        event_key = ":".join(sorted(event.get("participant_ids", [])))
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                """INSERT OR IGNORE INTO npc_social_events(
+                   id,player_id,game_date,event_key,event_json,status) VALUES (?,?,?,?,?,?)""",
+                (event["id"], player_id, event["date"], event_key, self._json(event), event["status"]),
+            )
+        return self.get_social_event(player_id, event["id"]), cursor.rowcount > 0  # type: ignore[return-value]
+
+    def resolve_social_event(self, player_id: str, event_id: str, action: str,
+                             changes: list[dict], memories: list[dict], outcome: dict,
+                             managed: bool = False) -> dict:
+        """Atomically applies rule-owned directed deltas, memories, and event resolution."""
+        with self._lock, self._connection:
+            row = self._connection.execute(
+                "SELECT * FROM npc_social_events WHERE player_id=? AND id=?", (player_id, event_id)
+            ).fetchone()
+            if not row:
+                raise KeyError(event_id)
+            if row["status"] in {"resolved_autonomously", "resolved_with_management"}:
+                return self._decode_social_event(row)
+            event = json.loads(row["event_json"])
+            for change in changes:
+                npc_a, npc_b = change["npc_a"], change["npc_b"]
+                digest = hashlib.sha256(f"{player_id}\0{npc_a}\0{npc_b}".encode()).digest()
+                self._connection.execute(
+                    """INSERT OR IGNORE INTO npc_social_edges(
+                       player_id,npc_a,npc_b,familiarity,trust,affinity,tension,status)
+                       VALUES (?,?,?,?,?,?,?,'stranger')""",
+                    (player_id, npc_a, npc_b, 12 + digest[0] % 9, 45 + digest[1] % 11,
+                     45 + digest[2] % 11, 3 + digest[3] % 8),
+                )
+                edge = self._connection.execute(
+                    "SELECT * FROM npc_social_edges WHERE player_id=? AND npc_a=? AND npc_b=?",
+                    (player_id, npc_a, npc_b),
+                ).fetchone()
+                values = {key: max(0, min(100, int(edge[key]) + int(change.get(key, 0))))
+                          for key in ("familiarity", "trust", "affinity", "tension")}
+                values["status"] = social_status(values)
+                self._connection.execute(
+                    """UPDATE npc_social_edges SET familiarity=?,trust=?,affinity=?,tension=?,status=?,
+                       updated_at=CURRENT_TIMESTAMP WHERE player_id=? AND npc_a=? AND npc_b=?""",
+                    (values["familiarity"], values["trust"], values["affinity"], values["tension"],
+                     values["status"], player_id, npc_a, npc_b),
+                )
+            for memory in memories:
+                content = " ".join(str(memory["content"]).split())[:500]
+                cursor = self._connection.execute(
+                    """INSERT INTO npc_memories(player_id,npc_id,kind,content,source_event_id,importance,
+                       tags_json,confidence,access_stage)
+                       SELECT ?,?,'social',?,?,3,'[\"social\",\"npc_interaction\"]',1,'stranger'
+                       WHERE NOT EXISTS(SELECT 1 FROM npc_memories WHERE player_id=? AND npc_id=? AND source_event_id=?)""",
+                    (player_id, memory["npc_id"], content, event_id,
+                     player_id, memory["npc_id"], event_id),
+                )
+                if cursor.rowcount:
+                    try:
+                        self._connection.execute(
+                            "INSERT INTO npc_memory_fts(content,player_id,npc_id,memory_id) VALUES (?,?,?,?)",
+                            (content, player_id, memory["npc_id"], str(cursor.lastrowid)),
+                        )
+                    except sqlite3.OperationalError:
+                        pass
+            status = "resolved_with_management" if managed else "resolved_autonomously"
+            event["status"], event["outcome"] = status, outcome
+            event["management"] = {**event.get("management", {}), "can_intervene": False}
+            self._connection.execute(
+                """UPDATE npc_social_events SET event_json=?,status=?,resolution_action=?,
+                   updated_at=CURRENT_TIMESTAMP WHERE player_id=? AND id=?""",
+                (self._json(event), status, action, player_id, event_id),
+            )
+        return self.get_social_event(player_id, event_id)  # type: ignore[return-value]
 
     def add_agent_trace(self, player_id: str, npc_id: str, request_id: str, trace: dict) -> None:
         with self._lock, self._connection:

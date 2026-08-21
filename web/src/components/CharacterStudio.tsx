@@ -2,6 +2,7 @@ import { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { NpcProfile } from "../types";
 import { AvatarStage } from "./AvatarStage";
+import { CharacterCanvas3D } from "../three/characters";
 const opts = {
   hair: ["swoop", "bob", "sprout", "bun", "curls", "shaggy"],
   face: ["round", "oval", "bean", "square", "heart"],
@@ -162,7 +163,7 @@ export function CharacterStudio({
         </header>
         <div className="studio-layout">
           <div className="studio-preview">
-            <AvatarStage avatar={profile.avatar} mood="happy" compact />
+            <CharacterCanvas3D avatar={profile.avatar} animation="happy" view="full" name={profile.name} />
             <strong>{profile.name || (zh ? "角色" : "Character")}</strong>
             <span>
               {profile.relationship} · {profile.occupation}

@@ -26,6 +26,7 @@ type Props={
  showOlder:boolean
  ready:boolean
  story?:ReactNode
+ visualStage?:ReactNode
  editLabel:string
  agentLabel:string
  language:'zh'|'en'
@@ -103,24 +104,23 @@ function PlayerHead({name}:{name:string}){
  </motion.div>
 }
 
-export function ConversationScene({npcName,playerName,avatar,mood,place,locationDescription,locationId,locationKind,locationBackground,locationBackgroundPosition,locationAccent,messages,liveSpeech,historyOpen,sceneryOpen,olderCount,showOlder,ready,story,editLabel,agentLabel,language,onHistoryOpen,onHistoryClose,onSceneryOpen,onSceneryClose,onToggleOlder,onEdit,onAgent}:Props){
+export function ConversationScene({npcName,playerName,avatar,mood,place,locationDescription,locationId,locationKind,locationBackground,locationBackgroundPosition,locationAccent,messages,liveSpeech,historyOpen,sceneryOpen,olderCount,showOlder,ready,story,visualStage,editLabel,agentLabel,language,onHistoryOpen,onHistoryClose,onSceneryOpen,onSceneryClose,onToggleOlder,onEdit,onAgent}:Props){
  const reduce=useReducedMotion(),historyRef=useRef<HTMLDivElement>(null),zh=language==='zh',[translations,setTranslations]=useState<Set<string>>(new Set())
  useEffect(()=>{if(historyOpen)requestAnimationFrame(()=>historyRef.current?.scrollTo({top:historyRef.current.scrollHeight,behavior:reduce?'auto':'smooth'}))},[historyOpen,messages,reduce])
  useEffect(()=>{if(!historyOpen)return;const close=(event:KeyboardEvent)=>{if(event.key==='Escape')onHistoryClose()};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close)},[historyOpen,onHistoryClose])
  const toggleTranslation=(key:string)=>setTranslations(current=>{const next=new Set(current);if(next.has(key))next.delete(key);else next.add(key);return next})
  const translationButton=(key:string,translation?:string)=>translation?<button type="button" className="translation-toggle" aria-expanded={translations.has(key)} onClick={()=>toggleTranslation(key)}>{translations.has(key)?(zh?'收起中文':'Hide Chinese'):(zh?'中英对照':'Show Chinese')}</button>:null
  return <section className={`dialogue-scene ${historyOpen?'is-reviewing':''} ${sceneryOpen?'is-scenery':''}`} aria-label={zh?`在${place}与${npcName}对话`:`Conversation with ${npcName} at ${place}`}>
-  <LocationBackdrop kind={locationKind} locationId={locationId} place={place} background={locationBackground} backgroundPosition={locationBackgroundPosition} accent={locationAccent}/>
+  {visualStage||<LocationBackdrop kind={locationKind} locationId={locationId} place={place} background={locationBackground} backgroundPosition={locationBackgroundPosition} accent={locationAccent}/>}
   <button className="scene-scenery-trigger" type="button" onClick={sceneryOpen?onSceneryClose:onSceneryOpen} aria-label={sceneryOpen?(zh?'返回对话':'Return to conversation'):(zh?'浏览背景风景':'Browse the scenery')}/>
   <button className="scene-history-button" type="button" onClick={onHistoryOpen}>↺ {zh?'回顾历史会话':'Review history'}</button>
   <AnimatePresence>{sceneryOpen&&<motion.aside className="scenery-info" initial={reduce?false:{opacity:0,y:24,scale:.96}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:15}}><small>{zh?'正在浏览':'SCENERY MODE'}</small><h2>{place}</h2><p>{locationDescription||(zh?'看看角色今天所在的地方，点击任意背景区域返回对话。':'Take in the place your character is visiting. Click the background again to return.')}</p><span>{zh?'再次点击背景，返回对话':'Click the background again to return'}</span></motion.aside>}</AnimatePresence>
-  <PlayerHead name={playerName}/>
-  <motion.div className="scene-npc" initial={reduce?false:{x:40,opacity:0,scale:.96}} animate={{x:0,opacity:1,scale:1}} transition={{type:'spring',stiffness:165,damping:22}}><AvatarStage avatar={avatar} mood={mood} compact scene/><span>{npcName}</span></motion.div>
+  {!visualStage&&<><PlayerHead name={playerName}/><motion.div className="scene-npc" initial={reduce?false:{x:40,opacity:0,scale:.96}} animate={{x:0,opacity:1,scale:1}} transition={{type:'spring',stiffness:165,damping:22}}><AvatarStage avatar={avatar} mood={mood} compact scene/><span>{npcName}</span></motion.div></>}
   <button className="scene-edit" type="button" onClick={onEdit}>✦ {editLabel}</button>
   <button className="scene-agent" type="button" onClick={onAgent}>◎ {agentLabel}</button>
-  <AnimatePresence mode="wait">{liveSpeech&&<motion.aside layout key={liveSpeech.key} className={`live-speech live-speech--${liveSpeech.speaker}`} initial={reduce?false:{opacity:0,scale:.68,y:26,rotate:liveSpeech.speaker==='player'?-2:2}} animate={{opacity:1,scale:1,y:0,rotate:0}} exit={reduce?{opacity:0}:{opacity:0,scale:.74,y:-48,filter:'blur(5px)'}} transition={{type:'spring',stiffness:300,damping:23,mass:.75}}>
+  {!visualStage&&<AnimatePresence mode="wait">{liveSpeech&&<motion.aside layout key={liveSpeech.key} className={`live-speech live-speech--${liveSpeech.speaker}`} initial={reduce?false:{opacity:0,scale:.68,y:26,rotate:liveSpeech.speaker==='player'?-2:2}} animate={{opacity:1,scale:1,y:0,rotate:0}} exit={reduce?{opacity:0}:{opacity:0,scale:.74,y:-48,filter:'blur(5px)'}} transition={{type:'spring',stiffness:300,damping:23,mass:.75}}>
    <strong>{liveSpeech.speaker==='player'?playerName:npcName}</strong><p>{liveSpeech.text}</p>{liveSpeech.streaming&&<i className="live-speech__cursor"/>}{liveSpeech.speaker==='npc'&&translationButton(`live-${liveSpeech.key}`,liveSpeech.translation)}{liveSpeech.translation&&translations.has(`live-${liveSpeech.key}`)&&<motion.div className="speech-translation" initial={{opacity:0,height:0}} animate={{opacity:1,height:'auto'}}><small>{zh?'中文':'Chinese'}</small><p>{liveSpeech.translation}</p></motion.div>}
-  </motion.aside>}</AnimatePresence>
+  </motion.aside>}</AnimatePresence>}
   <AnimatePresence>{!liveSpeech&&story&&<motion.div className="scene-story" initial={reduce?false:{opacity:0,y:-12,scale:.97}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0}} transition={{type:'spring',stiffness:220,damping:24}}>{story}</motion.div>}</AnimatePresence>
   {!ready&&<p className="scene-loading">{zh?'正在走近…':'Getting closer…'}</p>}
   <AnimatePresence>{historyOpen&&<motion.div className="history-review" role="dialog" aria-modal="true" aria-label={zh?'历史回顾':'Conversation history'} onClick={event=>{if(event.target===event.currentTarget)onHistoryClose()}} initial={reduce?{opacity:0}:{opacity:0,backdropFilter:'blur(0px)'}} animate={{opacity:1,backdropFilter:'blur(13px)'}} exit={{opacity:0,backdropFilter:'blur(0px)'}}>

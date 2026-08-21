@@ -147,3 +147,7 @@ class AdminUserPatch(BaseModel):
 class InviteCreateRequest(BaseModel):
     count: int = Field(default=1, ge=1, le=100)
     daily_quota: Optional[int] = Field(default=None, ge=1, le=10000)
+
+
+class SocialInterventionRequest(BaseModel):
+    action: Literal["mediate", "encourage", "give_space", "let_them_handle_it"]

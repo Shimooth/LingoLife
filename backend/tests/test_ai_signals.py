@@ -85,6 +85,9 @@ def test_deepseek_prompt_contains_optional_agent_context(monkeypatch):
     })
     dialogue = next(item for item in captured if not item.get("response_format"))
     analyzer = next(item for item in captured if item.get("response_format"))
+    assert dialogue["model"] == "deepseek-v4-flash"
+    assert dialogue["thinking"] == {"type": "disabled"}
+    assert analyzer["thinking"] == {"type": "disabled"}
     system = dialogue["messages"][0]["content"]
     assert "You are Mia" in system and "Lost sketchbook" in system
     assert "The player helped yesterday." in system

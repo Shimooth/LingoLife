@@ -112,7 +112,9 @@ def test_agent_state_plan_social_graph_summary_and_trace_round_trip(tmp_path):
     assert db.get_relationship("p1", "a")["stage"] == "friend"
     assert db.get_goal("p1", "a")["title"] == "Make an album"
     assert db.get_daily_plan("p1", "a", "2026-08-19")["slots"]["morning"]["location_id"] == "music_hall"
-    assert len(db.ensure_social_edges("p1", ["a", "b", "c"])) == 3
+    edges = db.ensure_social_edges("p1", ["a", "b", "c"])
+    assert len(edges) == 6  # each resident keeps an independent A -> B interpretation
+    assert {"familiarity", "trust", "affinity", "tension", "status"} <= edges[0].keys()
     db.append_conversation_summary("p1", "a", "2026-08-19", ["The player likes jazz."])
     assert db.list_conversation_summaries("p1", "a")[0]["summary"] == "The player likes jazz."
     db.add_agent_trace("p1", "a", "request-001", {"prompt_version": "v1", "fallback_used": True})

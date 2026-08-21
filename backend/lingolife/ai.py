@@ -197,6 +197,7 @@ class DeepSeekProvider:
     def _dialogue(self, message: str, history: list[dict], context: dict[str, Any],
                   on_chunk: Callable[[str], None] | None) -> str:
         payload = {"model": self.settings.deepseek_model,
+                   "thinking": {"type": "disabled"},
                    "messages": [{"role": "system", "content": _persona_prompt(context)},
                                 *_history_messages(history), {"role": "user", "content": message}],
                    "max_tokens": min(500, self.settings.deepseek_max_tokens),
@@ -241,6 +242,7 @@ class DeepSeekProvider:
             ], "schema": TurnAnalysis.model_json_schema(),
         }
         payload = {"model": self.settings.deepseek_model,
+                   "thinking": {"type": "disabled"},
                    "messages": [{"role": "system", "content": "You are LingoLife's conservative turn analyst. You do not roleplay."},
                                 {"role": "user", "content": json.dumps(analyzer, ensure_ascii=False)}],
                    "response_format": {"type": "json_object"},
@@ -258,6 +260,7 @@ class DeepSeekProvider:
 
     def translate(self, text: str) -> str:
         payload = {"model": self.settings.deepseek_model,
+                   "thinking": {"type": "disabled"},
                    "messages": [{"role": "system", "content": "Translate the following NPC dialogue into natural Simplified Chinese. Preserve the character's tone, humor, names, paragraph breaks, and implied emotion. Return only the translation, with no labels or explanation."},
                                 {"role": "user", "content": text}],
                    "max_tokens": min(600, self.settings.deepseek_max_tokens), "temperature": 0.1}

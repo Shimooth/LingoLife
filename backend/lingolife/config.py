@@ -17,7 +17,7 @@ class Settings:
     web_root: str = str(Path(__file__).resolve().parents[2] / "web" / "dist")
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-chat"
+    deepseek_model: str = "deepseek-v4-flash"
     deepseek_timeout: float = 25
     deepseek_max_tokens: int = 700
     deepseek_temperature: float = 0.7
