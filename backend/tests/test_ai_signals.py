@@ -19,12 +19,15 @@ def base_result(**extra):
 def test_ai_result_additions_default_empty_and_reject_unknown_values():
     result = base_result()
     assert result.semantic_signals == [] and result.learning_evidence == []
+    assert result.animation_cue == "talk"
     with pytest.raises(ValidationError):
         base_result(semantic_signals=["made_up_signal"])
     with pytest.raises(ValidationError):
         base_result(learning_evidence=[{"target_id": "unknown.target", "outcome": "success"}])
     with pytest.raises(ValidationError):
         base_result(learning_evidence=[{"target_id": "intent.empathy", "outcome": "success", "confidence": 2}])
+    with pytest.raises(ValidationError):
+        base_result(animation_cue="ai_invented_dance")
 
 
 def test_streamed_json_exposes_only_complete_decoded_reply_text():
@@ -94,5 +97,9 @@ def test_deepseek_prompt_contains_optional_agent_context(monkeypatch):
     assert dialogue["messages"][1] == {"role": "assistant", "content": "I had a difficult day."}
     prompt = json.loads(analyzer["messages"][1]["content"])
     assert prompt["learning_targets"] == ["intent.empathy"]
+    assert set(prompt["schema"]["properties"]["animation_cue"]["enum"]) == {
+        "idle", "talk", "listen", "happy", "sad", "tired",
+        "look_around", "walk", "run", "jump", "crouch", "push",
+    }
     assert result.npc_reply == "I answer in my own voice."
     assert result.semantic_signals == ["empathy"]

@@ -13,7 +13,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from .events import ActiveEvent, EventHistory, event_to_dict
 from .learning import LearningState
 from .models import Stats
-from .social import social_status
+from .social import social_animation_cues, social_status
 
 
 class Database:
@@ -23,9 +23,12 @@ class Database:
         self.path = url.removeprefix("sqlite:///")
         if self.path != ":memory:":
             Path(self.path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
-        self._connection = sqlite3.connect(self.path, check_same_thread=False)
+        self._connection = sqlite3.connect(self.path, check_same_thread=False, timeout=30)
         self._connection.row_factory = sqlite3.Row
         self._lock = threading.RLock()
+        self._connection.execute("PRAGMA busy_timeout=30000")
+        if self.path != ":memory:":
+            self._connection.execute("PRAGMA journal_mode=WAL")
         self._invite_cipher = Fernet(base64.urlsafe_b64encode(hashlib.sha256(invite_secret.encode()).digest())) if invite_secret else None
         self._init_schema()
 
@@ -287,16 +290,16 @@ class Database:
         return True
 
     def authenticate(self, token: str) -> dict | None:
-        row = self._connection.execute(
-            "SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.revoked_at IS NULL",
-            (self.token_hash(token),),
-        ).fetchone()
-        if not row:
-            return None
-        user = dict(row)
-        if user["disabled"]:
-            return {**user, "disabled": True}
         with self._lock, self._connection:
+            row = self._connection.execute(
+                "SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.revoked_at IS NULL",
+                (self.token_hash(token),),
+            ).fetchone()
+            if not row:
+                return None
+            user = dict(row)
+            if user["disabled"]:
+                return {**user, "disabled": True}
             self._connection.execute("UPDATE sessions SET last_used_at=CURRENT_TIMESTAMP WHERE token_hash=?", (self.token_hash(token),))
             self._connection.execute("UPDATE users SET last_active_at=CURRENT_TIMESTAMP WHERE id=?", (user["id"],))
         return user
@@ -442,15 +445,17 @@ class Database:
         return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
     def get_npc_profile(self, player_id: str, npc_id: str) -> dict | None:
-        row = self._connection.execute(
-            "SELECT profile_json FROM npc_profiles WHERE player_id=? AND npc_id=?", (player_id, npc_id)
-        ).fetchone()
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT profile_json FROM npc_profiles WHERE player_id=? AND npc_id=?", (player_id, npc_id)
+            ).fetchone()
         return json.loads(row[0]) if row else None
 
     def list_npc_profiles(self, player_id: str) -> list[dict]:
-        rows = self._connection.execute(
-            "SELECT npc_id,profile_json FROM npc_profiles WHERE player_id=? ORDER BY created_at,npc_id", (player_id,)
-        ).fetchall()
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT npc_id,profile_json FROM npc_profiles WHERE player_id=? ORDER BY created_at,npc_id", (player_id,)
+            ).fetchall()
         return [{"id": row["npc_id"], "profile": json.loads(row["profile_json"])} for row in rows]
 
     def get_or_create_npc_profile(self, player_id: str, npc_id: str, default_profile: dict) -> dict:
@@ -689,6 +694,7 @@ class Database:
         value["status"] = row["status"]
         if row["resolution_action"]:
             value.setdefault("outcome", {})["action"] = row["resolution_action"]
+        value["animation_cues"] = social_animation_cues(value)
         value["created_at"] = row["created_at"]
         value["updated_at"] = row["updated_at"]
         return value
@@ -722,6 +728,22 @@ class Database:
                 (event["id"], player_id, event["date"], event_key, self._json(event), event["status"]),
             )
         return self.get_social_event(player_id, event["id"]), cursor.rowcount > 0  # type: ignore[return-value]
+
+    def update_social_event(self, player_id: str, event: dict) -> dict:
+        """Persist an in-progress event transition without applying its outcome."""
+        with self._lock, self._connection:
+            cursor = self._connection.execute(
+                """UPDATE npc_social_events SET event_json=?,status=?,updated_at=CURRENT_TIMESTAMP
+                   WHERE player_id=? AND id=?
+                   AND status NOT IN ('resolved_autonomously','resolved_with_management')""",
+                (self._json(event), event["status"], player_id, event["id"]),
+            )
+        if not cursor.rowcount:
+            current = self.get_social_event(player_id, event["id"])
+            if current:
+                return current
+            raise KeyError(event["id"])
+        return self.get_social_event(player_id, event["id"])  # type: ignore[return-value]
 
     def resolve_social_event(self, player_id: str, event_id: str, action: str,
                              changes: list[dict], memories: list[dict], outcome: dict,

@@ -1,9 +1,16 @@
-import {Float,Html,Instances,Instance,OrbitControls,Sparkles,useCursor} from '@react-three/drei'
+import {Html,Instances,Instance,OrbitControls,useCursor,useGLTF} from '@react-three/drei'
 import {useFrame,useThree,type ThreeEvent} from '@react-three/fiber'
-import {useEffect,useMemo,useRef,useState,type ComponentRef} from 'react'
+import {useEffect,useMemo,useRef,useState,type ComponentRef,type MutableRefObject} from 'react'
 import * as THREE from 'three'
+import {defaultAvatar} from '../../avatar'
 import type {CityCharacter,CityLandmark} from '../../components/CityMap'
-import {BUILDING_CLUSTERS,DISTRICTS,hashString,KIND_COLORS,TREES,worldPosition,type TimeSlot,type WorldPoint} from './worldData'
+import {Character3D} from '../characters'
+import {
+ BUILDING_LOTS,BUILDING_MODELS,CITY_PLATFORM_OUTLINE,DISTRICTS,KAYKIT_ASSET_BASE,KAYKIT_PROP_MODELS,KAYKIT_ROAD_MODELS,KIND_COLORS,ROAD_TILES,ROAD_TILE_SCALE,SKY_ROAD_EXITS,STREET_PROPS,TREES,WORLD_DEPTH,WORLD_WIDTH,
+ buildingModelFor,hashString,worldPosition,
+ type BuildingLot,type CityBuildingPlacement,type KayKitBuildingModel,type KayKitPropModel,type KayKitRoadModel,type TimeSlot,type WorldPoint,
+} from './worldData'
+import {buildPedestrianRoute,samplePedestrianRoute,type PedestrianRoute} from './worldNavigation'
 
 type Quality='low'|'high'
 export type WorldQuality='auto'|Quality
@@ -12,7 +19,8 @@ export type WorldViewMode='isometric'|'top'
 type SceneProps={
  characters:readonly CityCharacter[]
  landmarks:readonly CityLandmark[]
- activeCharacterId?:string
+ followedCharacterId?:string
+ serverTime?:string
  language:'zh'|'en'
  timeSlot:TimeSlot
  reducedMotion:boolean
@@ -22,252 +30,568 @@ type SceneProps={
  viewMode:WorldViewMode
  quality:Quality
  onCharacterClick:(id:string)=>void
+ onCharacterEvent:(eventId:string)=>void
+ onJourneyElapsed?:()=>void
  onLandmarkSelect:(landmark:CityLandmark)=>void
 }
 
-const BUILDING_COLORS=[
- ['#f7dfbd','#c56d5c'],['#d9ebdd','#668c7b'],['#e9d9ef','#8675a3'],['#f4e7bf','#d08b5d'],
-] as const
+type KayKitModel=KayKitBuildingModel|KayKitRoadModel|KayKitPropModel
+type InstancePlacement={id:string;position:[number,number,number];rotation:number;scale:number}
 
-// World Html overlays intentionally have no distanceFactor. Drei multiplies
-// it by orthographic camera zoom, which can turn a small label into a
-// viewport-covering translucent surface.
+const BUILDING_HEIGHT:Record<KayKitBuildingModel,number>={
+ building_A:1.65,building_B:1.65,building_C:2.98,building_D:2.97,
+ building_E:2.35,building_F:2.35,building_G:2.98,building_H:3.05,
+}
 
-function CameraRig({focus,focusVersion,reducedMotion,viewMode}:{focus:WorldPoint|null;focusVersion:number;reducedMotion:boolean;viewMode:WorldViewMode}){
- const {camera}=useThree()
+const ALL_WORLD_MODELS:readonly KayKitModel[]=[
+ ...BUILDING_MODELS.residential,...BUILDING_MODELS.commercial,...BUILDING_MODELS.public,
+ ...KAYKIT_ROAD_MODELS,...KAYKIT_PROP_MODELS,
+]
+
+// World Html overlays intentionally have no distanceFactor. Drei multiplies it
+// by orthographic camera zoom, which can create a viewport-sized translucent
+// surface on mobile browsers.
+
+function useKayKitMesh(model:KayKitModel){
+ const {scene}=useGLTF(`${KAYKIT_ASSET_BASE}/${model}.gltf`)
+ const anisotropy=useThree(state=>Math.min(8,state.gl.capabilities.getMaxAnisotropy()))
+ return useMemo(()=>{
+  let found:THREE.Mesh|undefined
+  scene.traverse(object=>{if(!found&&object instanceof THREE.Mesh)found=object})
+  if(!found)throw new Error(`KayKit model has no mesh: ${model}`)
+  const source=Array.isArray(found.material)?found.material[0]:found.material
+  const material=source.clone()
+  if(material instanceof THREE.MeshStandardMaterial){
+   // Preserve KayKit's softly polished miniature finish instead of flattening
+   // the authored colours into a chalky, uniformly matte surface.
+   material.roughness=.5
+   material.metalness=.01
+   material.envMapIntensity=.82
+   if(material.map){material.map.anisotropy=anisotropy;material.map.needsUpdate=true}
+  }
+  return {geometry:found.geometry,material}
+ },[anisotropy,model,scene])
+}
+
+function AssetInstances({model,items,castShadow=false,receiveShadow=false}:{model:KayKitModel;items:readonly InstancePlacement[];castShadow?:boolean;receiveShadow?:boolean}){
+ const {geometry,material}=useKayKitMesh(model)
+ if(!items.length)return null
+ return <Instances geometry={geometry} material={material} limit={items.length} castShadow={castShadow} receiveShadow={receiveShadow} frustumCulled>
+  {items.map(item=><Instance key={item.id} position={item.position} rotation={[0,item.rotation,0]} scale={item.scale}/>) }
+ </Instances>
+}
+
+function AssetObject({model,item,castShadow=false,receiveShadow=false}:{model:KayKitModel;item:InstancePlacement;castShadow?:boolean;receiveShadow?:boolean}){
+ const {scene}=useGLTF(`${KAYKIT_ASSET_BASE}/${model}.gltf`)
+ const anisotropy=useThree(state=>Math.min(8,state.gl.capabilities.getMaxAnisotropy()))
+ const object=useMemo(()=>{
+  const clone=scene.clone(true)
+  clone.traverse(child=>{
+   if(child instanceof THREE.Mesh){
+    child.castShadow=castShadow
+    child.receiveShadow=receiveShadow
+    const materials=(Array.isArray(child.material)?child.material:[child.material]).map(source=>{
+     const material=source.clone()
+     if(material instanceof THREE.MeshStandardMaterial){
+      material.roughness=.5
+      material.metalness=.01
+      material.envMapIntensity=.82
+      if(material.map){material.map.anisotropy=anisotropy;material.map.needsUpdate=true}
+     }
+     return material
+    })
+    child.material=Array.isArray(child.material)?materials:materials[0]
+   }
+  })
+  return clone
+ },[anisotropy,castShadow,receiveShadow,scene])
+ return <primitive object={object} position={item.position} rotation={[0,item.rotation,0]} scale={item.scale}/>
+}
+
+type ActorRegistry=MutableRefObject<Map<string,THREE.Group>>
+
+function CameraRig({focus,focusVersion,followedCharacterId,actors,reducedMotion,viewMode}:{focus:WorldPoint|null;focusVersion:number;followedCharacterId?:string;actors:ActorRegistry;reducedMotion:boolean;viewMode:WorldViewMode}){
+ const {camera,size}=useThree()
  const controls=useRef<ComponentRef<typeof OrbitControls>>(null)
  const moving=useRef(false)
- const desiredPosition=useRef(new THREE.Vector3(24,24,28))
- const desiredTarget=useRef(new THREE.Vector3(0,0,0))
+ const desiredPosition=useRef(new THREE.Vector3(38,36,44))
+ const desiredTarget=useRef(new THREE.Vector3(0,0,-1.5))
+ const desiredZoom=useRef(25)
+ const actorPosition=useRef(new THREE.Vector3())
+ const followTopOffset=useRef(new THREE.Vector3(.01,28,.01))
+ const followIsometricOffset=useRef(new THREE.Vector3(12.5,14,15))
 
  useEffect(()=>{
-  const target=new THREE.Vector3(...(focus??[0,0,0]))
+  const target=new THREE.Vector3(...(focus??[0,0,-1.5]))
   desiredTarget.current.copy(target)
-  const offset=viewMode==='top'?new THREE.Vector3(.01,focus?22:38,.01):(focus?new THREE.Vector3(10,12,13):new THREE.Vector3(24,24,28))
+  const focused=Boolean(focus||followedCharacterId)
+  const offset=viewMode==='top'
+   ?new THREE.Vector3(.01,focused?28:54,.01)
+   :(focused?new THREE.Vector3(12.5,14,15):new THREE.Vector3(38,36,44))
   desiredPosition.current.copy(target).add(offset)
+  const portrait=size.height>size.width*1.25
+  const overviewFit=portrait
+   ?Math.min(size.width/(viewMode==='top'?42:40),size.height/(viewMode==='top'?46:48))
+   :Math.min(size.width/(viewMode==='top'?52:56),size.height/(viewMode==='top'?35:33))*.96
+  const focusFit=Math.min(52,Math.max(30,size.height/17))
+  desiredZoom.current=focused?(viewMode==='top'?Math.min(30,focusFit):focusFit):overviewFit
   moving.current=true
   if(reducedMotion){
    camera.position.copy(desiredPosition.current)
+   if(camera instanceof THREE.OrthographicCamera){camera.zoom=desiredZoom.current;camera.updateProjectionMatrix()}
    controls.current?.target.copy(desiredTarget.current)
    controls.current?.update()
    moving.current=false
   }
- },[camera,focus,focusVersion,reducedMotion,viewMode])
+ },[camera,focus,focusVersion,followedCharacterId,reducedMotion,size.height,size.width,viewMode])
 
  useFrame((_,delta)=>{
+  if(followedCharacterId){
+   const actor=actors.current.get(followedCharacterId)
+   if(actor){
+    actor.getWorldPosition(actorPosition.current)
+    desiredTarget.current.copy(actorPosition.current)
+    desiredPosition.current.copy(actorPosition.current).add(viewMode==='top'?followTopOffset.current:followIsometricOffset.current)
+    moving.current=true
+   }
+  }
   if(!moving.current||!controls.current)return
   const alpha=1-Math.exp(-delta*4.8)
   camera.position.lerp(desiredPosition.current,alpha)
   controls.current.target.lerp(desiredTarget.current,alpha)
+  if(camera instanceof THREE.OrthographicCamera){
+   camera.zoom=THREE.MathUtils.lerp(camera.zoom,desiredZoom.current,alpha)
+   camera.updateProjectionMatrix()
+  }
   controls.current.update()
-  if(camera.position.distanceToSquared(desiredPosition.current)<.005&&controls.current.target.distanceToSquared(desiredTarget.current)<.003){
+  const zoomSettled=!(camera instanceof THREE.OrthographicCamera)||Math.abs(camera.zoom-desiredZoom.current)<.015
+  if(!followedCharacterId&&camera.position.distanceToSquared(desiredPosition.current)<.005&&controls.current.target.distanceToSquared(desiredTarget.current)<.003&&zoomSettled){
    camera.position.copy(desiredPosition.current)
+   if(camera instanceof THREE.OrthographicCamera){camera.zoom=desiredZoom.current;camera.updateProjectionMatrix()}
    controls.current.target.copy(desiredTarget.current)
    moving.current=false
   }
  })
 
- return <OrbitControls ref={controls} makeDefault enableDamping dampingFactor={reducedMotion ? 1 : .08} minZoom={22} maxZoom={70} minPolarAngle={viewMode==='top' ? .01 : .55} maxPolarAngle={1.2} enablePan screenSpacePanning maxDistance={65} minDistance={14}/>
+ return <OrbitControls ref={controls} makeDefault enableDamping dampingFactor={reducedMotion?1:.08} minZoom={5} maxZoom={68} minPolarAngle={viewMode==='top' ? .01 : .5} maxPolarAngle={1.22} enablePan={!followedCharacterId} enableRotate={!followedCharacterId} screenSpacePanning maxDistance={110} minDistance={14}/>
 }
 
-function Ocean({night,reducedMotion}:{night:boolean;reducedMotion:boolean}){
- const water=useRef<THREE.Mesh>(null)
- useFrame((state)=>{
-  if(reducedMotion||!water.current)return
-  water.current.position.y=-.54+Math.sin(state.clock.elapsedTime*.55)*.035
- })
+// A manufactured, chamfered city deck reads as one district in a much larger
+// world. It deliberately avoids the organic shoreline silhouette of an island.
+const createPlatformShape=(scale:number)=>{
+ const shape=new THREE.Shape()
+ CITY_PLATFORM_OUTLINE.forEach(([x,z],index)=>index?shape.lineTo(x*scale,z*scale):shape.moveTo(x*scale,z*scale))
+ shape.closePath()
+ return shape
+}
+
+const PLATFORM_SHELL=createPlatformShape(1)
+const PLATFORM_TOP=createPlatformShape(.985)
+
+const UNDERCITY_ANCHORS:readonly [number,number,number,number][]= [
+ [-18,-2.3,-9,1.8],[-10,-2.45,8,2.1],[-2,-2.65,-3,2.4],[7,-2.45,8,2.15],
+ [16,-2.35,-7,1.95],[20,-2.2,6,1.55],[-19,-2.2,7,1.5],[9,-2.3,-10,1.7],
+]
+
+function FloatingCityBase({quality}:{quality:Quality}){
  return <group>
-  <mesh ref={water} rotation-x={-Math.PI/2} position-y={-.55} receiveShadow>
-   <circleGeometry args={[48,80]}/>
-   <meshStandardMaterial color={night?'#315f78':'#78c9d4'} roughness={.34} metalness={.12}/>
+  <mesh position-y={-1.06} rotation-x={-Math.PI/2} receiveShadow castShadow={quality==='high'}>
+   <extrudeGeometry args={[PLATFORM_SHELL,{depth:1.06,bevelEnabled:true,bevelSize:.32,bevelThickness:.2,bevelSegments:4,curveSegments:2}]}/>
+   <meshStandardMaterial color="#43535c" roughness={.64} metalness={.045}/>
   </mesh>
-  {[19,23,28,34].map((radius,index)=><mesh key={radius} rotation-x={-Math.PI/2} position-y={-.515-index*.004}>
-   <ringGeometry args={[radius,radius+.06,96]}/><meshBasicMaterial color={night?'#81b6c5':'#d9fcf5'} transparent opacity={.22-index*.025}/>
-  </mesh>)}
- </group>
-}
-
-function IslandBase(){
- return <group>
-  <mesh position-y={-.23} scale={[1.04,1,.7]} receiveShadow>
-   <cylinderGeometry args={[17.3,16.6,.7,64]}/><meshStandardMaterial color="#e2c38c" roughness={.92}/>
+  <mesh position-y={.222} rotation-x={-Math.PI/2} receiveShadow>
+   <shapeGeometry args={[PLATFORM_TOP]}/>
+   <meshStandardMaterial color="#606d70" roughness={.76} metalness={.02}/>
   </mesh>
-  <mesh position-y={.12} scale={[1,1,.67]} receiveShadow>
-   <cylinderGeometry args={[17,16.9,.42,64]}/><meshStandardMaterial color="#91bd72" roughness={.96}/>
+  <mesh position-y={.232} rotation-x={-Math.PI/2} scale={[.978,.978,1]} receiveShadow>
+   <shapeGeometry args={[PLATFORM_TOP]}/>
+   <meshStandardMaterial color="#707c7b" roughness={.84}/>
   </mesh>
-  <mesh position={[-3,.42,-6.7]} scale={[7.8,.7,3.4]} receiveShadow>
-   <sphereGeometry args={[1,24,12]}/><meshStandardMaterial color="#80ae6e" roughness={1}/>
-  </mesh>
-  <mesh position={[11,.2,6.5]} rotation-x={-Math.PI/2}>
-   <circleGeometry args={[3.3,32]}/><meshStandardMaterial color="#66b8c6" roughness={.5}/>
-  </mesh>
- </group>
-}
-
-function Road({position,scale,rotation=0}:{position:[number,number,number];scale:[number,number,number];rotation?:number}){
- return <group position={position} rotation-y={rotation}>
-  <mesh receiveShadow scale={scale}><boxGeometry/><meshStandardMaterial color="#d6d3c4" roughness={1}/></mesh>
-  <mesh position-y={.512} scale={[scale[0]*.9,.015,.055]}><boxGeometry/><meshBasicMaterial color="#f8ecbd"/></mesh>
- </group>
-}
-
-function RoadNetwork(){
- return <group position-y={.39}>
-  <Road position={[0,0,-3.2]} scale={[13,.08,.54]}/>
-  <Road position={[-2.2,0,2.8]} scale={[12.8,.08,.55]}/>
-  <Road position={[-6.1,0,-.1]} scale={[.52,.08,8.1]}/>
-  <Road position={[4.1,0,-.2]} scale={[.52,.08,8.2]}/>
-  <Road position={[-1.1,0,-.1]} scale={[.44,.08,8.8]}/>
-  <Road position={[9.7,0,1.9]} scale={[.5,.08,6.4]}/>
-  <Road position={[7.3,0,6]} scale={[6,.08,.47]} rotation={-.12}/>
+  {UNDERCITY_ANCHORS.map(([x,y,z,scale],index)=><group key={`under-city-${index}`} position={[x,y,z]} rotation-y={index*.71}>
+   <mesh castShadow={quality==='high'} scale={[scale*.88,scale*.62,scale*.78]}>
+    <dodecahedronGeometry args={[1,0]}/>
+    <meshStandardMaterial color={index%2?'#596267':'#677076'} roughness={.9}/>
+   </mesh>
+   <mesh position={[0,-scale*1.05,0]} rotation-z={Math.PI} castShadow={quality==='high'} scale={[scale*.34,scale*.82,scale*.32]}>
+    <coneGeometry args={[1,2,7]}/>
+    <meshStandardMaterial color="#4e585e" roughness={.94}/>
+   </mesh>
+  </group>)}
  </group>
 }
 
 function DistrictGround({language}:{language:'zh'|'en'}){
  return <group>
-  {DISTRICTS.map((district,index)=><group key={district.id} position={[district.position[0],.345,district.position[2]]}>
-   <mesh rotation-x={-Math.PI/2} scale={[index===0 ? 1.2 : 1,index===5 ? .75 : 1,1]}>
-    <circleGeometry args={[3.5,32]}/><meshStandardMaterial color={district.color} transparent opacity={.34} depthWrite={false}/>
-   </mesh>
-   <Html center position={[0,.12,0]} zIndexRange={[5,0]}>
+  {DISTRICTS.map(district=><group key={district.id} position={[district.position[0],.235,district.position[2]]}>
+   <Html center position={[0,.14,0]} zIndexRange={[5,0]}>
     <span className="world3d-district-label" style={{'--district-accent':district.accent} as React.CSSProperties}>{district.name[language]}</span>
    </Html>
   </group>)}
  </group>
 }
 
-function TinyBuildings({quality}:{quality:Quality}){
+function RoadNetwork(){
  return <group>
-  {BUILDING_CLUSTERS.map(([x,z,variant],index)=>{
-   const palette=BUILDING_COLORS[(index+variant)%BUILDING_COLORS.length]
-   const width=1.05+(index%3)*.18
-   const height=1.05+variant*.42+(index%4)*.12
-   return <group key={`${x}-${z}`} position={[x,.47,z]} rotation-y={(index%3-1)*.06}>
-    <mesh castShadow={quality==='high'} receiveShadow position-y={height/2}>
-     <boxGeometry args={[width,height,.92]}/><meshStandardMaterial color={palette[0]} roughness={.88}/>
+  {KAYKIT_ROAD_MODELS.map(model=><AssetInstances key={model} model={model} receiveShadow items={ROAD_TILES.filter(tile=>tile.model===model).map(tile=>({id:tile.id,position:[tile.position[0],.245,tile.position[1]],rotation:tile.rotation,scale:ROAD_TILE_SCALE}))}/>) }
+ </group>
+}
+
+const COURTYARD_CARS:readonly {id:string;model:KayKitPropModel;position:[number,number];rotation:number}[]=[
+ {id:'station-yard-car-a',model:'car_sedan',position:[13.4,6],rotation:0},
+ {id:'station-yard-car-b',model:'car_hatchback',position:[16.1,6],rotation:0},
+ {id:'station-yard-car-c',model:'car_stationwagon',position:[18.7,6],rotation:0},
+]
+
+function CourtyardFeatures({quality}:{quality:Quality}){
+ const cars=quality==='high'?COURTYARD_CARS:COURTYARD_CARS.slice(0,2)
+ return <group>
+  <group position={[-.8,.3,-6.5]}>
+   <mesh receiveShadow><boxGeometry args={[14.4,.12,4.25]}/><meshStandardMaterial color="#8daf76" roughness={.96}/></mesh>
+   <mesh position={[0,.075,0]} receiveShadow><boxGeometry args={[13.6,.025,.5]}/><meshStandardMaterial color="#d7d0b0" roughness={.92}/></mesh>
+   <mesh position={[0,.078,0]} rotation-y={Math.PI/2} receiveShadow><boxGeometry args={[3.55,.028,.45]}/><meshStandardMaterial color="#e3d9ba" roughness={.92}/></mesh>
+   <mesh position={[0,.16,0]} castShadow={quality==='high'}><cylinderGeometry args={[.62,.78,.28,20]}/><meshStandardMaterial color="#d6c7a4" roughness={.84}/></mesh>
+   <mesh position={[0,.32,0]} rotation-x={-Math.PI/2}><circleGeometry args={[.5,24]}/><meshStandardMaterial color="#7fc4cf" roughness={.32} metalness={.06}/></mesh>
+  </group>
+  <group position={[0,.3,6.5]}>
+   <mesh receiveShadow><boxGeometry args={[5.5,.12,4.4]}/><meshStandardMaterial color="#d9c89f" roughness={.9}/></mesh>
+   <mesh position-y={.075} rotation-x={-Math.PI/2}><ringGeometry args={[.65,1.05,28]}/><meshStandardMaterial color="#eee2c3" roughness={.9}/></mesh>
+   <mesh position-y={.25} castShadow={quality==='high'}><cylinderGeometry args={[.52,.67,.38,20]}/><meshStandardMaterial color="#b9a481" roughness={.84}/></mesh>
+   <mesh position-y={.455} rotation-x={-Math.PI/2}><circleGeometry args={[.43,24]}/><meshStandardMaterial color="#77bfcd" roughness={.3} metalness={.07}/></mesh>
+  </group>
+  <group position={[16,.3,6.5]}>
+   <mesh receiveShadow><boxGeometry args={[7.7,.12,4.4]}/><meshStandardMaterial color="#4e5a61" roughness={.88}/></mesh>
+   {[-2.6,0,2.6].map(offset=><group key={offset} position={[offset,.08,0]}>{[-.63,.63].map(side=><mesh key={side} position={[side,0,0]}><boxGeometry args={[.055,.025,3.55]}/><meshBasicMaterial color="#e5e2d7"/></mesh>)}</group>)}
+  </group>
+  {cars.map(item=><AssetObject key={item.id} model={item.model} item={{id:item.id,position:[item.position[0],.46,item.position[1]],rotation:item.rotation,scale:1.12}} castShadow={quality==='high'} receiveShadow/>)}
+ </group>
+}
+
+function SkyRoadDecks({quality}:{quality:Quality}){
+ return <group>
+  {SKY_ROAD_EXITS.map(exit=><group key={exit.id} position={[exit.position[0],-.2,exit.position[1]]} rotation-y={exit.rotation}>
+   <mesh receiveShadow castShadow={quality==='high'}>
+    <boxGeometry args={[exit.width*1.08,.86,exit.length]}/>
+    <meshStandardMaterial color="#667077" roughness={.76} metalness={.025}/>
+   </mesh>
+   {[-1,1].map(side=><mesh key={side} position={[side*exit.width*.55,.53,0]} castShadow={quality==='high'}>
+    <boxGeometry args={[.16,.24,exit.length+.12]}/>
+    <meshStandardMaterial color="#c8cbc8" roughness={.82}/>
+   </mesh>)}
+   {[-.28,.28].map(offset=><mesh key={offset} position={[0,-.69,exit.length*offset]} castShadow={quality==='high'}>
+    <boxGeometry args={[exit.width*.72,.72,.5]}/>
+    <meshStandardMaterial color="#515c63" roughness={.9}/>
+   </mesh>)}
+  </group>)}
+ </group>
+}
+
+const pointDistanceSquared=(a:[number,number],b:[number,number])=>(a[0]-b[0])**2+(a[1]-b[1])**2
+
+type HomePlacement={character:CityCharacter;model:KayKitBuildingModel;position:WorldPoint;rotation:number;scale:number;lot:BuildingLot}
+type LandmarkPlacement={landmark:CityLandmark;model:KayKitBuildingModel;position:WorldPoint;rotation:number;scale:number;lot:BuildingLot}
+type ResolvedCityLayout={
+ landmarkPlacements:LandmarkPlacement[]
+ homePlacements:HomePlacement[]
+ fillerBuildings:CityBuildingPlacement[]
+ landmarkLots:Map<string,BuildingLot>
+ homeLots:Map<string,BuildingLot>
+ occupiedPositions:[number,number][]
+}
+
+const CITY_BUILDING_TARGET=54
+const SCENIC_RESERVES:readonly {position:[number,number];radius:number}[]=[
+ {position:[-5.3,-11.9],radius:3.4},
+ {position:[1.6,-5.7],radius:3},
+ {position:[-3.5,10.9],radius:3.1},
+ {position:[12.2,10.7],radius:3.2},
+ {position:[-22.8,-14.5],radius:2.7},
+]
+
+const targetPosition=(point:{x:number;y:number})=>{
+ const [x,,z]=worldPosition(point.x,point.y)
+ return [x,z] as [number,number]
+}
+
+const claimNearestLot=(available:BuildingLot[],target:[number,number],key:string,preferredFamily?:BuildingLot['family'])=>{
+ let chosenIndex=0,chosenScore=Number.POSITIVE_INFINITY
+ available.forEach((lot,index)=>{
+  const familyPenalty=preferredFamily&&lot.family!==preferredFamily?2.2:0
+  const score=pointDistanceSquared(lot.position,target)+familyPenalty+(hashString(`${key}:${lot.id}`)%997)/1_000_000
+  if(score<chosenScore){chosenIndex=index;chosenScore=score}
+ })
+ return available.splice(chosenIndex,1)[0]
+}
+
+const layoutGridKey=([x,z]:[number,number])=>`${Math.max(0,Math.min(3,Math.floor((x+28)/14)))}:${Math.max(0,Math.min(2,Math.floor((z+19)/12.67)))}`
+const isScenicLot=(lot:BuildingLot)=>SCENIC_RESERVES.some(reserve=>pointDistanceSquared(lot.position,reserve.position)<reserve.radius**2)
+
+function resolveCityLayout(landmarks:readonly CityLandmark[],characters:readonly CityCharacter[]):ResolvedCityLayout{
+ const available=[...BUILDING_LOTS]
+ const landmarkLots=new Map<string,BuildingLot>()
+ const homeLots=new Map<string,BuildingLot>()
+
+ ;[...landmarks].sort((a,b)=>a.id.localeCompare(b.id)).forEach(landmark=>{
+  const family=buildingModelFor(landmark.kind,landmark.id)
+  const preferredFamily=Object.entries(BUILDING_MODELS).find(([,models])=>models.includes(family))?.[0] as BuildingLot['family']|undefined
+  landmarkLots.set(landmark.id,claimNearestLot(available,targetPosition(landmark),`landmark:${landmark.id}`,preferredFamily))
+ })
+ ;[...characters].slice(0,5).sort((a,b)=>a.id.localeCompare(b.id)).forEach(character=>{
+  homeLots.set(character.id,claimNearestLot(available,targetPosition(character.home),`home:${character.id}`,'residential'))
+ })
+
+ const landmarkPlacements=landmarks.map(landmark=>{
+  const lot=landmarkLots.get(landmark.id)!
+  const hash=hashString(`landmark:${landmark.id}`)
+  return {landmark,lot,model:buildingModelFor(landmark.kind,landmark.id),position:[lot.position[0],.369,lot.position[1]] as WorldPoint,rotation:lot.rotation,scale:1.16+(hash%4)*.018}
+ })
+ const homePlacements=characters.slice(0,5).map(character=>{
+  const lot=homeLots.get(character.id)!
+  const hash=hashString(`home:${character.id}`)
+  return {character,lot,model:BUILDING_MODELS.residential[hash%BUILDING_MODELS.residential.length],position:[lot.position[0],.369,lot.position[1]] as WorldPoint,rotation:lot.rotation,scale:1.12+(hash%3)*.025}
+ })
+
+ const occupiedLots=[...landmarkLots.values(),...homeLots.values()]
+ const districtCounts=new Map<string,number>()
+ const gridCounts=new Map<string,number>()
+ occupiedLots.forEach(lot=>{
+  districtCounts.set(lot.district,(districtCounts.get(lot.district)??0)+1)
+  const grid=layoutGridKey(lot.position)
+  gridCounts.set(grid,(gridCounts.get(grid)??0)+1)
+ })
+ const fillerBuildings:CityBuildingPlacement[]=[]
+ const fillerCount=Math.max(0,Math.min(available.length,CITY_BUILDING_TARGET-occupiedLots.length))
+ for(let index=0;index<fillerCount;index+=1){
+  let chosenIndex=0,chosenScore=Number.POSITIVE_INFINITY
+  available.forEach((lot,lotIndex)=>{
+   const nearest=occupiedLots.length?Math.min(...occupiedLots.map(item=>pointDistanceSquared(item.position,lot.position))):0
+   const score=(gridCounts.get(layoutGridKey(lot.position))??0)*180+(districtCounts.get(lot.district)??0)*42+(isScenicLot(lot)?10_000:0)-Math.min(nearest,110)*.32+(hashString(`fabric:${lot.id}`)%997)/1_000
+   if(score<chosenScore){chosenIndex=lotIndex;chosenScore=score}
+  })
+  const lot=available.splice(chosenIndex,1)[0]
+  occupiedLots.push(lot)
+  districtCounts.set(lot.district,(districtCounts.get(lot.district)??0)+1)
+  const grid=layoutGridKey(lot.position)
+  gridCounts.set(grid,(gridCounts.get(grid)??0)+1)
+  const depth=.65*lot.position[0]+.76*lot.position[1]
+  const models=depth>=8
+   ?lot.family==='residential'?BUILDING_MODELS.residential.slice(0,2):lot.family==='commercial'?(['building_E'] as const):(['building_F'] as const)
+   :BUILDING_MODELS[lot.family]
+  const model=models[hashString(lot.id)%models.length]
+  const baseScale=depth<=-7?1.1:depth>=8?.98:1.04
+  fillerBuildings.push({id:`fabric-${lot.id}`,family:lot.family,model,position:lot.position,rotation:lot.rotation,scale:baseScale+(hashString(`scale:${lot.id}`)%4)*.025})
+ }
+
+ return {
+  landmarkPlacements,homePlacements,fillerBuildings,landmarkLots,homeLots,
+  occupiedPositions:occupiedLots.map(lot=>lot.position),
+ }
+}
+
+function CityFabric({buildings,quality}:{buildings:readonly CityBuildingPlacement[];quality:Quality}){
+ return <group>
+  <AssetInstances model="base" receiveShadow items={buildings.map(building=>({id:`lot-${building.id}`,position:[building.position[0],.238,building.position[1]],rotation:building.rotation,scale:ROAD_TILE_SCALE}))}/>
+  {([...BUILDING_MODELS.residential,...BUILDING_MODELS.commercial,...BUILDING_MODELS.public] as KayKitBuildingModel[]).map(model=><AssetInstances key={model} model={model} castShadow={quality==='high'} receiveShadow items={buildings.filter(building=>building.model===model).map(building=>({id:building.id,position:[building.position[0],.369,building.position[1]],rotation:building.rotation,scale:building.scale}))}/>) }
+ </group>
+}
+
+function ResidentialHomes({homes,quality,language,onSelect}:{homes:readonly HomePlacement[];quality:Quality;language:'zh'|'en';onSelect:(id:string)=>void}){
+ return <group>
+  <AssetInstances model="base" receiveShadow items={homes.map(home=>({id:`home-lot-${home.character.id}`,position:[home.position[0],.238,home.position[2]],rotation:home.rotation,scale:ROAD_TILE_SCALE}))}/>
+  {BUILDING_MODELS.residential.map(model=><AssetInstances key={model} model={model} castShadow={quality==='high'} receiveShadow items={homes.filter(home=>home.model===model).map(home=>({id:`home-${home.character.id}`,position:home.position,rotation:home.rotation,scale:home.scale}))}/>) }
+  {homes.map(home=><Html key={`home-label-${home.character.id}`} center position={[home.position[0],home.position[1]+BUILDING_HEIGHT[home.model]*home.scale+.58,home.position[2]]} zIndexRange={[24,2]}>
+   <button type="button" className="world3d-home" onClick={event=>{event.stopPropagation();onSelect(home.character.id)}} aria-label={language==='zh'?`${home.character.name}的家`:`${home.character.name}'s home`}><span aria-hidden>⌂</span>{home.character.name}</button>
+  </Html>)}
+ </group>
+}
+
+const ROAD_PROPS=new Set<KayKitPropModel>(['streetlight','trafficlight_A','trafficlight_B','trafficlight_C','firehydrant','car_sedan','car_taxi','car_police','car_hatchback','car_stationwagon'])
+
+function StreetLife({quality,occupiedPositions}:{quality:Quality;occupiedPositions:readonly [number,number][]}){
+ const qualityPlacements=quality==='high'?STREET_PROPS:STREET_PROPS.filter((_,index)=>index%2===0)
+ const placements=qualityPlacements.filter(item=>ROAD_PROPS.has(item.model)||occupiedPositions.every(position=>pointDistanceSquared(position,item.position)>4.4))
+ const staticPlacements=placements.filter(item=>!item.model.startsWith('car_'))
+ const models=Array.from(new Set(staticPlacements.map(item=>item.model)))
+ const cars=placements.filter(item=>item.model.startsWith('car_'))
+ return <group>
+  {models.map(model=><AssetInstances key={model} model={model} castShadow={quality==='high'} receiveShadow items={staticPlacements.filter(item=>item.model===model).map(item=>({
+   id:item.id,
+   position:[item.position[0],.37,item.position[1]],
+   rotation:item.rotation,
+   scale:item.scale,
+  }))}/>) }
+  {cars.map(item=><AssetObject key={item.id} model={item.model} item={{id:item.id,position:[item.position[0],.47,item.position[1]],rotation:item.rotation,scale:item.scale}} castShadow={quality==='high'} receiveShadow/>)}
+ </group>
+}
+
+function Trees({quality,occupiedPositions}:{quality:Quality;occupiedPositions:readonly [number,number][]}){
+ const qualityTrees=quality==='high'?TREES:TREES.filter((_,index)=>index%2===0)
+ const trees=qualityTrees.filter(tree=>occupiedPositions.every(position=>pointDistanceSquared(position,tree)>4.2))
+ return <group>
+  <Instances limit={trees.length} castShadow={quality==='high'}>
+   <cylinderGeometry args={[.09,.15,.62,7]}/><meshStandardMaterial color="#75543c" roughness={1}/>
+   {trees.map(([x,z],index)=><Instance key={`trunk-${index}`} position={[x,.68,z]} rotation={[0,index*.72,0]}/>) }
+  </Instances>
+  <Instances limit={trees.length} castShadow={quality==='high'}>
+   <icosahedronGeometry args={[.52,1]}/><meshStandardMaterial color="#4f9368" roughness={.96}/>
+   {trees.map(([x,z],index)=><Instance key={`crown-${index}`} position={[x,1.28+(index%3)*.07,z]} scale={[.9+(index%2)*.16,1.08,.9]}/>) }
+  </Instances>
+ </group>
+}
+
+function LandmarkModelInstances({model,items,selectedId,quality,onHover,onSelect}:{model:KayKitBuildingModel;items:readonly LandmarkPlacement[];selectedId?:string;quality:Quality;onHover:(id?:string)=>void;onSelect:(landmark:CityLandmark)=>void}){
+ const {geometry,material}=useKayKitMesh(model)
+ return <Instances geometry={geometry} material={material} limit={items.length} castShadow={quality==='high'} receiveShadow>
+  {items.map(item=><Instance
+   key={item.landmark.id}
+   position={item.position}
+   rotation={[0,item.rotation,0]}
+   scale={item.landmark.id===selectedId?item.scale*1.07:item.scale}
+   onClick={(event:ThreeEvent<MouseEvent>)=>{event.stopPropagation();onSelect(item.landmark)}}
+   onPointerOver={event=>{event.stopPropagation();onHover(item.landmark.id)}}
+   onPointerOut={()=>onHover(undefined)}
+  />)}
+ </Instances>
+}
+
+function LandmarkBuildings({placements,selectedId,hoveredId,language,night,quality,onHover,onSelect}:{placements:readonly LandmarkPlacement[];selectedId?:string;hoveredId?:string;language:'zh'|'en';night:boolean;quality:Quality;onHover:(id?:string)=>void;onSelect:(landmark:CityLandmark)=>void}){
+ return <group>
+  <AssetInstances model="base" receiveShadow items={placements.map(item=>({id:`landmark-lot-${item.landmark.id}`,position:[item.position[0],.238,item.position[2]],rotation:item.rotation,scale:ROAD_TILE_SCALE}))}/>
+  {([...BUILDING_MODELS.residential,...BUILDING_MODELS.commercial,...BUILDING_MODELS.public] as KayKitBuildingModel[]).map(model=>{
+   const items=placements.filter(item=>item.model===model)
+   return items.length?<LandmarkModelInstances key={model} model={model} items={items} selectedId={selectedId} quality={quality} onHover={onHover} onSelect={onSelect}/>:null
+  })}
+  {placements.map(item=>{
+   const visible=item.landmark.id===selectedId||item.landmark.id===hoveredId
+   if(!visible)return null
+   const colors=KIND_COLORS[item.landmark.kind]??KIND_COLORS.civic
+   const height=BUILDING_HEIGHT[item.model]*item.scale
+   return <group key={`overlay-${item.landmark.id}`} position={item.position}>
+    <mesh rotation-x={-Math.PI/2} position-y={.035}>
+     <ringGeometry args={[1.55,1.8,40]}/><meshBasicMaterial color={colors.glow} transparent opacity={item.landmark.id===selectedId ? .95 : .58} side={THREE.DoubleSide}/>
     </mesh>
-    <mesh castShadow={quality==='high'} position-y={height+.22} rotation-y={Math.PI/4} scale={[.82,.32,.82]}>
-     <octahedronGeometry args={[width*.7,0]}/><meshStandardMaterial color={palette[1]} roughness={.82}/>
-    </mesh>
-    <mesh position={[0,height*.62,.466]}>
-     <planeGeometry args={[.24,.3]}/><meshBasicMaterial color="#91cad1"/>
-    </mesh>
+    <Html center position={[0,height+.7,0]} zIndexRange={[30,0]}>
+     <button type="button" className={`world3d-pin world3d-pin--place ${item.landmark.id===selectedId?'is-selected':''}`} onClick={event=>{event.stopPropagation();onSelect(item.landmark)}}>
+      <span aria-hidden>{item.landmark.kind==='nature'?'✦':'⌂'}</span><strong>{item.landmark.name}</strong><small>{language==='zh'?'查看地点':'View place'}</small>
+     </button>
+    </Html>
+    {item.landmark.id===selectedId&&<pointLight position={[0,height+.6,0]} color={colors.glow} intensity={night?5:2.4} distance={6}/>}
    </group>
   })}
  </group>
 }
 
-function Trees({quality}:{quality:Quality}){
- return <group>
-  <Instances limit={TREES.length} castShadow={quality==='high'}>
-   <cylinderGeometry args={[.08,.13,.55,7]}/><meshStandardMaterial color="#77583d" roughness={1}/>
-   {TREES.map(([x,z],index)=><Instance key={`trunk-${index}`} position={[x,.75,z]}/>) }
-  </Instances>
-  <Instances limit={TREES.length} castShadow={quality==='high'}>
-   <icosahedronGeometry args={[.48,0]}/><meshStandardMaterial color="#4f9368" roughness={.96}/>
-   {TREES.map(([x,z],index)=><Instance key={`crown-${index}`} position={[x,1.25+(index%3)*.06,z]} scale={[.9+(index%2)*.16,1.1,.9]}/>) }
-  </Instances>
- </group>
-}
-
-function LandmarkBuilding({landmark,selected,language,night,quality,onSelect}:{landmark:CityLandmark;selected:boolean;language:'zh'|'en';night:boolean;quality:Quality;onSelect:()=>void}){
+function CharacterMarker({character,lot,route,active,actors,serverTime,reducedMotion,language,onClick,onEvent,onJourneyElapsed}:{character:CityCharacter;lot?:BuildingLot;route?:PedestrianRoute;active:boolean;actors:ActorRegistry;serverTime?:string;reducedMotion:boolean;language:'zh'|'en';onClick:()=>void;onEvent:(eventId:string)=>void;onJourneyElapsed?:()=>void}){
  const [hovered,setHovered]=useState(false)
  useCursor(hovered)
- const position=worldPosition(landmark.x,landmark.y,.47)
- const seed=hashString(landmark.id)
- const colors=KIND_COLORS[landmark.kind]??KIND_COLORS.civic
- const height=1.7+(seed%5)*.22
- const width=1.55+(seed%3)*.18
- const select=(event:ThreeEvent<MouseEvent>)=>{event.stopPropagation();onSelect()}
- return <group position={position} scale={selected||hovered?1.08:1} onClick={select} onPointerOver={event=>{event.stopPropagation();setHovered(true)}} onPointerOut={()=>setHovered(false)}>
-  <mesh castShadow={quality==='high'} receiveShadow position-y={height/2}>
-   {landmark.kind==='culture'?<cylinderGeometry args={[width*.72,width*.82,height,10]}/>:<boxGeometry args={[width,height,width*.8]}/>} 
-   <meshStandardMaterial color={colors.wall} roughness={.78} emissive={selected?colors.glow:'#000000'} emissiveIntensity={selected ? .18 : 0}/>
+ const actor=useRef<THREE.Group>(null)
+ const characterHash=hashString(character.id)
+ const fallback=worldPosition(character.location.x,character.location.y,.375)
+ const action=character.worldAction
+ // Rotation points from a parcel to its nearest road. Residents stand on that
+ // pavement, so moving a building to a legal parcel also moves its resident.
+ const lateral=action?.state==='waiting_at_event'?(action.participant_index ? .7 : -.7):((characterHash%5)-2)*.13
+ const forward=lot?[Math.sin(lot.rotation),Math.cos(lot.rotation)]:[0,0]
+ const side=lot?[Math.cos(lot.rotation),-Math.sin(lot.rotation)]:[0,0]
+ const position:WorldPoint=lot?[
+  THREE.MathUtils.clamp(lot.position[0]+forward[0]*1.56+side[0]*lateral,-WORLD_WIDTH/2+1.5,WORLD_WIDTH/2-1.5),
+  .375,
+  THREE.MathUtils.clamp(lot.position[1]+forward[1]*1.56+side[1]*lateral,-WORLD_DEPTH/2+1.5,WORLD_DEPTH/2-1.5),
+ ]:fallback
+ const serverSkew=useMemo(()=>{const parsed=Date.parse(serverTime||'');return Number.isFinite(parsed)?parsed-Date.now():0},[serverTime])
+ const startedAt=Date.parse(action?.started_at||''),arrivesAt=Date.parse(action?.arrives_at||'')
+ const alreadyArrived=action?.state==='walking_to_event'&&Number.isFinite(arrivesAt)&&Date.now()+serverSkew>=arrivesAt
+ const desiredState=alreadyArrived?'waiting_at_event':action?.state??'idle'
+ const [visualState,setVisualState]=useState(desiredState)
+ const arrivalNotified=useRef('')
+ useEffect(()=>setVisualState(desiredState),[desiredState])
+ useEffect(()=>{
+  const current=actor.current
+  if(!current)return
+  const registry=actors.current
+  registry.set(character.id,current)
+  return()=>{if(registry.get(character.id)===current)registry.delete(character.id)}
+ },[actors,character.id])
+ useEffect(()=>{arrivalNotified.current=''},[action?.event_id])
+ useFrame(()=>{
+  if(!actor.current||!route||action?.state!=='walking_to_event')return
+  const duration=arrivesAt-startedAt
+  const progress=reducedMotion?1:duration>0?(Date.now()+serverSkew-startedAt)/duration:1
+  const sample=samplePedestrianRoute(route,progress)
+  actor.current.position.set(...sample.position)
+  actor.current.rotation.y=sample.rotation
+  if(sample.done&&action.event_id&&arrivalNotified.current!==action.event_id){
+   arrivalNotified.current=action.event_id
+   setVisualState('waiting_at_event')
+   onJourneyElapsed?.()
+  }
+ })
+ const avatar=character.avatar??defaultAvatar
+ const cityAsset=avatar.model?.startsWith('city-')??false
+ const characterScale=cityAsset?(active||hovered?.19:.175):(active||hovered?.23:.21)
+ const color=`hsl(${characterHash%360} 62% 63%)`
+ const moving=visualState==='walking_to_event'
+ const waiting=visualState==='waiting_at_event'
+ const animation=moving?'walk':waiting?'look_around':character.animationCue??'idle'
+ const stateLabel=language==='zh'?({idle:'空闲',event_pending:'有待办',walking_to_event:'前往事件',waiting_at_event:'等待查看'} as const)[visualState]:({idle:'Idle',event_pending:'Pending',walking_to_event:'On the way',waiting_at_event:'Waiting'} as const)[visualState]
+ const statusGlyph=moving?'➜':waiting?'!':visualState==='event_pending'?'✦':'·'
+ return <group ref={actor} position={position} onClick={event=>{event.stopPropagation();onClick()}} onPointerDown={event=>event.stopPropagation()} onPointerOver={event=>{event.stopPropagation();setHovered(true)}} onPointerOut={()=>setHovered(false)}>
+  <Character3D avatar={avatar} animation={animation} name={character.name} seed={character.id} scale={characterScale}/>
+  <mesh position-y={.5}>
+   <cylinderGeometry args={[.48,.48,1,12]}/><meshBasicMaterial transparent opacity={0} depthWrite={false}/>
   </mesh>
-  <mesh castShadow={quality==='high'} position-y={height+.32} rotation-y={Math.PI/4} scale={[1,.45,1]}>
-   <octahedronGeometry args={[width*.73,0]}/><meshStandardMaterial color={colors.roof} roughness={.75}/>
+  <mesh position-y={.012} rotation-x={-Math.PI/2}>
+   <ringGeometry args={[.25,.34,28]}/><meshBasicMaterial color={active?'#ff8d5b':color} transparent opacity={active ? .95 : .62} side={THREE.DoubleSide}/>
   </mesh>
-  {Array.from({length:3},(_,index)=><mesh key={index} position={[(index-1)*.42,height*.55,width*.405+.008]}>
-   <planeGeometry args={[.22,.3]}/><meshBasicMaterial color={night?colors.glow:'#79b9c8'} toneMapped={false}/>
-  </mesh>)}
-  <mesh position={[0,.22,width*.42+.015]}><planeGeometry args={[.3,.44]}/><meshStandardMaterial color={colors.roof}/></mesh>
-  {(selected||hovered)&&<Html center position={[0,height+1.15,0]} zIndexRange={[30,0]}>
-   <button type="button" className={`world3d-pin world3d-pin--place ${selected?'is-selected':''}`} onClick={event=>{event.stopPropagation();onSelect()}}>
-    <span aria-hidden>{landmark.kind==='nature'?'✦':'⌂'}</span><strong>{landmark.name}</strong><small>{language==='zh'?'查看地点':'View place'}</small>
-   </button>
-  </Html>}
-  {selected&&<pointLight position={[0,height+1,0]} color={colors.glow} intensity={3} distance={5}/>} 
- </group>
-}
-
-function CharacterMarker({character,active,language,onClick}:{character:CityCharacter;active:boolean;language:'zh'|'en';onClick:()=>void}){
- const [hovered,setHovered]=useState(false)
- useCursor(hovered)
- const position=worldPosition(character.location.x,character.location.y,.9)
- const color=`hsl(${hashString(character.id)%360} 62% 63%)`
- const initials=character.name.trim().slice(0,1).toUpperCase()
- return <group position={position} onPointerOver={event=>{event.stopPropagation();setHovered(true)}} onPointerOut={()=>setHovered(false)}>
-  <mesh position-y={-.54} rotation-x={-Math.PI/2}>
-   <ringGeometry args={[.42,.53,24]}/><meshBasicMaterial color={active?'#ff8d5b':color} transparent opacity={active ? .95 : .62} side={THREE.DoubleSide}/>
-  </mesh>
-  <Html center position={[0,.35,0]} zIndexRange={[40,10]}>
-   <button type="button" className={`world3d-character ${active?'is-active':''}`} style={{'--character-color':color} as React.CSSProperties} onClick={event=>{event.stopPropagation();onClick()}} aria-label={`${language==='zh'?'与':'Talk to '}${character.name}${language==='zh'?'互动':''}`}>
-    <span aria-hidden>{initials}<i/></span>
-    <b>{character.name}</b>
-    {(hovered||active)&&<small>{character.location.place||(language==='zh'?'正在城市中':'Around town')}</small>}
-   </button>
+  <Html center position={[0,1,0]} zIndexRange={[40,10]}>
+   <div className="world3d-character-ui" style={{'--character-color':color,'--character-ui-shift':action?.event_id?`${action.participant_index ? 12 : -12}px`:'0px'} as React.CSSProperties}>
+    <button type="button" className={`world3d-character-status is-${visualState}`} onPointerDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();if(action?.event_id&&visualState!=='event_pending')onEvent(action.event_id);else onClick()}} aria-label={stateLabel}>{statusGlyph}</button>
+    <button type="button" className={`world3d-character world3d-character--model ${active?'is-active':''}`} onPointerDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();onClick()}} aria-label={`${language==='zh'?'跟随':'Follow '}${character.name}`}>
+     <b>{character.name}</b>
+     {(hovered||active||moving||waiting)&&<small>{moving||waiting?stateLabel:character.location.place||(language==='zh'?'正在城市中':'Around town')}</small>}
+    </button>
+   </div>
   </Html>
  </group>
 }
 
-function Harbour({quality}:{quality:Quality}){
- return <group position={[10,.55,7]}>
-  {[-2,-.8,.4,1.6].map((x,index)=><mesh key={x} position={[x,0,index%2*.4]} castShadow={quality==='high'}><boxGeometry args={[.86,.22,2.8]}/><meshStandardMaterial color="#987050" roughness={.9}/></mesh>)}
-  <group position={[3,.2,-.5]} rotation-y={-.2}>
-   <mesh><boxGeometry args={[1.5,.36,.65]}/><meshStandardMaterial color="#f3eee0"/></mesh>
-   <mesh position={[0,.65,0]}><coneGeometry args={[.08,1.5,8]}/><meshStandardMaterial color="#755b45"/></mesh>
-   <mesh position={[.35,.7,0]} rotation-z={-.15}><planeGeometry args={[.72,.72]}/><meshStandardMaterial color="#e78464" side={THREE.DoubleSide}/></mesh>
-  </group>
- </group>
-}
-
-function Lighthouse({night,quality}:{night:boolean;quality:Quality}){
- return <group position={[-14,1.1,4.8]}>
-  <mesh castShadow={quality==='high'}><cylinderGeometry args={[.28,.48,2.2,12]}/><meshStandardMaterial color="#f4eee0"/></mesh>
-  <mesh position-y={1.18}><cylinderGeometry args={[.42,.42,.32,12]}/><meshStandardMaterial color="#c96758"/></mesh>
-  <mesh position-y={1.5}><coneGeometry args={[.5,.42,12]}/><meshStandardMaterial color="#b9554b"/></mesh>
-  {night&&<pointLight position={[0,1.28,0]} color="#ffe2a0" intensity={8} distance={10}/>} 
- </group>
-}
-
-function Clouds({reducedMotion}:{reducedMotion:boolean}){
- return <group>
-  {[[-9,8,-8],[7,10,-7],[12,7,2]].map(([x,y,z],index)=><Float key={index} speed={reducedMotion?0:.45+index*.1} rotationIntensity={reducedMotion?0:.08} floatIntensity={reducedMotion?0:.45}>
-   <group position={[x,y,z]} scale={1+index*.18}>{[-.55,0,.55].map((offset,part)=><mesh key={part} position={[offset,part%2*.15,0]}><sphereGeometry args={[.72+(part%2)*.16,12,8]}/><meshStandardMaterial color="#fffaf0" transparent opacity={.64} depthWrite={false} roughness={1}/></mesh>)}</group>
-  </Float>)}
- </group>
-}
-
-export function WorldScene({characters,landmarks,activeCharacterId,language,timeSlot,reducedMotion,selectedLandmarkId,focus,focusVersion,viewMode,quality,onCharacterClick,onLandmarkSelect}:SceneProps){
+export function WorldScene({characters,landmarks,followedCharacterId,serverTime,language,timeSlot,reducedMotion,selectedLandmarkId,focus,focusVersion,viewMode,quality,onCharacterClick,onCharacterEvent,onJourneyElapsed,onLandmarkSelect}:SceneProps){
  const night=timeSlot==='evening'
- const stars=useMemo(()=>night?(quality==='high'?140:60):0,[night,quality])
+ const [hoveredLandmarkId,setHoveredLandmarkId]=useState<string>()
+ const actors=useRef(new Map<string,THREE.Group>())
+ const layout=useMemo(()=>resolveCityLayout(landmarks,characters),[characters,landmarks])
+ const characterLot=(character:CityCharacter)=>character.locationId?layout.landmarkLots.get(character.locationId):layout.homeLots.get(character.id)
+ const targetLot=(character:CityCharacter)=>character.worldAction?.target_location_id?layout.landmarkLots.get(character.worldAction.target_location_id):undefined
+ const resolvedFocus=useMemo(()=>{
+  if(!focus)return null
+  const selectedLot=selectedLandmarkId?layout.landmarkLots.get(selectedLandmarkId):undefined
+  if(selectedLot)return [selectedLot.position[0],.5,selectedLot.position[1]] as WorldPoint
+  const candidates=[
+   ...landmarks.map(landmark=>({raw:targetPosition(landmark),lot:layout.landmarkLots.get(landmark.id)})),
+   ...characters.map(character=>({raw:targetPosition(character.location),lot:character.locationId?layout.landmarkLots.get(character.locationId):layout.homeLots.get(character.id)})),
+  ].filter((item):item is {raw:[number,number];lot:BuildingLot}=>Boolean(item.lot))
+  const rawFocus:[number,number]=[focus[0],focus[2]]
+  const nearest=candidates.reduce<{raw:[number,number];lot:BuildingLot}|undefined>((best,item)=>!best||pointDistanceSquared(item.raw,rawFocus)<pointDistanceSquared(best.raw,rawFocus)?item:best,undefined)
+  return nearest?[nearest.lot.position[0],.5,nearest.lot.position[1]] as WorldPoint:focus
+ },[characters,focus,landmarks,layout.homeLots,layout.landmarkLots,selectedLandmarkId])
+ useCursor(Boolean(hoveredLandmarkId))
  return <>
-  <color attach="background" args={[night?'#21384f':timeSlot==='morning'?'#bce7e2':'#9bd4e0']}/>
-  <ambientLight intensity={night ? .38 : .58} color={night?'#7891c8':'#fff7e8'}/>
-  <hemisphereLight args={[night?'#5b72aa':'#d9f3f4',night?'#25362f':'#58774d',night ? .52 : .78]}/>
-  <directionalLight castShadow={quality==='high'} position={night?[-9,15,-8]:[10,18,8]} intensity={night ? .72 : 1.45} color={night?'#91a7dd':'#ffe8bd'} shadow-mapSize={[quality==='high'?1536:512,quality==='high'?1536:512]} shadow-camera-far={50} shadow-camera-left={-22} shadow-camera-right={22} shadow-camera-top={18} shadow-camera-bottom={-18}/>
-  <Ocean night={night} reducedMotion={reducedMotion}/>
-  <IslandBase/>
+  <FloatingCityBase quality={quality}/>
+  <SkyRoadDecks quality={quality}/>
   <DistrictGround language={language}/>
   <RoadNetwork/>
-  <TinyBuildings quality={quality}/>
-  <Trees quality={quality}/>
-  <Harbour quality={quality}/>
-  <Lighthouse night={night} quality={quality}/>
-  {landmarks.map(landmark=><LandmarkBuilding key={landmark.id} landmark={landmark} selected={selectedLandmarkId===landmark.id} language={language} night={night} quality={quality} onSelect={()=>onLandmarkSelect(landmark)}/>)}
-  {characters.slice(0,24).map(character=><CharacterMarker key={character.id} character={character} active={character.id===activeCharacterId} language={language} onClick={()=>onCharacterClick(character.id)}/>)}
-  <Clouds reducedMotion={reducedMotion}/>
-  {night&&<Sparkles count={stars} scale={[42,16,30]} position={[0,11,0]} size={1.7} speed={reducedMotion?0:.15} color="#fff2c9"/>}
-  <CameraRig focus={focus} focusVersion={focusVersion} reducedMotion={reducedMotion} viewMode={viewMode}/>
+  <CourtyardFeatures quality={quality}/>
+  <CityFabric buildings={layout.fillerBuildings} quality={quality}/>
+  <ResidentialHomes homes={layout.homePlacements} quality={quality} language={language} onSelect={onCharacterClick}/>
+  <StreetLife quality={quality} occupiedPositions={layout.occupiedPositions}/>
+  <Trees quality={quality} occupiedPositions={layout.occupiedPositions}/>
+  <LandmarkBuildings placements={layout.landmarkPlacements} selectedId={selectedLandmarkId} hoveredId={hoveredLandmarkId} language={language} night={night} quality={quality} onHover={setHoveredLandmarkId} onSelect={onLandmarkSelect}/>
+  {characters.slice(0,24).map(character=>{
+   const origin=characterLot(character),target=targetLot(character),participantIndex=character.worldAction?.participant_index??0
+   const route=character.worldAction?.state==='walking_to_event'&&origin&&target?buildPedestrianRoute(origin,target,{seed:`${character.worldAction.event_id}:${character.id}`,startLateralOffset:participantIndex ? .28 : -.28,endLateralOffset:participantIndex ? .7 : -.7}):undefined
+   return <CharacterMarker key={character.id} character={character} lot={origin} route={route} active={character.id===followedCharacterId} actors={actors} serverTime={serverTime} reducedMotion={reducedMotion} language={language} onClick={()=>onCharacterClick(character.id)} onEvent={onCharacterEvent} onJourneyElapsed={onJourneyElapsed}/>
+  })}
+  <CameraRig focus={resolvedFocus} focusVersion={focusVersion} followedCharacterId={followedCharacterId} actors={actors} reducedMotion={reducedMotion} viewMode={viewMode}/>
  </>
 }
+
+ALL_WORLD_MODELS.forEach(model=>useGLTF.preload(`${KAYKIT_ASSET_BASE}/${model}.gltf`))

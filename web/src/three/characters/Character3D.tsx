@@ -1,8 +1,9 @@
-import { useRef } from 'react'
+import { Component, Suspense, useRef, type ErrorInfo, type ReactNode } from 'react'
 import { useFrame } from '@react-three/fiber'
 import type { Group } from 'three'
 import { MathUtils } from 'three'
 import { resolveAvatar, shiftColor, stableCharacterTilt } from './avatarMappings'
+import { AssetCharacter3D } from './AssetCharacter3D'
 import type { Character3DProps, CharacterMotion } from './types'
 
 const HALF_PI = Math.PI / 2
@@ -109,7 +110,7 @@ function Leg({ x, color, kind, skin, legRef }: { x: number; color: string; kind:
   </group>
 }
 
-export function Character3D({ avatar, animation = 'idle', detail = 'full', mirrored = false, name, position = [0, 0, 0], rotation = [0, 0, 0], scale = 1, seed }: Character3DProps) {
+export function ProceduralCharacter3D({ avatar, animation = 'idle', detail = 'full', mirrored = false, name, position = [0, 0, 0], rotation = [0, 0, 0], scale = 1, seed }: Character3DProps) {
   const root = useRef<Group>(null)
   const body = useRef<Group>(null)
   const head = useRef<Group>(null)
@@ -162,4 +163,38 @@ export function Character3D({ avatar, animation = 'idle', detail = 'full', mirro
       </group>
     </group>
   </group>
+}
+
+class CharacterAssetBoundary extends Component<{
+  children: ReactNode
+  fallback: ReactNode
+  resetKey: string
+}, { failed: boolean }> {
+  state = { failed: false }
+
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('LingoLife character asset failed to render; using procedural fallback.', error, info.componentStack)
+  }
+
+  componentDidUpdate(previous: Readonly<{ resetKey: string }>) {
+    if (this.state.failed && previous.resetKey !== this.props.resetKey) this.setState({ failed: false })
+  }
+
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children
+  }
+}
+
+export function Character3D(props: Character3DProps) {
+  const fallback = <ProceduralCharacter3D {...props} />
+  const resetKey = `${props.avatar.model ?? 'chibi'}:${props.avatar.hair}:${props.avatar.outfit}:${props.avatar.accessory}`
+  return <CharacterAssetBoundary fallback={fallback} resetKey={resetKey}>
+    <Suspense fallback={fallback}>
+      <AssetCharacter3D {...props} />
+    </Suspense>
+  </CharacterAssetBoundary>
 }

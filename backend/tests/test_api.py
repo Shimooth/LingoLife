@@ -1,5 +1,9 @@
+from concurrent.futures import ThreadPoolExecutor
+import threading
+
 from fastapi.testclient import TestClient
 
+from lingolife.animation import ANIMATION_CUES
 from lingolife.app import create_app
 from lingolife.config import Settings
 from lingolife.models import AIResult, EnglishFeedback
@@ -73,6 +77,8 @@ def test_health_and_new_room(tmp_path):
     assert room["messages"][0]["speaker"] == "npc"
     assert room["messages"][0]["text"] == "I had a terrible day at work..."
     assert room["messages"][0]["created_at"]
+    assert room["npc"]["animation_cue"] in ANIMATION_CUES
+    assert room["active_event"]["stage"]["animation_cue"] == room["npc"]["animation_cue"]
 
 
 def test_chat_clamps_and_is_idempotent(tmp_path):
@@ -84,8 +90,31 @@ def test_chat_clamps_and_is_idempotent(tmp_path):
     assert first.json()["relationship_change"] == 5
     assert first.json()["english_xp_change"] == 5
     assert first.json()["stats"] == {"relationship": 40, "mood": 38, "english_xp": 5}
+    assert first.json()["animation"] == "happy"
+    assert first.json()["animation_cue"] in ANIMATION_CUES
     assert stub.calls == 1
     assert len(c.get("/api/v1/room", headers=headers).json()["messages"]) == 3
+
+
+def test_legacy_cached_chat_is_upgraded_to_the_animation_cue_contract(tmp_path):
+    import json
+
+    c = client(tmp_path, Stub())
+    auth_headers = auth(c)
+    headers = {**auth_headers, "Idempotency-Key": "legacy-animation-01"}
+    first = c.post("/api/v1/chat", headers=headers, json={"message": "How was your day?"}).json()
+    player_id = c.app.state.db.authenticate(auth_headers["Authorization"][7:])["player_id"]
+    legacy = dict(first)
+    legacy.pop("animation_cue", None)
+    legacy.get("agent", {}).pop("animation_cue", None)
+    with c.app.state.db._connection:
+        c.app.state.db._connection.execute(
+            "UPDATE chat_requests SET response_json=? WHERE player_id=? AND idempotency_key=?",
+            (json.dumps(legacy), player_id, "legacy-animation-01"),
+        )
+    replay = c.post("/api/v1/chat", headers=headers, json={"message": "ignored"}).json()
+    assert replay["animation"] == "happy"
+    assert replay["animation_cue"] == "happy"
 
 
 def test_positive_relationship_growth_has_a_per_character_daily_cap(tmp_path):
@@ -197,6 +226,53 @@ def test_password_login_restores_the_same_account_on_another_device(tmp_path):
     ).fetchone()[0]
     assert stored.startswith("pbkdf2_sha256$600000$")
     assert "spaces and symbols" not in stored
+
+
+def test_logged_in_npc_list_and_city_reads_do_not_lock_a_file_database(tmp_path):
+    database_path = tmp_path / "concurrent-reads.db"
+    settings = Settings(
+        database_url=f"sqlite:///{database_path}",
+        web_root=str(tmp_path / "none"),
+    )
+    first = TestClient(create_app(settings, Stub()))
+    headers = auth(first, username="parallel-reader")
+    # Materialize the account's default resident before opening additional
+    # application connections. The concurrent requests below still exercise
+    # authentication activity writes and the city's lazy Agent/world refresh.
+    assert first.get("/api/v1/npcs", headers=headers).status_code == 200
+    # Independent application instances model concurrent server workers and,
+    # crucially, give every request its own SQLite connection. Sharing one
+    # sqlite3.Connection object across simultaneous Python threads would test
+    # the driver object rather than file-level locking behavior.
+    clients = [first, *(TestClient(create_app(settings, Stub())) for _ in range(7))]
+
+    assert database_path.is_file()
+    assert first.app.state.db.path != ":memory:"
+    assert all(current.app.state.db._connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+               for current in clients)
+
+    requests = [
+        (current, "/api/v1/npcs" if index % 2 == 0 else "/api/v1/city")
+        for index, current in enumerate(clients)
+    ]
+    ready = threading.Barrier(len(requests))
+
+    def read(client_and_path):
+        current, path = client_and_path
+        try:
+            ready.wait(timeout=10)
+            response = current.get(path, headers=headers)
+            return path, response.status_code, response.text
+        except Exception as exc:  # Keep SQLite failures visible in one assertion.
+            return path, None, f"{type(exc).__name__}: {exc}"
+
+    with ThreadPoolExecutor(max_workers=len(requests)) as pool:
+        results = list(pool.map(read, requests))
+
+    failures = [result for result in results
+                if result[1] != 200 or "database is locked" in result[2].casefold()]
+    assert not failures, failures
+    assert {path for path, _, _ in results} == {"/api/v1/npcs", "/api/v1/city"}
 
 
 def test_legacy_account_can_set_password_once_and_password_change_revokes_other_sessions(tmp_path):

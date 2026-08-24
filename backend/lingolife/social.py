@@ -2,12 +2,37 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from itertools import combinations
 from typing import Any, Mapping, Protocol, Sequence
 
+from .animation import AnimationCue, animation_cue
+
 
 SOCIAL_ACTIONS = {"mediate", "encourage", "give_space", "let_them_handle_it"}
+OPEN_SOCIAL_STATUSES = {"traveling", "awaiting_observation", "awaiting_management"}
+SOCIAL_TRAVEL_SECONDS = (24, 34)
+SOCIAL_EVENT_EXPIRY_HOURS = 24
+
+SOCIAL_TEMPLATE_CUES: dict[str, tuple[AnimationCue, AnimationCue]] = {
+    "shared_interest_chat": ("talk", "listen"),
+    "help_with_goal": ("talk", "happy"),
+    "unexpected_teamwork": ("push", "happy"),
+    "small_misunderstanding": ("talk", "sad"),
+}
+
+
+def social_animation_cues(event: Mapping[str, Any]) -> dict[str, AnimationCue]:
+    """Upgrade persisted social events and constrain all participant cues."""
+    raw_participants = event.get("participant_ids")
+    participants = ([str(value) for value in raw_participants[:2]]
+                    if isinstance(raw_participants, (list, tuple)) else [])
+    defaults = SOCIAL_TEMPLATE_CUES.get(str(event.get("template_id")), ("talk", "listen"))
+    outcome = event.get("outcome") if isinstance(event.get("outcome"), Mapping) else {}
+    supplied = outcome.get("animation_cues") or event.get("animation_cues") or {}
+    supplied = supplied if isinstance(supplied, Mapping) else {}
+    return {npc_id: animation_cue(supplied.get(npc_id), defaults[index])
+            for index, npc_id in enumerate(participants)}
 
 
 @dataclass(frozen=True)
@@ -54,6 +79,7 @@ class SocialRepository(Protocol):
                            npc_id: str | None = None, limit: int = 50) -> list[dict]: ...
     def get_social_event(self, player_id: str, event_id: str) -> dict | None: ...
     def save_social_event(self, player_id: str, event: dict) -> tuple[dict, bool]: ...
+    def update_social_event(self, player_id: str, event: dict) -> dict: ...
     def resolve_social_event(self, player_id: str, event_id: str, action: str,
                              changes: list[dict], memories: list[dict], outcome: dict,
                              managed: bool = False) -> dict: ...
@@ -61,6 +87,21 @@ class SocialRepository(Protocol):
 
 def _number(*parts: object) -> int:
     return int.from_bytes(hashlib.sha256("\0".join(map(str, parts)).encode()).digest()[:8], "big")
+
+
+def _utc(value: datetime | None = None) -> datetime:
+    current = value or datetime.now(timezone.utc)
+    return current.replace(tzinfo=timezone.utc) if current.tzinfo is None else current.astimezone(timezone.utc)
+
+
+def _timestamp(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return _utc(parsed)
+    except ValueError:
+        return None
 
 
 def _words(values: Sequence[str]) -> set[str]:
@@ -97,16 +138,27 @@ class SocialWorldEngine:
     def ensure_daily(self, player_id: str, profiles: Sequence[dict], plans: Mapping[str, dict],
                      game_day: date, current_slot: str = "afternoon",
                      location_names: Mapping[str, str] | None = None,
-                     runtime_states: Mapping[str, dict] | None = None) -> list[dict]:
+                     runtime_states: Mapping[str, dict] | None = None,
+                     now: datetime | None = None) -> list[dict]:
         day = game_day.isoformat()
+        current_time = _utc(now)
+        recent = self.repository.list_social_events(player_id, limit=20)
+        for event in recent:
+            if event.get("status") == "generated":  # Upgrade pre-journey events from older releases.
+                self._settle(player_id, event, "autonomous", managed=False)
+            elif event.get("status") in OPEN_SOCIAL_STATUSES:
+                # Residents wait for the observer for the rest of the game day.
+                # An unseen story is closed lazily on the next day's first read,
+                # so no background worker is required and no event blocks forever.
+                if str(event.get("date", "")) < day:
+                    self._settle(player_id, event, "autonomous", managed=False)
+                else:
+                    self._advance(player_id, event, current_time)
         existing = self.repository.list_social_events(player_id, day)
         if existing:
-            for event in existing:
-                if event.get("status") == "generated":
-                    self._settle(player_id, event, "autonomous", managed=False)
-            return self.repository.list_social_events(player_id, day)
+            return existing
         open_events = [event for event in self.repository.list_social_events(player_id, limit=20)
-                       if event.get("status") == "awaiting_management"]
+                       if event.get("status") in OPEN_SOCIAL_STATUSES]
         if open_events:
             return open_events
         if len(profiles) < 2:
@@ -126,14 +178,10 @@ class SocialWorldEngine:
             traits_a = {str(value).casefold() for value in profile_a.get("personality", [])}
             traits_b = {str(value).casefold() for value in profile_b.get("personality", [])}
             plan_a, plan_b = _plan_locations(plans.get(npc_a, {})), _plan_locations(plans.get(npc_b, {}))
-            slot_order = {"morning": 0, "afternoon": 1, "evening": 2}
-            meetings = sorted(((slot, place) for slot, place in plan_a.items() if plan_b.get(slot) == place),
-                              key=lambda item: (slot_order.get(item[0], 99), item[0], item[1]))
-            meeting = meetings[0] if meetings else None
-            fallback_slots = sorted(set(plan_a) | set(plan_b), key=lambda value: (slot_order.get(value, 99), value))
-            slot = meeting[0] if meeting else (fallback_slots[_number(player_id, day, npc_a, npc_b, "slot") % len(fallback_slots)]
-                                               if fallback_slots else current_slot)
-            location = meeting[1] if meeting else plan_a.get(slot) or plan_b.get(slot) or "sunny_plaza"
+            shared_current_place = plan_a.get(current_slot) if plan_a.get(current_slot) == plan_b.get(current_slot) else None
+            slot = current_slot
+            current_places = tuple(dict.fromkeys(filter(None, (plan_a.get(slot), plan_b.get(slot), "sunny_plaza"))))
+            location = shared_current_place or current_places[_number(player_id, day, npc_a, npc_b, "place") % len(current_places)]
             forward = edge_map[(npc_a, npc_b)]
             reverse = edge_map[(npc_b, npc_a)]
             state_a, state_b = (runtime_states or {}).get(npc_a, {}), (runtime_states or {}).get(npc_b, {})
@@ -144,7 +192,7 @@ class SocialWorldEngine:
             tension = max(int(forward["tension"]), int(reverse["tension"]))
             recent_penalty = 24 if any({npc_a, npc_b} <= set(event.get("participant_ids", [])) for event in recent[:5]) else 0
             score = (30 + 12 * len(interests_a & interests_b) + 4 * len(traits_a & traits_b)
-                     + 18 * bool(meeting) + relationship_score + tension // 2 - recent_penalty
+                     + 18 * bool(shared_current_place) + relationship_score + tension // 2 - recent_penalty
                      + int(social_need // 5)
                      + _number(player_id, day, npc_a, npc_b) % 17)
             candidates.append((score, npc_a, npc_b, slot, location))
@@ -176,22 +224,105 @@ class SocialWorldEngine:
         important = template_id == "small_misunderstanding" and peak_tension >= 45
         name_a, name_b = str(profile_a.get("name", npc_a)), str(profile_b.get("name", npc_b))
         place = (location_names or {}).get(location, location.replace("_", " ").title())
+        shared_subject = (sorted(shared_interests)[_number(day, npc_a, npc_b, "subject") % len(shared_interests)]
+                          if shared_interests else None)
+        goal_subject = " ".join(str(profile_b.get("longTermGoal") or profile_a.get("longTermGoal")
+                                    or "make everyday life a little better").split())[:140]
+        presentation_beats = {
+            "shared_interest_chat": [
+                {"speaker_id": npc_a, "text": f"I didn't know you were into {shared_subject or 'this'} too.",
+                 "translation_zh": f"我以前不知道你也喜欢「{shared_subject or '这个'}」。"},
+                {"speaker_id": npc_b, "text": "I am! What do you enjoy most about it?",
+                 "translation_zh": "是啊！你最喜欢它的哪一点？"},
+            ],
+            "help_with_goal": [
+                {"speaker_id": npc_a, "text": f"You said you want to {goal_subject[:1].lower() + goal_subject[1:]}. I might be able to help.",
+                 "translation_zh": "你说过这件事对你很重要，我也许能帮上忙。"},
+                {"speaker_id": npc_b, "text": "Really? I would appreciate that more than you know.",
+                 "translation_zh": "真的吗？这份帮助对我意义很大。"},
+            ],
+            "unexpected_teamwork": [
+                {"speaker_id": npc_a, "text": "This little problem is bigger than it looked.",
+                 "translation_zh": "这个小问题比看上去麻烦多了。"},
+                {"speaker_id": npc_b, "text": "Let's split it up. I think we can handle it together.",
+                 "translation_zh": "我们分工吧，我觉得一起就能搞定。"},
+            ],
+            "small_misunderstanding": [
+                {"speaker_id": npc_a, "text": "I was trying to be honest, not hurtful.",
+                 "translation_zh": "我只是想坦诚一点，并不是要伤害你。"},
+                {"speaker_id": npc_b, "text": "It did not sound that way to me.",
+                 "translation_zh": "可我听起来并不是那样。"},
+            ],
+        }[template_id]
         event_id = "social-" + hashlib.sha256(f"{player_id}\0{day}\0{npc_a}\0{npc_b}".encode()).hexdigest()[:20]
+        fallback_origins = ("city_library", "old_town_market", "riverside_park", "moonlight_cafe",
+                            "central_station", "botanical_garden")
+        origins: dict[str, str] = {}
+        for npc_id in (npc_a, npc_b):
+            planned = _plan_locations(plans.get(npc_id, {}))
+            candidates_for_origin = [value for key, value in planned.items()
+                                     if key != current_slot and value != location]
+            candidates_for_origin.extend(value for value in fallback_origins
+                                         if value != location and value not in candidates_for_origin)
+            origins[npc_id] = candidates_for_origin[_number(event_id, npc_id, "origin") % len(candidates_for_origin)]
+        travel_seconds = SOCIAL_TRAVEL_SECONDS[0] + _number(event_id, "travel") % (
+            SOCIAL_TRAVEL_SECONDS[1] - SOCIAL_TRAVEL_SECONDS[0] + 1)
+        arrives_at = current_time + timedelta(seconds=travel_seconds)
+        summary = template.summary.format(a=name_a, b=name_b, place=place)
+        if template_id == "shared_interest_chat" and shared_subject:
+            summary = f"{name_a} and {name_b} discovered that they both enjoy {shared_subject} at {place}."
+        elif template_id == "help_with_goal":
+            summary = f"At {place}, {name_a} offered {name_b} practical help with this goal: {goal_subject}"
         event = {
             "id": event_id, "date": day, "template_id": template_id, "title": template.title,
-            "summary": template.summary.format(a=name_a, b=name_b, place=place),
+            "summary": summary,
             "location_id": location, "time_slot": slot, "participant_ids": [npc_a, npc_b],
             "participants": [{"id": npc_a, "name": name_a}, {"id": npc_b, "name": name_b}],
             "related_npc_ids": [npc_a, npc_b], "importance": 4 if important else 2,
-            "status": "awaiting_management" if important else "generated",
+            "status": "traveling",
+            "journey": {
+                "started_at": current_time.isoformat(),
+                "arrives_at": arrives_at.isoformat(),
+                "auto_resolve_at": (arrives_at + timedelta(hours=SOCIAL_EVENT_EXPIRY_HOURS)).isoformat(),
+                "origin_location_ids": origins,
+                "target_location_id": location,
+            },
+            "animation_cues": social_animation_cues({"template_id": template_id,
+                                                       "participant_ids": [npc_a, npc_b]}),
+            "presentation": {"subject": shared_subject or goal_subject,
+                             "beats": presentation_beats},
             "management": ({"can_intervene": True, "actions": sorted(SOCIAL_ACTIONS),
                             "prompt": "These residents are in conflict. You may mediate or let them handle it."}
                            if important else {"can_intervene": False, "actions": []}),
         }
-        saved, created = self.repository.save_social_event(player_id, event)
-        if created and not important:
-            return [self._settle(player_id, saved, "autonomous", managed=False)]
+        self.repository.save_social_event(player_id, event)
         return self.repository.list_social_events(player_id, day)
+
+    def _advance(self, player_id: str, event: dict, now: datetime) -> dict:
+        journey = event.get("journey") if isinstance(event.get("journey"), Mapping) else {}
+        auto_resolve_at = _timestamp(str(journey.get("auto_resolve_at", "")))
+        if auto_resolve_at and now >= auto_resolve_at:
+            return self._settle(player_id, event, "autonomous", managed=False)
+        arrives_at = _timestamp(str(journey.get("arrives_at", "")))
+        if event.get("status") == "traveling" and arrives_at and now >= arrives_at:
+            event = dict(event)
+            event["status"] = ("awaiting_management" if event.get("management", {}).get("can_intervene")
+                               else "awaiting_observation")
+            return self.repository.update_social_event(player_id, event)
+        return event
+
+    def observe(self, player_id: str, event_id: str) -> dict:
+        event = self.repository.get_social_event(player_id, event_id)
+        if not event:
+            raise KeyError(event_id)
+        if event.get("status") in OPEN_SOCIAL_STATUSES:
+            event = self._advance(player_id, event, _utc())
+        if event.get("status") in {"resolved_autonomously", "resolved_with_management"}:
+            return event
+        event = self._advance(player_id, event, _utc())
+        if event.get("status") != "awaiting_observation":
+            raise RuntimeError("social event is not ready to observe")
+        return self._settle(player_id, event, "observed", managed=False)
 
     def intervene(self, player_id: str, event_id: str, action: str) -> dict:
         if action not in SOCIAL_ACTIONS:
@@ -199,10 +330,14 @@ class SocialWorldEngine:
         event = self.repository.get_social_event(player_id, event_id)
         if not event:
             raise KeyError(event_id)
+        if event.get("status") in OPEN_SOCIAL_STATUSES:
+            event = self._advance(player_id, event, _utc())
         if event.get("status") in {"resolved_autonomously", "resolved_with_management"}:
             if event.get("outcome", {}).get("action") == action:
                 return event
             raise RuntimeError("social event has already been resolved")
+        if event.get("status") == "traveling":
+            raise RuntimeError("social event is not ready for management")
         if event.get("status") != "awaiting_management":
             raise RuntimeError("social event is not open for management")
         return self._settle(player_id, event, action, managed=True)
@@ -233,7 +368,11 @@ class SocialWorldEngine:
         if managed:
             for memory in memories:
                 memory["content"] += f" The community manager chose to {action.replace('_', ' ')}."
-        outcome = {"action": action, "managed": managed, "edge_changes": changes}
+        resolved_cues = ({npc_a: "happy", npc_b: "happy"} if action in {"mediate", "encourage"} else
+                         {npc_a: "walk", npc_b: "walk"} if action == "give_space" else
+                         social_animation_cues(event))
+        outcome = {"action": action, "managed": managed, "edge_changes": changes,
+                   "animation_cues": resolved_cues}
         return self.repository.resolve_social_event(player_id, event["id"], action, changes, memories,
                                                     outcome, managed=managed)
 

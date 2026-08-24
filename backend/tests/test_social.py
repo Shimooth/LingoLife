@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -34,6 +34,24 @@ def plans(location="moonlight_cafe"):
     }} for npc_id in ("ava", "bo")}
 
 
+def clock(day: date, hour: int = 9) -> datetime:
+    return datetime(day.year, day.month, day.day, hour, tzinfo=timezone.utc)
+
+
+def just_after_arrival(event: dict) -> datetime:
+    return datetime.fromisoformat(event["journey"]["arrives_at"]) + timedelta(seconds=1)
+
+
+def move_journey_into_observation_window(db: Database, player_id: str, event: dict) -> dict:
+    value = dict(event)
+    journey = dict(value["journey"])
+    now = datetime.now(timezone.utc)
+    journey["arrives_at"] = (now - timedelta(seconds=1)).isoformat()
+    journey["auto_resolve_at"] = (now + timedelta(minutes=5)).isoformat()
+    value["journey"] = journey
+    return db.update_social_event(player_id, value)
+
+
 def test_existing_social_table_is_incrementally_migrated_and_data_is_kept(tmp_path):
     path = tmp_path / "legacy-social.db"
     connection = sqlite3.connect(path)
@@ -63,17 +81,46 @@ def test_directional_edges_are_stable_scoped_and_independent(tmp_path):
     assert len(db.ensure_social_edges("another-player", ["ava", "bo"])) == 2
 
 
-def test_daily_autonomous_event_is_date_stable_idempotent_and_gives_distinct_memories(tmp_path):
+def test_daily_event_travels_waits_and_lazily_resolves_on_the_next_game_day(tmp_path):
     db = database(tmp_path)
     engine = SocialWorldEngine(db)
-    day = date(2026, 8, 21)
+    day = date(2040, 8, 21)
+    started_at = clock(day)
     before = {(edge["npc_a"], edge["npc_b"]): edge for edge in db.ensure_social_edges("p", ["ava", "bo"])}
-    first = engine.ensure_daily("p", residents(), plans(), day, "afternoon", {"moonlight_cafe": "Moonlight Cafe"})
-    second = engine.ensure_daily("p", list(reversed(residents())), plans(), day, "evening")
+    first = engine.ensure_daily("p", residents(), plans(), day, "afternoon",
+                                {"moonlight_cafe": "Moonlight Cafe"}, now=started_at)
+    second = engine.ensure_daily("p", list(reversed(residents())), plans(), day, "evening",
+                                 now=started_at + timedelta(seconds=5))
     assert len(first) == 1 and first[0]["id"] == second[0]["id"]
-    assert first[0]["status"] == "resolved_autonomously"
+    assert first[0]["status"] == second[0]["status"] == "traveling"
     assert first[0]["location_id"] == "moonlight_cafe"
     assert first[0]["participant_ids"] == ["ava", "bo"]
+    assert first[0]["journey"]["target_location_id"] == "moonlight_cafe"
+    assert set(first[0]["journey"]["origin_location_ids"]) == {"ava", "bo"}
+    assert set(first[0]["animation_cues"]) == {"ava", "bo"}
+    assert set(first[0]["animation_cues"].values()) <= {
+        "idle", "talk", "listen", "happy", "sad", "tired",
+        "look_around", "walk", "run", "jump", "crouch", "push",
+    }
+    during_travel = {(edge["npc_a"], edge["npc_b"]): edge
+                     for edge in db.ensure_social_edges("p", ["ava", "bo"])}
+    assert during_travel == before
+    assert db.list_npc_memories("p", "ava", kind="social") == []
+
+    waiting = engine.ensure_daily("p", residents(), plans(), day, "afternoon",
+                                  now=just_after_arrival(first[0]))[0]
+    assert waiting["status"] == "awaiting_observation"
+    while_waiting = {(edge["npc_a"], edge["npc_b"]): edge
+                     for edge in db.ensure_social_edges("p", ["ava", "bo"])}
+    assert while_waiting == before
+    assert db.list_npc_memories("p", "ava", kind="social") == []
+
+    tomorrow = engine.ensure_daily("p", residents(), plans(), day + timedelta(days=1), "afternoon",
+                                   now=started_at + timedelta(days=1))
+    settled = db.get_social_event("p", first[0]["id"])
+    assert settled and settled["status"] == "resolved_autonomously"
+    assert settled["outcome"]["action"] == "autonomous"
+    assert tomorrow[0]["id"] != first[0]["id"] and tomorrow[0]["status"] == "traveling"
     after = {(edge["npc_a"], edge["npc_b"]): edge for edge in db.ensure_social_edges("p", ["ava", "bo"])}
     assert after[("ava", "bo")]["affinity"] > before[("ava", "bo")]["affinity"]
     memories_a = db.list_npc_memories("p", "ava", kind="social")
@@ -81,8 +128,22 @@ def test_daily_autonomous_event_is_date_stable_idempotent_and_gives_distinct_mem
     assert len(memories_a) == len(memories_b) == 1
     assert memories_a[0]["content"] != memories_b[0]["content"]
     assert memories_a[0]["source_event_id"] == first[0]["id"]
-    tomorrow = engine.ensure_daily("p", residents(), plans(), date(2026, 8, 22), "afternoon")
-    assert tomorrow[0]["id"] != first[0]["id"]
+
+
+def test_observing_a_ready_ordinary_event_resolves_once(tmp_path):
+    db = database(tmp_path)
+    engine = SocialWorldEngine(db)
+    day = date(2040, 8, 21)
+    event = engine.ensure_daily("p", residents(), plans(), day, now=clock(day))[0]
+    ready = engine.ensure_daily("p", residents(), plans(), day, now=just_after_arrival(event))[0]
+    assert ready["status"] == "awaiting_observation"
+
+    resolved = engine.observe("p", event["id"])
+    replay = engine.observe("p", event["id"])
+    assert resolved["status"] == "resolved_autonomously"
+    assert resolved["outcome"]["action"] == "observed"
+    assert replay["outcome"] == resolved["outcome"]
+    assert len(db.list_npc_memories("p", "ava", kind="social")) == 1
 
 
 def test_high_impact_event_waits_for_management_and_resolution_is_idempotent(tmp_path):
@@ -91,20 +152,48 @@ def test_high_impact_event_waits_for_management_and_resolution_is_idempotent(tmp
     db.save_social_edge("p", "ava", "bo", tension=70, trust=30, affinity=30)
     db.save_social_edge("p", "bo", "ava", tension=65, trust=35, affinity=32)
     engine = SocialWorldEngine(db)
-    event = engine.ensure_daily("p", residents(), plans(), date(2026, 8, 21))[0]
+    day = date(2040, 8, 21)
+    event = engine.ensure_daily("p", residents(), plans(), day, now=clock(day))[0]
     assert event["template_id"] == "small_misunderstanding"
-    assert event["status"] == "awaiting_management"
+    assert event["status"] == "traveling"
     assert event["management"]["can_intervene"] is True
-    assert engine.ensure_daily("p", residents(), plans(), date(2026, 8, 22))[0]["id"] == event["id"]
+    with pytest.raises(RuntimeError):
+        engine.intervene("p", event["id"], "mediate")
+    arrived = engine.ensure_daily("p", residents(), plans(), day, now=just_after_arrival(event))[0]
+    assert arrived["status"] == "awaiting_management"
     before = db.ensure_social_edges("p", ["ava", "bo"])
     resolved = engine.intervene("p", event["id"], "mediate")
     again = engine.intervene("p", event["id"], "mediate")
     assert resolved["status"] == "resolved_with_management"
+    assert resolved["animation_cues"] == {"ava": "happy", "bo": "happy"}
     assert again["outcome"] == resolved["outcome"]
     assert len(db.list_npc_memories("p", "ava", kind="social")) == 1
     assert db.ensure_social_edges("p", ["ava", "bo"]) != before
     with pytest.raises(RuntimeError):
         engine.intervene("p", event["id"], "give_space")
+
+
+def test_unattended_management_event_resolves_autonomously_next_game_day(tmp_path):
+    db = database(tmp_path)
+    db.ensure_social_edges("p", ["ava", "bo"])
+    db.save_social_edge("p", "ava", "bo", tension=70, trust=30, affinity=30)
+    db.save_social_edge("p", "bo", "ava", tension=65, trust=35, affinity=32)
+    engine = SocialWorldEngine(db)
+    day = date(2040, 8, 21)
+    started_at = clock(day)
+    event = engine.ensure_daily("p", residents(), plans(), day, now=started_at)[0]
+    waiting = engine.ensure_daily("p", residents(), plans(), day, now=just_after_arrival(event))[0]
+    assert waiting["status"] == "awaiting_management"
+    assert db.list_npc_memories("p", "ava", kind="social") == []
+
+    following_day = engine.ensure_daily("p", residents(), plans(), day + timedelta(days=1),
+                                        now=started_at + timedelta(days=1))
+    settled = db.get_social_event("p", event["id"])
+    assert settled and settled["status"] == "resolved_autonomously"
+    assert settled["outcome"]["action"] == "autonomous"
+    assert settled["outcome"]["managed"] is False
+    assert following_day[0]["id"] != event["id"]
+    assert len(db.list_npc_memories("p", "ava", kind="social")) == 1
 
 
 def test_city_and_world_lazy_generate_observable_social_interactions(tmp_path):
@@ -122,13 +211,29 @@ def test_city_and_world_lazy_generate_observable_social_interactions(tmp_path):
     city = client.get("/api/v1/city", headers=headers).json()
     world = client.get("/api/v1/world", headers=headers).json()
     assert len(city["social_interactions"]) == 1
+    assert city["social_interactions"][0]["status"] == "traveling"
     assert city["social_interactions"][0]["id"] == world["social_interactions"][0]["id"]
+    participant_ids = set(city["social_interactions"][0]["participant_ids"])
+    participant_rows = [resident for resident in city["npcs"] if resident["id"] in participant_ids]
+    assert all(resident["world_action"]["state"] == "walking_to_event" for resident in participant_rows)
+    assert all(resident["animation_cue"] == "walk" for resident in participant_rows)
+    assert city["server_time"]
     assert all("social_interaction_ids" in resident and "related_npc_ids" in resident for resident in city["npcs"])
     listing = client.get("/api/v1/social-events", headers=headers).json()["social_interactions"]
     assert listing[0]["id"] == city["social_interactions"][0]["id"]
     npc_id = listing[0]["participant_ids"][0]
     agent = client.get(f"/api/v1/npcs/{npc_id}/agent", headers=headers).json()
     assert agent["social_interactions"][0]["id"] == listing[0]["id"]
+
+    observe_endpoint = f"/api/v1/social-events/{listing[0]['id']}/observe"
+    assert client.post(observe_endpoint, headers=headers).status_code == 409
+    player_id = client.app.state.db.authenticate(registered["session_token"])["player_id"]
+    move_journey_into_observation_window(client.app.state.db, player_id, listing[0])
+    observed = client.post(observe_endpoint, headers=headers)
+    replay = client.post(observe_endpoint, headers=headers)
+    assert observed.status_code == replay.status_code == 200
+    assert observed.json()["status"] == "resolved_autonomously"
+    assert replay.json()["outcome"] == observed.json()["outcome"]
 
 
 def test_management_intervention_api_is_owned_scoped_and_idempotent(tmp_path):
@@ -148,8 +253,11 @@ def test_management_intervention_api_is_owned_scoped_and_idempotent(tmp_path):
     db.save_social_edge(player_id, "emma", npc_id, tension=70)
     db.save_social_edge(player_id, npc_id, "emma", tension=70)
     event = client.get("/api/v1/city", headers=headers).json()["social_interactions"][0]
-    assert event["status"] == "awaiting_management"
+    assert event["status"] == "traveling"
     endpoint = f"/api/v1/social-events/{event['id']}/intervene"
+    early = client.post(endpoint, headers=headers, json={"action": "mediate"})
+    assert early.status_code == 409 and early.json()["error"]["code"] == "SOCIAL_EVENT_NOT_READY"
+    move_journey_into_observation_window(db, player_id, event)
     first = client.post(endpoint, headers=headers, json={"action": "mediate"})
     retry = client.post(endpoint, headers=headers, json={"action": "mediate"})
     closed = client.post(endpoint, headers=headers, json={"action": "give_space"})

@@ -3,7 +3,7 @@ import {useCallback,useEffect,useMemo,useRef,useState} from 'react'
 import {DISTRICT_NAMES,getHomeLocationAsset,getLocationAsset,locationCopy,type LocationAsset} from '../locationAssets'
 import {LocationIcon} from './LocationIcon'
 import {AvatarStage} from './AvatarStage'
-import type {AvatarConfig} from '../types'
+import type {AnimationCue,AvatarConfig,ResidentWorldAction} from '../types'
 import './CityMap.css'
 import './CityMapExpansion.css'
 
@@ -13,9 +13,11 @@ export type CityCharacter={
   id:string
   name:string
   avatar?:AvatarConfig
+  animationCue?:AnimationCue
   home:CityPoint
   location:CityPoint&{place?:string}
   locationId?:string
+  worldAction?:ResidentWorldAction
 }
 export type CityMapProps={
   characters:CityCharacter[]
@@ -78,7 +80,7 @@ export function CityMap({characters,landmarks=DEFAULT_LANDMARKS,activeCharacterI
   const [view,setView]=useState({zoom:1,panX:0,panY:0})
   const [selected,setSelected]=useState<{landmark?:CityLandmark;homeCharacter?:CityCharacter}|null>(null)
   const selectedAsset=useMemo(()=>selected?.landmark?getLocationAsset(selected.landmark.id,selected.landmark.kind):selected?.homeCharacter?getHomeLocationAsset(selected.homeCharacter.id,selected.homeCharacter.avatar?.homeBackground):null,[selected])
-  const copy=language==='zh'?{label:'城市地图',home:'家',park:'绿荫公园',cafe:'橘子咖啡',school:'城市学校',hospital:'中心医院',shops:'商业街',station:'中央车站',office:'创意办公区',river:'月川',plus:'放大地图',minus:'缩小地图',reset:'重置地图'}:{label:'City map',home:'Home',park:'Green Park',cafe:'Orange Café',school:'City School',hospital:'Central Hospital',shops:'Market Street',station:'Central Station',office:'Creative District',river:'Moon River',plus:'Zoom in',minus:'Zoom out',reset:'Reset map'}
+  const copy=language==='zh'?{label:'天空之城地图',home:'家',park:'绿荫公园',cafe:'橘子咖啡',school:'城市学校',hospital:'中心医院',shops:'商业街',station:'中央车站',office:'创意办公区',river:'月川',plus:'放大地图',minus:'缩小地图',reset:'重置地图'}:{label:'Sky City map',home:'Home',park:'Green Park',cafe:'Orange Café',school:'City School',hospital:'Central Hospital',shops:'Market Street',station:'Central Station',office:'Creative District',river:'Moon River',plus:'Zoom in',minus:'Zoom out',reset:'Reset map'}
   const constrain=useCallback((zoom:number,panX:number,panY:number)=>{
     const el=viewport.current;if(!el)return {zoom,panX,panY}
     const maxX=Math.max(0,(el.clientWidth*(zoom-1))/2),maxY=Math.max(0,(el.clientHeight*(zoom-1))/2)

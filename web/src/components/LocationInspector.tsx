@@ -20,7 +20,7 @@ export function LocationInspector({landmark,name,description,image,language,resi
    <button type="button" onClick={onClose} aria-label={zh?'关闭地点详情':'Close place details'}>×</button>
    <span>{landmark.kind}</span><h2>{name||landmark.name}</h2><small>{landmark.district}</small>
   </div>
-  <div className="location-inspector__body"><p>{description||(zh?'岛上居民会按照自己的日程来到这里，故事也可能在这里自然发生。':'Residents visit this place according to their own schedules, and stories can begin here naturally.')}</p>
+  <div className="location-inspector__body"><p>{description||(zh?'城市居民会按照自己的日程来到这里，故事也可能在这里自然发生。':'Residents visit this place according to their own schedules, and stories can begin here naturally.')}</p>
    <h3>{zh?'现在在这里':'Here now'}</h3>
    {residents.length?<div className="location-inspector__residents">{residents.map(resident=><button type="button" key={resident.id} onClick={()=>onResidentClick(resident.id)}><span>{resident.name.slice(0,1)}</span><b>{resident.name}</b><small>{zh?'查看并交谈':'View and talk'}</small></button>)}</div>:<p className="location-inspector__empty">{zh?'现在很安静，晚些时候再来看看。':'It is quiet right now. Check back later.'}</p>}
   </div>

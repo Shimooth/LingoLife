@@ -22,12 +22,13 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
+from .animation import animation_cue, resolve_turn_animation, state_animation_cue
 from .ai import DeepSeekProvider, DialogueProvider, ResilientProvider
 from .agent import (advance_goal, advance_relationship, advance_runtime, compile_goal,
                     compile_persona, daily_plan, dialogue_objective, initial_relationship,
                     initial_runtime, time_slot)
 from .config import Settings, load_settings
-from .city import CITY_LOCATIONS, city_payload
+from .city import CITY_LOCATIONS, LOCATION_BY_ID, city_payload
 from .db import Database
 from .events import ActiveEvent, EventEngine, NPCEventContext
 from .learning import Evidence, LearningEngine
@@ -44,9 +45,9 @@ DEFAULT_NPC_PROFILE = {
     "personality": ["kind", "thoughtful", "quiet"],
     "interests": ["art", "music", "photography"], "occupation": "Designer",
     "longTermGoal": "Open a small independent design studio.",
-    "avatar": {"hair": "swoop", "hairColor": "#563B38", "face": "round",
+    "avatar": {"model": "chibi", "hair": "hair-variant", "hairColor": "#563B38", "face": "round",
                "skin": "#EFB99B", "eyes": "dot", "brows": "soft", "nose": "button",
-               "mouth": "smile", "outfit": "jumper", "outfitColor": "#D87362",
+               "mouth": "smile", "outfit": "student", "outfitColor": "#D87362",
                "pants": "balloon", "accessory": "none", "homeBackground": "bubble", "strokes": []},
 }
 
@@ -136,7 +137,8 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         name = str((profile or {}).get("name", "Emma"))
         adapt = lambda value: value.replace("Emma", name)
         return {"id": template.id, "title": adapt(template.title), "category": template.category,
-                "stage": {"id": stage.id, "prompt": adapt(stage.prompt), "objective": adapt(stage.objective)},
+                "stage": {"id": stage.id, "prompt": adapt(stage.prompt), "objective": adapt(stage.objective),
+                          "animation_cue": stage.animation_cue},
                 "stage_index": active.stage_index, "stage_count": len(template.stages),
                 "learning_targets": list(template.learning_targets)}
 
@@ -169,7 +171,8 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         }
         return {"persona": persona, "runtime_state": runtime, "relationship": relationship,
                 "goal": goal, "daily_plan": plan, "current_slot": time_slot(datetime.now(game_zone).hour),
-                "language_controller": language_controller}
+                "language_controller": language_controller,
+                "animation_cue": state_animation_cue(stats.mood, runtime.get("emotion", {}).get("energy"))}
 
     def daily_social_world(player_id: str, profiles: list[dict], agents: dict[str, dict] | None = None) -> list[dict]:
         bundles = agents or {}
@@ -278,10 +281,13 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         active = event_engine.daily_event(event_context(player_id, npc_id, profile, stats, learning_state,
                                                         agent["runtime_state"]), game_today())
         animation = "sad" if stats.mood < 40 else "happy" if stats.mood >= 60 else "idle"
+        active_view = public_event(active, profile)
+        cue = active_view["stage"]["animation_cue"] if active_view else agent["animation_cue"]
         social_events = daily_social_world(player_id, db.list_npc_profiles(player_id), {npc_id: agent})
-        return {"room_id": f"{npc_id}-room", "npc": {"id": npc_id, "name": profile["name"], "animation": animation},
+        return {"room_id": f"{npc_id}-room", "npc": {"id": npc_id, "name": profile["name"],
+                                                       "animation": animation, "animation_cue": cue},
                 "stats": stats, "messages": db.messages(player_id, 200, npc_id),
-                "quota": db.quota(user["id"]), "active_event": public_event(active, profile), "agent": agent,
+                "quota": db.quota(user["id"]), "active_event": active_view, "agent": agent,
                 "social_interactions": [event for event in social_events if npc_id in event["participant_ids"]]}
 
     @app.get(settings.api_prefix + "/npc/profile")
@@ -324,6 +330,7 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
             planned_locations[npc_id] = agent["daily_plan"]["slots"][slot]["location_id"]
         payload = city_payload(player_id, profiles, active_events, game_today(), planned_locations)
         social_events = daily_social_world(player_id, profiles, agents)
+        server_time = datetime.now(timezone.utc)
         for resident in payload["npcs"]:
             resident["active_event"] = summaries[resident["id"]]
             resident["daily_plan"] = agents[resident["id"]]["daily_plan"]
@@ -332,7 +339,46 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
             resident["social_interaction_ids"] = [event["id"] for event in resident_events]
             resident["related_npc_ids"] = sorted({npc_id for event in resident_events
                                                    for npc_id in event["participant_ids"] if npc_id != resident["id"]})
+            open_social = next((event for event in resident_events
+                                if event.get("status") in {"traveling", "awaiting_observation", "awaiting_management"}), None)
+            if open_social:
+                journey = open_social.get("journey", {})
+                walking = open_social.get("status") == "traveling"
+                location_id = ((journey.get("origin_location_ids") or {}).get(resident["id"])
+                               if walking else journey.get("target_location_id"))
+                location = LOCATION_BY_ID.get(location_id)
+                if location:
+                    resident["current_location_id"] = location.id
+                    resident["position"] = {"x": location.x, "y": location.y}
+                    resident["is_home"] = False
+                resident["world_action"] = {
+                    "state": "walking_to_event" if walking else "waiting_at_event",
+                    "event_id": open_social["id"],
+                    "target_location_id": journey.get("target_location_id", open_social.get("location_id")),
+                    "started_at": journey.get("started_at"),
+                    "arrives_at": journey.get("arrives_at"),
+                    "auto_resolve_at": journey.get("auto_resolve_at"),
+                    "participant_index": open_social.get("participant_ids", []).index(resident["id"]),
+                }
+            elif resident.get("active_event"):
+                resident["world_action"] = {
+                    "state": "event_pending", "event_id": resident["active_event"]["id"],
+                    "target_location_id": resident["current_location_id"],
+                }
+            else:
+                resident["world_action"] = {"state": "idle"}
+            event_cue = (resident.get("active_event") or {}).get("stage", {}).get("animation_cue")
+            if event_cue in {"talk", "listen"}:
+                event_cue = None  # Conversation-only cues should not make a resident talk alone on the map.
+            social_cue = next((event.get("animation_cues", {}).get(resident["id"])
+                               for event in resident_events
+                               if event.get("time_slot") == agents[resident["id"]]["current_slot"]
+                               and event.get("animation_cues", {}).get(resident["id"])), None)
+            resident["animation_cue"] = animation_cue(("walk" if open_social and open_social.get("status") == "traveling" else None)
+                                                        or social_cue or event_cue or
+                                                        agents[resident["id"]].get("animation_cue"))
         payload["time_slot"] = time_slot(datetime.now(game_zone).hour)
+        payload["server_time"] = server_time.isoformat()
         payload["social_interactions"] = social_events
         return payload
 
@@ -357,8 +403,20 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
             raise HTTPException(404, {"code": "SOCIAL_EVENT_NOT_FOUND", "message": "Social event was not found."})
         except ValueError:
             raise HTTPException(422, {"code": "INVALID_SOCIAL_ACTION", "message": "This management action is not supported."})
-        except RuntimeError:
+        except RuntimeError as error:
+            if "not ready" in str(error):
+                raise HTTPException(409, {"code": "SOCIAL_EVENT_NOT_READY", "message": "The residents have not reached the event yet."})
             raise HTTPException(409, {"code": "SOCIAL_EVENT_CLOSED", "message": "This event is no longer open for management."})
+
+    @app.post(settings.api_prefix + "/social-events/{event_id}/observe")
+    def observe_social_event(event_id: str, authorization: Optional[str] = Header(None)):
+        user = current_user(authorization)
+        try:
+            return social_engine.observe(user["player_id"], event_id)
+        except KeyError:
+            raise HTTPException(404, {"code": "SOCIAL_EVENT_NOT_FOUND", "message": "Social event was not found."})
+        except RuntimeError:
+            raise HTTPException(409, {"code": "SOCIAL_EVENT_NOT_READY", "message": "The residents have not reached the event yet."})
 
     @app.post(settings.api_prefix + "/npcs", status_code=201)
     def create_npc(body: NpcProfile, authorization: Optional[str] = Header(None)):
@@ -420,6 +478,14 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
             raise HTTPException(400, {"code": "INVALID_IDEMPOTENCY_KEY", "message": "Idempotency-Key is invalid."})
         cached = db.cached(player_id, idempotency_key)
         if cached:
+            # Responses cached before animation-cue support remain replayable.
+            cached["animation_cue"] = animation_cue(cached.get("animation_cue") or cached.get("animation"))
+            cached_agent = cached.get("agent")
+            if isinstance(cached_agent, dict):
+                cached_agent.setdefault("animation_cue", cached["animation_cue"])
+            cached_event = cached.get("active_event")
+            if isinstance(cached_event, dict) and isinstance(cached_event.get("stage"), dict):
+                cached_event["stage"].setdefault("animation_cue", cached["animation_cue"])
             return user, body.message.strip(), {**cached, "quota": db.quota(user["id"])}
         message = body.message.strip()
         if not message or len(message) > settings.max_message_characters or any(ord(c) < 32 and c not in "\n\t" for c in message):
@@ -453,22 +519,27 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         db.save_learning_state(player_id, learning_state)
         event_update = None
         event_rel = event_mood = 0
+        event_cue = event_engine.stage(active).animation_cue if active else None
+        outcome_cue = None
         if active:
             transition = event_engine.advance(active, result.semantic_signals)
             event_update = {"stage_changed": transition.stage_changed, "completed": transition.completed}
             if transition.completed and transition.outcome and transition.memory:
                 event_rel, event_mood = transition.outcome.relationship_change, transition.outcome.mood_change
+                outcome_cue = transition.outcome.animation_cue
                 db.add_npc_memory(player_id, npc_id, "event", transition.memory.memory,
                                   transition.memory.template_id, importance=3,
                                   tags=["event", transition.memory.category], confidence=1)
                 event_update.update({"outcome": {"id": transition.outcome.id,
-                                                 "memory": transition.memory.memory},
+                                                 "memory": transition.memory.memory,
+                                                 "animation_cue": transition.outcome.animation_cue},
                                      "memory": transition.memory.memory})
             elif transition.stage_changed and transition.event:
                 # The next story beat must remain visible even while the live
                 # speech bubble persists. Templates contain situation content,
                 # while names are adapted to the selected custom character.
                 next_stage = event_engine.stage(transition.event)
+                event_cue = next_stage.animation_cue
                 result.npc_reply = f"{result.npc_reply}\n\n{next_stage.prompt.replace('Emma', profile['name'])}"
             active = transition.event
         if hasattr(provider, "translate"):
@@ -482,6 +553,11 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
             rel = min(rel, max(0, 10 - db.positive_relationship_change_today(
                 player_id, npc_id, game_today().isoformat())))
         mood = max(-10, min(10, max(-5, min(5, result.mood_change)) + event_mood))
+        final_animation_cue = resolve_turn_animation(
+            result.animation_cue, mood, event_cue=event_cue, outcome_cue=outcome_cue,
+        )
+        if event_update is not None:
+            event_update["animation_cue"] = final_animation_cue
         xp = max(0, min(5, result.english_xp_change)) if understandable else 0
         stats = {"relationship": max(0, min(100, old.relationship + rel)), "mood": max(0, min(100, old.mood + mood)), "english_xp": max(0, min(100, old.english_xp + xp))}
         relationship = advance_relationship(agent["relationship"], rel, result.semantic_signals)
@@ -498,11 +574,13 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
                 growth["assertiveness"] = min(15, float(growth.get("assertiveness", 0)) + .5)
                 growth["emotional_stability"] = min(15, float(growth.get("emotional_stability", 0)) + .5)
         public_agent = {"runtime_state": runtime, "relationship": relationship, "goal": goal,
-                        "daily_plan": agent["daily_plan"], "current_slot": agent["current_slot"]}
+                        "daily_plan": agent["daily_plan"], "current_slot": agent["current_slot"],
+                        "animation_cue": final_animation_cue}
         response = {**result.model_dump(), "npc_id": npc_id, "game_date": game_today().isoformat(),
                     "relationship_change": rel, "mood_change": mood,
                     "english_xp_change": xp, "stats": stats,
                     "animation": "happy" if mood > 0 else "sad" if mood < 0 else "idle",
+                    "animation_cue": final_animation_cue,
                     "active_event": public_event(active, profile), "event_update": event_update,
                     "learning_summary": learning_engine.progress(learning_state), "agent": public_agent}
         committed, created = db.commit_chat(player_id, idempotency_key, message, response, npc_id)

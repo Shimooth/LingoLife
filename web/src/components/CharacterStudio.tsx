@@ -1,19 +1,18 @@
 import { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { NpcProfile } from "../types";
-import { AvatarStage } from "./AvatarStage";
 import { CharacterCanvas3D } from "../three/characters";
-const opts = {
-  hair: ["swoop", "bob", "sprout", "bun", "curls", "shaggy"],
-  face: ["round", "oval", "bean", "square", "heart"],
-  eyes: ["dot", "oval", "sleepy", "wink", "sparkle", "curious"],
-  brows: ["tiny", "straight", "worried", "bold", "soft"],
-  nose: ["button", "dot", "triangle", "round", "heart"],
-  mouth: ["smile", "open", "cat", "pout", "tongue"],
-  outfit: ["jumper", "hoodie", "jacket", "playful", "overalls", "blazer"],
-  pants: ["balloon", "straight", "wide", "shorts", "cargo", "pleated"],
-  accessory: ["none", "glasses", "earrings", "headphones", "scarf", "beanie", "frogclip"],
-};
+import {
+  CHARACTER_PRESETS,
+  CHIBI_ACCESSORIES,
+  CHIBI_HAIR,
+  CHIBI_MODEL_ID,
+  CHIBI_OUTFITS,
+  getCharacterFamily,
+  resolveChibiAccessory,
+  resolveChibiHair,
+  resolveChibiOutfit,
+} from "../three/characters/characterAssets";
 const skinTones=["#f7d7c4","#efb99b","#d99772","#b87352","#8b533b","#57372f"]
 const homeBackgrounds=["bubble","book","plant","retro","space","harbor"]
 const label = (s: string) => s[0].toUpperCase() + s.slice(1);
@@ -71,7 +70,7 @@ const zhLabels: Record<string, string> = {
   freckles: "雀斑",
   frogclip:"青蛙发夹",
   bean:"豆豆脸",dot:"小圆点",sparkle:"星星眼",curious:"好奇眼",wink:"眨眨眼",worried:"八字眉",triangle:"三角鼻",
-  homeBackground:"家的背景",bubble:"糖果阁楼",book:"书香小窝",plant:"奇趣植物屋",retro:"复古波普屋",space:"太空舱",harbor:"海港木屋",
+  homeBackground:"家的背景",bubble:"糖果阁楼",book:"书香小窝",plant:"奇趣植物屋",retro:"复古波普屋",space:"太空舱",harbor:"云端木屋",
 };
 const enLabels: Record<string, string> = {
   hair: "Hair",
@@ -82,7 +81,7 @@ const enLabels: Record<string, string> = {
   mouth: "Mouth",
   outfit: "Clothing",
   accessory: "Accessories",
-  pants:"Pants",homeBackground:"Home background",swoop:"Swoop",sprout:"Sprout",curls:"Curls",shaggy:"Shaggy",bean:"Bean",dot:"Dot",sparkle:"Sparkle",curious:"Curious",wink:"Wink",tiny:"Tiny",worried:"Worried",triangle:"Triangle",open:"Open smile",cat:"Cat mouth",pout:"Pout",tongue:"Tongue",jumper:"Jumper",playful:"Playful top",balloon:"Balloon pants",straight:"Straight pants",shorts:"Shorts",cargo:"Cargo pants",pleated:"Pleated shorts",frogclip:"Frog clip",bubble:"Candy loft",book:"Book nest",plant:"Plant lab",retro:"Retro pop",space:"Space pod",harbor:"Harbor cabin",
+  pants:"Pants",homeBackground:"Home background",swoop:"Swoop",sprout:"Sprout",curls:"Curls",shaggy:"Shaggy",bean:"Bean",dot:"Dot",sparkle:"Sparkle",curious:"Curious",wink:"Wink",tiny:"Tiny",worried:"Worried",triangle:"Triangle",open:"Open smile",cat:"Cat mouth",pout:"Pout",tongue:"Tongue",jumper:"Jumper",playful:"Playful top",balloon:"Balloon pants",straight:"Straight pants",shorts:"Shorts",cargo:"Cargo pants",pleated:"Pleated shorts",frogclip:"Frog clip",bubble:"Candy loft",book:"Book nest",plant:"Plant lab",retro:"Retro pop",space:"Space pod",harbor:"Cloud cabin",
   hairclip: "Hair clip",
   tee: "T-shirt",
   locs: "Locs",
@@ -133,11 +132,11 @@ export function CharacterStudio({
   const reduce = useReducedMotion(),
     [tab, setTab] = useState<"story" | "look">("story"),
     zh = language === "zh";
+  const characterFamily = getCharacterFamily(profile.avatar);
   const set = <K extends keyof NpcProfile>(key: K, value: NpcProfile[K]) =>
     onChange({ ...profile, [key]: value });
   const avatar = (key: string, value: string) =>
     set("avatar", { ...profile.avatar, [key]: value, strokes: [] });
-  const previewAvatar=(key:string,value:string)=>({...profile.avatar,[key]:value,strokes:[]})
   const optionLabel = (value: string, group?: string) =>
     zh
       ? zhContext[`${group}.${value}`] || zhLabels[value] || value
@@ -272,9 +271,34 @@ export function CharacterStudio({
                 ) : (
                   <>
                     <fieldset>
+                      <legend>{zh ? "角色模型" : "Character model"}</legend>
+                      <p className="studio-field-hint">
+                        {zh
+                          ? "奇趣角色支持发型与服装组合；城市居民是素材包中完整制作的低模预设。"
+                          : "The chibi model supports mix-and-match parts; city residents are complete low-poly presets."}
+                      </p>
+                      <div className="avatar-preset-grid">
+                        {CHARACTER_PRESETS.map((preset, index) => (
+                          <button
+                            type="button"
+                            className={(profile.avatar.model ?? CHIBI_MODEL_ID) === preset.id ? "chosen" : ""}
+                            onClick={() => avatar("model", preset.id)}
+                            key={preset.id}
+                          >
+                            <span className={`avatar-preset-token avatar-preset-token--${preset.family}`} aria-hidden>
+                              {preset.family === "chibi" ? "✦" : String(index).padStart(2, "0")}
+                            </span>
+                            <span>{preset.label[language]}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </fieldset>
+
+                    {characterFamily === "chibi" ? <>
+                    <fieldset>
                       <legend>{zh ? "肤色" : "Skin tone"}</legend>
                       <div className="avatar-option-grid avatar-option-grid--skin">
-                        {skinTones.map(value=><button type="button" className={profile.avatar.skin===value?'chosen':''} onClick={()=>avatar('skin',value)} key={value}><span className="skin-swatch" style={{background:value}}/><AvatarStage avatar={previewAvatar('skin',value)} preview="head" compact staticPreview/><span>{zh?'肤色':'Tone'}</span></button>)}
+                        {skinTones.map(value=><button type="button" className={profile.avatar.skin===value?'chosen':''} onClick={()=>avatar('skin',value)} key={value}><span className="skin-swatch skin-swatch--large" style={{background:value}}/><span>{zh?'肤色':'Tone'}</span></button>)}
                       </div>
                     </fieldset>
                     <div className="field-grid color-fields">
@@ -297,33 +321,57 @@ export function CharacterStudio({
                         />
                       </label>
                     </div>
-                    {Object.entries(opts).map(([key, curated]) => {
-                      const current=String(profile.avatar[key as keyof typeof profile.avatar]||'')
-                      const values=curated.includes(current)?curated:[current,...curated]
-                      return (
-                      <fieldset key={key}>
-                        <legend>{optionLabel(key)}</legend>
+                    <fieldset>
+                      <legend>{zh ? "发型" : "Hair"}</legend>
+                      <div className="avatar-option-grid avatar-option-grid--assets">
+                        {CHIBI_HAIR.map((entry) => <button
+                          type="button"
+                          className={resolveChibiHair(profile.avatar.hair) === entry.id ? "chosen" : ""}
+                          onClick={() => avatar("hair", entry.id)}
+                          key={entry.id}
+                        ><span className="asset-option-glyph" aria-hidden>◒</span><span>{entry.label[language]}</span></button>)}
+                      </div>
+                    </fieldset>
+                    <fieldset>
+                      <legend>{zh ? "穿着" : "Outfit"}</legend>
+                      <div className="avatar-option-grid avatar-option-grid--assets">
+                        {CHIBI_OUTFITS.map((entry) => <button
+                          type="button"
+                          className={resolveChibiOutfit(profile.avatar.outfit) === entry.id ? "chosen" : ""}
+                          onClick={() => avatar("outfit", entry.id)}
+                          key={entry.id}
+                        ><span className="asset-option-glyph" aria-hidden>◇</span><span>{entry.label[language]}</span></button>)}
+                      </div>
+                    </fieldset>
+                    <fieldset>
+                      <legend>{zh ? "配饰" : "Accessory"}</legend>
+                      <div className="avatar-option-grid avatar-option-grid--assets">
+                        {CHIBI_ACCESSORIES.map((entry) => <button
+                          type="button"
+                          className={resolveChibiAccessory(profile.avatar.accessory) === entry.id ? "chosen" : ""}
+                          onClick={() => avatar("accessory", entry.id)}
+                          key={entry.id}
+                        ><span className="asset-option-glyph" aria-hidden>{entry.id === "none" ? "—" : "✧"}</span><span>{entry.label[language]}</span></button>)}
+                      </div>
+                    </fieldset>
+                    </> : <>
+                      <fieldset>
+                        <legend>{zh ? "发色" : "Hair color"}</legend>
+                        <p className="studio-field-hint">
+                          {zh
+                            ? "城市角色的身体、脸部和服装是一体化模型，当前素材仅支持安全调整独立头发材质。"
+                            : "City bodies, faces, and outfits are authored as one mesh; only the separate hair material can be recolored safely."}
+                        </p>
                         <div className="avatar-option-grid">
-                          {values.map((x) => (
-                            <button
-                              type="button"
-                              className={
-                                profile.avatar[
-                                  key as keyof typeof profile.avatar
-                                ] === x
-                                  ? "chosen"
-                                  : ""
-                              }
-                              onClick={() => avatar(key, x)}
-                              key={x}
-                            >
-                              <span className="avatar-option-visual"><AvatarStage avatar={previewAvatar(key,x)} preview={key==='outfit'||key==='pants'?'body':'head'} compact staticPreview/></span>
-                              <span>{optionLabel(x, key)}</span>
-                            </button>
-                          ))}
+                          {["#2d2323", "#65423b", "#b36b43", "#e0b06f", "#6d718d", "#d67683"].map((value) => <button
+                            type="button"
+                            className={profile.avatar.hairColor.toLowerCase() === value ? "chosen" : ""}
+                            onClick={() => avatar("hairColor", value)}
+                            key={value}
+                          ><span className="skin-swatch skin-swatch--large" style={{background:value}}/><span>{zh ? "发色" : "Color"}</span></button>)}
                         </div>
                       </fieldset>
-                    )})}
+                    </>}
                     <fieldset>
                       <legend>{optionLabel('homeBackground')}</legend>
                       <div className="home-option-grid">

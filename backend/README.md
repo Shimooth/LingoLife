@@ -31,8 +31,16 @@ SQLite 启动时会增量迁移旧数据库：已有 `npc_social_edges` 保留�
 
 - 顶层 `social_interactions`：当天可观察的 NPC 间互动，含地点、时段、参与者、关联角色、重要度、状态和管理契约。
 - 每名居民的 `social_interaction_ids` 与 `related_npc_ids`。
+- 每名参与者的 `world_action`：包含 `walking_to_event` / `waiting_at_event` 状态、共同目的地、出发/到达时间和参与者序号；顶层 `server_time` 供客户端做平滑插值。
 
-普通事件立即以 `resolved_autonomously` 结算，规则原子更新两条方向边，并为每位参与者写入各自视角的 `social` 记忆。若进程在“生成”和“结算”之间退出，下一次世界读取会继续推进而不是重复创建。高影响冲突保持 `awaiting_management`，不预先修改关系；介入窗口会跨日保留，并暂缓生成下一件社交事件，避免冲突被悄悄覆盖：
+事件创建后先进入 `traveling`。NPC 从各自的当前位置沿客户端确定性人行道路线前往共同地点；到达后，普通事件进入 `awaiting_observation`，高影响事件进入 `awaiting_management`。在玩家观看或管理前，关系、记忆和情绪不会提前结算。普通事件通过观察接口展开：
+
+```http
+POST /api/v1/social-events/{event_id}/observe
+Authorization: Bearer <session>
+```
+
+高影响事件提供有限的管理动作：
 
 ```http
 POST /api/v1/social-events/{event_id}/intervene
@@ -42,4 +50,4 @@ Content-Type: application/json
 {"action":"mediate"}
 ```
 
-动作限定为 `mediate`、`encourage`、`give_space`、`let_them_handle_it`。相同动作重试返回同一结算结果；事件结算后改用另一动作返回 `409 SOCIAL_EVENT_CLOSED`。`GET /api/v1/social-events` 可用可选的 `game_date`、`npc_id` 查询，角色 Agent/房间响应也会暴露与该角色相关的 `social_interactions`。
+动作限定为 `mediate`、`encourage`、`give_space`、`let_them_handle_it`。观察和管理接口均幂等：重复请求返回同一结果，关系规则原子更新两条方向边，并为每位参与者写入各自视角的 `social` 记忆。未观看事件不会永久卡住世界；下一游戏日首次读取时会惰性自主结算，再为新的一天评估事件。`GET /api/v1/social-events` 可用可选的 `game_date`、`npc_id` 查询，角色 Agent/房间响应也会暴露与该角色相关的 `social_interactions`。

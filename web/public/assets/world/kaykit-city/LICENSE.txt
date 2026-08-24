@@ -1,0 +1,13 @@
+KayKit : City Builder Bits (1.0)
+
+Created and distributed by Kay Lousberg (www.kaylousberg.com)
+Creation date: 25/08/2023
+
+License: Creative Commons Zero (CC0)
+https://creativecommons.org/publicdomain/zero/1.0/
+
+This content is free to use in personal, educational and commercial projects.
+Crediting Kay Lousberg is appreciated, but not mandatory.
+
+Source asset pack:
+https://kaylousberg.itch.io/city-builder-bits

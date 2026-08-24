@@ -1,0 +1,83 @@
+.branded-startup{
+ --startup-sky-top:#337fac;
+ --startup-sky-horizon:#78b3ce;
+ --startup-sky-lower:#5598bc;
+ --startup-cloud:#fff8e9;
+ --startup-cloud-shade:#dbe8e5;
+ position:relative;
+ display:grid;
+ width:100%;
+ min-width:320px;
+ min-height:100vh;
+ min-height:100dvh;
+ place-items:center;
+ overflow:hidden;
+ padding:24px;
+ color:#fffdf6;
+ background:linear-gradient(180deg,var(--startup-sky-top) 0%,var(--startup-sky-horizon) 58%,var(--startup-sky-lower) 100%);
+ isolation:isolate;
+}
+
+.branded-startup__sky{position:absolute;z-index:0;inset:0;overflow:hidden;pointer-events:none}
+.branded-startup__star{position:absolute;width:5px;height:5px;border-radius:50%;background:#fff3c8;box-shadow:0 0 0 4px #fff3c826}
+.branded-startup__star--one{top:16%;left:18%}
+.branded-startup__star--two{top:25%;right:19%;width:3px;height:3px}
+.branded-startup__star--three{top:11%;right:34%;width:4px;height:4px}
+
+.branded-startup__cloud{position:absolute;display:block;height:44px;border-radius:999px;background:var(--startup-cloud)}
+.branded-startup__cloud>i{position:absolute;display:block;border-radius:50%;background:inherit}
+.branded-startup__cloud>i:nth-child(1){left:12%;bottom:10px;width:58px;height:58px}
+.branded-startup__cloud>i:nth-child(2){left:38%;bottom:16px;width:78px;height:78px}
+.branded-startup__cloud>i:nth-child(3){right:8%;bottom:7px;width:52px;height:52px}
+.branded-startup__cloud--left{top:28%;left:-54px;width:238px;animation:branded-cloud-left 8s ease-in-out infinite alternate}
+.branded-startup__cloud--right{top:22%;right:-68px;width:270px;transform:scale(.88);animation:branded-cloud-right 9.5s ease-in-out infinite alternate}
+.branded-startup__cloud--far{top:68%;left:12%;width:190px;background:var(--startup-cloud-shade);transform:scale(.62);animation:branded-cloud-far 11s ease-in-out infinite alternate}
+
+.branded-startup__cloud-bank{position:absolute;right:-5vw;bottom:-72px;left:-5vw;height:150px;background:var(--startup-cloud-shade)}
+.branded-startup__cloud-bank>i{position:absolute;top:-54px;display:block;width:150px;height:125px;border-radius:50%;background:var(--startup-cloud-shade)}
+.branded-startup__cloud-bank>i:nth-child(1){left:-1%}
+.branded-startup__cloud-bank>i:nth-child(2){left:16%;top:-78px;width:190px;height:155px;background:var(--startup-cloud)}
+.branded-startup__cloud-bank>i:nth-child(3){left:35%;top:-45px;width:145px}
+.branded-startup__cloud-bank>i:nth-child(4){right:30%;top:-82px;width:205px;height:165px;background:var(--startup-cloud)}
+.branded-startup__cloud-bank>i:nth-child(5){right:12%;top:-50px;width:158px}
+.branded-startup__cloud-bank>i:nth-child(6){right:-3%;top:-75px;width:185px;height:150px;background:var(--startup-cloud)}
+
+.branded-startup__brand{position:relative;z-index:2;display:grid;min-width:min(310px,86vw);justify-items:center;text-align:center}
+.branded-startup__logo{position:relative;width:96px;height:96px;overflow:hidden;border:3px solid #ffffff;border-radius:29px;background:linear-gradient(155deg,#fffdf3,#f4e5cb);box-shadow:0 22px 48px #17496442,inset 0 -5px 0 #c5a9862b;animation:branded-logo-float 3.2s ease-in-out infinite}
+.branded-startup__sun{position:absolute;top:15px;right:16px;width:22px;height:22px;border-radius:50%;background:#f5bd63;box-shadow:0 0 0 6px #f5bd6326}
+.branded-startup__city{position:absolute;right:15px;bottom:25px;left:15px;display:flex;height:42px;align-items:flex-end;justify-content:center;gap:4px}
+.branded-startup__city>i{position:relative;display:block;width:17px;height:28px;border-radius:4px 4px 1px 1px;background:#e27e67;box-shadow:inset 0 -4px 0 #a9544a33}
+.branded-startup__city>i::after{position:absolute;top:7px;left:5px;width:4px;height:5px;border-radius:1px;background:#fff7d8;box-shadow:0 9px #fff7d8;content:""}
+.branded-startup__city>i:nth-child(2){height:39px;background:#5d91a0}
+.branded-startup__city>i:nth-child(3){height:32px;background:#7ca573}
+.branded-startup__road{position:absolute;right:10px;bottom:12px;left:10px;height:10px;border-radius:3px;background:#637177}
+.branded-startup__road::after{position:absolute;top:4px;right:8px;left:8px;height:2px;background:repeating-linear-gradient(90deg,#fff5cf 0 8px,transparent 8px 13px);content:""}
+.branded-startup__wordmark{margin:20px 0 0;color:#fffdf5;font:800 clamp(1.5rem,4vw,1.9rem)/1 ui-rounded,"SF Pro Rounded",system-ui,sans-serif;letter-spacing:.055em;text-shadow:0 4px 16px #1749644d}
+.branded-startup__message{min-height:1.4em;margin:10px 0 0;color:#edf8f6;font:650 .78rem/1.4 ui-rounded,"SF Pro Rounded",system-ui,sans-serif;letter-spacing:.02em;text-shadow:0 2px 9px #21556b52}
+.branded-startup__progress{display:flex;height:19px;align-items:flex-end;gap:6px;margin-top:14px}
+.branded-startup__progress>i{display:block;width:6px;height:6px;border-radius:50%;background:#fff5d4;animation:branded-progress 1.05s ease-in-out infinite}
+.branded-startup__progress>i:nth-child(2){animation-delay:.14s}
+.branded-startup__progress>i:nth-child(3){animation-delay:.28s}
+
+@keyframes branded-logo-float{50%{transform:translateY(-6px)}}
+@keyframes branded-progress{0%,100%{transform:translateY(0);opacity:.48}50%{transform:translateY(-7px);opacity:1}}
+@keyframes branded-cloud-left{to{transform:translate3d(28px,5px,0)}}
+@keyframes branded-cloud-right{to{transform:translate3d(-25px,7px,0) scale(.88)}}
+@keyframes branded-cloud-far{to{transform:translate3d(42px,-4px,0) scale(.62)}}
+
+@media(max-width:600px){
+ .branded-startup{padding:18px}
+ .branded-startup__cloud--left{top:24%;left:-120px;transform:scale(.78)}
+ .branded-startup__cloud--right{top:19%;right:-142px;transform:scale(.68);animation-name:branded-cloud-right-mobile}
+ .branded-startup__cloud--far{left:-48px;top:70%}
+ .branded-startup__cloud-bank{bottom:-92px}
+ .branded-startup__logo{width:88px;height:88px;border-radius:26px}
+ .branded-startup__wordmark{margin-top:18px}
+}
+
+@keyframes branded-cloud-right-mobile{to{transform:translate3d(-18px,5px,0) scale(.68)}}
+
+@media(prefers-reduced-motion:reduce){
+ .branded-startup__logo,.branded-startup__progress>i,.branded-startup__cloud{animation:none}
+ .branded-startup__progress>i{opacity:.75}
+}

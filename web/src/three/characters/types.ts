@@ -8,6 +8,11 @@ export type CharacterMotion =
   | 'happy'
   | 'sad'
   | 'tired'
+  | 'look_around'
+  | 'run'
+  | 'jump'
+  | 'crouch'
+  | 'push'
 
 export type CharacterDetail = 'full' | 'portrait' | 'head'
 

@@ -4,6 +4,8 @@ from typing import Any, Dict, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from .animation import AnimationCue
+
 
 class Stats(BaseModel):
     relationship: int = Field(ge=0, le=100)
@@ -52,6 +54,7 @@ class TurnAnalysis(BaseModel):
     mood_change: int = Field(ge=-5, le=5)
     english_xp_change: int = Field(ge=0, le=5)
     english_feedback: EnglishFeedback
+    animation_cue: AnimationCue = "talk"
     semantic_signals: list[SemanticSignal] = Field(default_factory=list, max_length=11)
     learning_evidence: list[LearningEvidence] = Field(default_factory=list, max_length=12)
     memory_candidates: list[MemoryCandidate] = Field(default_factory=list, max_length=4)
@@ -64,6 +67,7 @@ class AIResult(BaseModel):
     mood_change: int
     english_xp_change: int
     english_feedback: EnglishFeedback
+    animation_cue: AnimationCue = "talk"
     semantic_signals: list[SemanticSignal] = Field(default_factory=list, max_length=11)
     learning_evidence: list[LearningEvidence] = Field(default_factory=list, max_length=12)
     memory_candidates: list[MemoryCandidate] = Field(default_factory=list, exclude=True)
@@ -92,6 +96,7 @@ class AvatarStroke(BaseModel):
 
 
 class AvatarConfig(BaseModel):
+    model: str = Field(default="chibi", pattern=r"^(?:chibi|city-(?:0[1-9]|1[0-6]))$")
     hair: str = Field(max_length=24)
     hairColor: str = Field(pattern=r"^#[0-9A-Fa-f]{6}$")
     face: str = Field(max_length=24)

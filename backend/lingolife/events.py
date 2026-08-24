@@ -7,6 +7,8 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Protocol, Sequence
 
+from .animation import AnimationCue, require_animation_cue
+
 
 EVENT_CATEGORIES = {"daily", "growth", "relationship", "surprise"}
 SEMANTIC_SIGNALS = {
@@ -37,6 +39,7 @@ class EventStage:
     required_signals: tuple[str, ...] = ()
     any_signals: tuple[str, ...] = ()
     min_turns: int = 1
+    animation_cue: AnimationCue = "talk"
 
 
 @dataclass(frozen=True)
@@ -46,6 +49,7 @@ class EventOutcome:
     relationship_change: int
     mood_change: int
     memory: str
+    animation_cue: AnimationCue = "happy"
 
 
 @dataclass(frozen=True)
@@ -150,10 +154,16 @@ def load_event_templates(path: str | Path | None = None) -> tuple[EventTemplate,
             id=s["id"], prompt=s["prompt"], objective=s["objective"],
             required_signals=tuple(s.get("required_signals", ())),
             any_signals=tuple(s.get("any_signals", ())), min_turns=s.get("min_turns", 1),
+            animation_cue=require_animation_cue(s.get("animation_cue", "talk"),
+                                                 field=f"{item['id']}.{s['id']}.animation_cue"),
         ) for s in item["stages"])
         outcomes = tuple(EventOutcome(
             id=o["id"], trigger_signals=tuple(o.get("trigger_signals", ())),
             relationship_change=o["relationship_change"], mood_change=o["mood_change"], memory=o["memory"],
+            animation_cue=require_animation_cue(
+                o.get("animation_cue", "happy" if o["mood_change"] > 0 else "sad" if o["mood_change"] < 0 else "idle"),
+                field=f"{item['id']}.{o['id']}.animation_cue",
+            ),
         ) for o in item["outcomes"])
         if not stages or not outcomes or item["default_outcome"] not in {o.id for o in outcomes}:
             raise ValueError(f"incomplete event: {item['id']}")

@@ -1,0 +1,16 @@
+LingoLife third-party character runtime assets
+
+Chibi Characters
+Created and distributed by Styloo
+Source: https://styloo.itch.io/chibi
+
+Cartoon City Massive Pack — Characters (free version)
+Created and distributed by RG Poly
+Source: https://rg-poly.itch.io/cartoon-city-massive-pack-characters
+
+License: Creative Commons Zero v1.0 Universal (CC0-1.0)
+https://creativecommons.org/publicdomain/zero/1.0/
+
+These assets may be used, adapted and redistributed in personal, educational
+and commercial projects. Attribution is retained here for provenance even
+though it is not required by CC0.

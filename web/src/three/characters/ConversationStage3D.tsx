@@ -101,11 +101,17 @@ export function ConversationStage3D({ npcAvatar, playerAvatar, showPlayerAvatar 
     onTranslationChange?.(next)
   }
   const speaker = fallbackLine?.speaker
-  const npcMotion = reducedMotion ? 'idle' : npcAnimation ?? (speaker === 'npc' ? 'talk' : 'listen')
+  const npcMotion = reducedMotion
+    ? 'idle'
+    : speaker === 'player'
+      ? 'listen'
+      : fallbackLine?.streaming
+        ? 'talk'
+        : npcAnimation ?? (speaker === 'npc' ? 'talk' : 'idle')
   const playerMotion = reducedMotion ? 'idle' : playerAnimation ?? (speaker === 'player' ? 'talk' : 'listen')
   const you = playerName ?? (language === 'zh' ? '你' : 'You')
 
-  return <section className={`conversation-stage-3d ${sceneryMode ? 'is-scenery' : ''} ${reducedMotion ? 'is-reduced-motion' : ''} ${className}`.trim()} style={{ '--conversation-sky': palette.sky } as React.CSSProperties} aria-label={language === 'zh' ? `在${place ?? '岛上'}与${npcName}对话` : `Conversation with ${npcName} at ${place ?? 'the island'}`}>
+  return <section className={`conversation-stage-3d ${sceneryMode ? 'is-scenery' : ''} ${reducedMotion ? 'is-reduced-motion' : ''} ${className}`.trim()} style={{ '--conversation-sky': palette.sky } as React.CSSProperties} aria-label={language === 'zh' ? `在${place ?? '天空之城'}与${npcName}对话` : `Conversation with ${npcName} at ${place ?? 'the Sky City'}`}>
     <Canvas dpr={[1, 1.65]} gl={{ antialias: true, alpha: false }}>
       <color attach="background" args={[palette.sky]} />
       <fog attach="fog" args={[palette.sky, 8, 18]} />

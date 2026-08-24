@@ -6,7 +6,7 @@
       "tags": {"traits": ["playful", "creative"], "interests": ["cooking"], "moods": ["happy", "neutral"], "needs": ["food"]},
       "cooldown_days": 10, "repeatable": true, "learning_targets": ["intent.follow_up", "grammar.past_simple"],
       "stages": [
-        {"id": "smoke", "prompt": "I tried a new breakfast recipe, but the smoke alarm became my food critic.", "objective": "Ask what happened.", "any_signals": ["curiosity", "empathy"]},
+        {"id": "smoke", "prompt": "I tried a new breakfast recipe, but the smoke alarm became my food critic.", "objective": "Ask what happened.", "any_signals": ["curiosity", "empathy"], "animation_cue": "look_around"},
         {"id": "taste", "prompt": "The toast is black, but the fruit is still safe. Would you try my second attempt?", "objective": "Respond to the invitation.", "any_signals": ["accept", "decline", "encouragement"]},
         {"id": "retry", "prompt": "Maybe I should start with something easier. What would you make?", "objective": "Offer an idea.", "any_signals": ["advice", "practical_help"]}
       ],
@@ -20,12 +20,12 @@
       "tags": {"traits": ["calm", "introverted"], "interests": ["nature", "photography"], "moods": ["tired", "lonely"], "needs": ["rest", "social"]},
       "cooldown_days": 8, "repeatable": true, "learning_targets": ["intent.advice", "grammar.soft_advice"],
       "stages": [
-        {"id": "window", "prompt": "It has been raining all afternoon. The street looks strangely peaceful.", "objective": "Notice Emma's mood.", "any_signals": ["curiosity", "empathy"]},
+        {"id": "window", "prompt": "It has been raining all afternoon. The street looks strangely peaceful.", "objective": "Notice Emma's mood.", "any_signals": ["curiosity", "empathy"], "animation_cue": "look_around"},
         {"id": "choice", "prompt": "I want to go outside, but I also want to stay under this blanket forever.", "objective": "Make a gentle suggestion.", "any_signals": ["advice", "encouragement"]},
-        {"id": "invite", "prompt": "Would you walk with me if we both brought umbrellas?", "objective": "Accept or decline honestly.", "any_signals": ["accept", "decline", "honesty"]}
+        {"id": "invite", "prompt": "Would you walk with me if we both brought umbrellas?", "objective": "Accept or decline honestly.", "any_signals": ["accept", "decline", "honesty"], "animation_cue": "walk"}
       ],
       "outcomes": [
-        {"id": "shared_walk", "trigger_signals": ["accept", "empathy"], "relationship_change": 5, "mood_change": 4, "memory": "We took a quiet rainy walk together when I felt low."},
+        {"id": "shared_walk", "trigger_signals": ["accept", "empathy"], "relationship_change": 5, "mood_change": 4, "memory": "We took a quiet rainy walk together when I felt low.", "animation_cue": "walk"},
         {"id": "rested", "trigger_signals": ["advice"], "relationship_change": 2, "mood_change": 2, "memory": "The player helped me choose what I needed on a rainy day."}
       ], "default_outcome": "rested"
     },
@@ -34,9 +34,9 @@
       "tags": {"traits": ["curious", "playful"], "interests": ["books", "technology"], "moods": ["excited"]},
       "cooldown_days": 20, "repeatable": false, "learning_targets": ["intent.follow_up", "grammar.questions"],
       "stages": [
-        {"id": "arrival", "prompt": "A package arrived with my name on it, but I don't remember ordering anything.", "objective": "Ask for details.", "any_signals": ["curiosity", "reassurance"]},
+        {"id": "arrival", "prompt": "A package arrived with my name on it, but I don't remember ordering anything.", "objective": "Ask for details.", "any_signals": ["curiosity", "reassurance"], "animation_cue": "look_around"},
         {"id": "clue", "prompt": "The label says it came from my old college town. What do you think is inside?", "objective": "Make a prediction.", "any_signals": ["curiosity", "advice"]},
-        {"id": "open", "prompt": "It's my lost sketchbook! My old roommate found it after five years.", "objective": "Share Emma's excitement.", "any_signals": ["celebration", "encouragement", "empathy"]}
+        {"id": "open", "prompt": "It's my lost sketchbook! My old roommate found it after five years.", "objective": "Share Emma's excitement.", "any_signals": ["celebration", "encouragement", "empathy"], "animation_cue": "jump"}
       ],
       "outcomes": [
         {"id": "memory_shared", "trigger_signals": ["curiosity", "celebration"], "relationship_change": 4, "mood_change": 6, "memory": "The player was with me when my lost college sketchbook unexpectedly returned."},
@@ -48,8 +48,8 @@
       "tags": {"traits": ["creative", "ambitious"], "interests": ["art", "design"], "occupations": ["designer"], "moods": ["sad", "angry"], "needs": ["achievement"], "goals": ["portfolio", "designer", "promotion"]},
       "cooldown_days": 30, "repeatable": false, "learning_targets": ["intent.empathy", "intent.advice"],
       "stages": [
-        {"id": "rejection", "prompt": "My manager rejected the design I worked on all week. He only said it felt wrong.", "objective": "Show empathy and ask what happened.", "required_signals": ["empathy"], "any_signals": ["curiosity", "reassurance"]},
-        {"id": "doubt", "prompt": "Maybe I'm not good enough for this job. Should I throw the whole idea away?", "objective": "Respond to Emma's self-doubt.", "any_signals": ["encouragement", "advice", "honesty"]},
+        {"id": "rejection", "prompt": "My manager rejected the design I worked on all week. He only said it felt wrong.", "objective": "Show empathy and ask what happened.", "required_signals": ["empathy"], "any_signals": ["curiosity", "reassurance"], "animation_cue": "sad"},
+        {"id": "doubt", "prompt": "Maybe I'm not good enough for this job. Should I throw the whole idea away?", "objective": "Respond to Emma's self-doubt.", "any_signals": ["encouragement", "advice", "honesty"], "animation_cue": "sad"},
         {"id": "plan", "prompt": "I could ask for specific feedback tomorrow, but that conversation scares me.", "objective": "Help make a practical plan.", "any_signals": ["practical_help", "encouragement"]}
       ],
       "outcomes": [
@@ -63,8 +63,8 @@
       "tags": {"traits": ["creative", "introverted"], "interests": ["art", "photography"], "occupations": ["designer", "artist"], "moods": ["excited", "anxious"], "needs": ["achievement"], "goals": ["exhibition", "portfolio", "artist"]},
       "relationship_range": [25, 100], "cooldown_days": 45, "repeatable": false, "learning_targets": ["intent.empathy", "intent.advice"],
       "stages": [
-        {"id": "invitation", "prompt": "The neighborhood café offered me one wall for a tiny exhibition.", "objective": "React and ask about the opportunity.", "any_signals": ["celebration", "curiosity", "encouragement"]},
-        {"id": "fear", "prompt": "What if people look at my work and feel nothing?", "objective": "Address Emma's fear.", "any_signals": ["empathy", "reassurance", "honesty"]},
+        {"id": "invitation", "prompt": "The neighborhood café offered me one wall for a tiny exhibition.", "objective": "React and ask about the opportunity.", "any_signals": ["celebration", "curiosity", "encouragement"], "animation_cue": "happy"},
+        {"id": "fear", "prompt": "What if people look at my work and feel nothing?", "objective": "Address Emma's fear.", "any_signals": ["empathy", "reassurance", "honesty"], "animation_cue": "sad"},
         {"id": "selection", "prompt": "I need to choose three pieces tonight. Will you help me decide what story they should tell?", "objective": "Offer help or a theme.", "any_signals": ["accept", "advice", "practical_help"]}
       ],
       "outcomes": [
@@ -77,7 +77,7 @@
       "tags": {"traits": ["ambitious", "anxious"], "moods": ["tired", "anxious"], "needs": ["achievement", "security"], "goals": ["job", "career", "promotion"]},
       "cooldown_days": 40, "repeatable": false, "learning_targets": ["intent.advice", "grammar.soft_advice"],
       "stages": [
-        {"id": "news", "prompt": "I have an interview tomorrow, and my stomach has been doing acrobatics all day.", "objective": "Ask about the interview.", "any_signals": ["curiosity", "empathy"]},
+        {"id": "news", "prompt": "I have an interview tomorrow, and my stomach has been doing acrobatics all day.", "objective": "Ask about the interview.", "any_signals": ["curiosity", "empathy"], "animation_cue": "look_around"},
         {"id": "weakness", "prompt": "They always ask about weaknesses. I never know how to answer without sounding terrible.", "objective": "Suggest an approach.", "any_signals": ["advice", "practical_help"]},
         {"id": "practice", "prompt": "Could I practice my introduction with you once?", "objective": "Agree to help or encourage Emma.", "any_signals": ["accept", "encouragement", "reassurance"]}
       ],
@@ -91,8 +91,8 @@
       "tags": {"traits": ["kind", "anxious"], "moods": ["guilty", "sad"], "needs": ["social", "love"]},
       "cooldown_days": 45, "repeatable": false, "learning_targets": ["intent.empathy", "grammar.past_simple"],
       "stages": [
-        {"id": "mistake", "prompt": "I just realized I forgot my best friend's birthday yesterday.", "objective": "Respond empathetically.", "any_signals": ["empathy", "reassurance"]},
-        {"id": "avoidance", "prompt": "I'm embarrassed. Part of me wants to pretend I didn't notice.", "objective": "Give honest advice.", "any_signals": ["advice", "honesty"]},
+        {"id": "mistake", "prompt": "I just realized I forgot my best friend's birthday yesterday.", "objective": "Respond empathetically.", "any_signals": ["empathy", "reassurance"], "animation_cue": "sad"},
+        {"id": "avoidance", "prompt": "I'm embarrassed. Part of me wants to pretend I didn't notice.", "objective": "Give honest advice.", "any_signals": ["advice", "honesty"], "animation_cue": "look_around"},
         {"id": "message", "prompt": "I want to apologize without making excuses. How should I begin?", "objective": "Help form an apology.", "any_signals": ["apology", "practical_help"]}
       ],
       "outcomes": [
@@ -105,7 +105,7 @@
       "tags": {"traits": ["direct", "tidy"], "moods": ["angry", "tired"], "needs": ["rest", "security"]},
       "cooldown_days": 30, "repeatable": true, "learning_targets": ["intent.advice", "grammar.soft_advice"],
       "stages": [
-        {"id": "complaint", "prompt": "My roommate left every dish in the sink again. I'm trying not to send an angry message.", "objective": "Ask what has happened before.", "any_signals": ["curiosity", "empathy"]},
+        {"id": "complaint", "prompt": "My roommate left every dish in the sink again. I'm trying not to send an angry message.", "objective": "Ask what has happened before.", "any_signals": ["curiosity", "empathy"], "animation_cue": "look_around"},
         {"id": "draft", "prompt": "My first draft says, 'Do you think dishes wash themselves?' Too much?", "objective": "Evaluate the message honestly.", "any_signals": ["honesty", "advice"]},
         {"id": "request", "prompt": "How can I ask clearly without starting a fight?", "objective": "Suggest a polite request.", "any_signals": ["practical_help", "advice"]}
       ],
@@ -119,8 +119,8 @@
       "tags": {"traits": ["introverted", "nostalgic"], "moods": ["lonely", "anxious"], "needs": ["social", "love"]},
       "relationship_range": [40, 100], "cooldown_days": 60, "repeatable": false, "learning_targets": ["intent.past_story", "intent.follow_up"],
       "stages": [
-        {"id": "notification", "prompt": "An old friend messaged me after four years. I stared at the notification for ten minutes.", "objective": "Invite Emma to explain.", "any_signals": ["curiosity", "empathy"]},
-        {"id": "history", "prompt": "We didn't have a fight. We just stopped trying, which somehow feels worse.", "objective": "Acknowledge the complicated feeling.", "any_signals": ["empathy", "honesty", "reassurance"]},
+        {"id": "notification", "prompt": "An old friend messaged me after four years. I stared at the notification for ten minutes.", "objective": "Invite Emma to explain.", "any_signals": ["curiosity", "empathy"], "animation_cue": "look_around"},
+        {"id": "history", "prompt": "We didn't have a fight. We just stopped trying, which somehow feels worse.", "objective": "Acknowledge the complicated feeling.", "any_signals": ["empathy", "honesty", "reassurance"], "animation_cue": "sad"},
         {"id": "reply", "prompt": "Would replying now be strange, or is late better than never?", "objective": "Help Emma decide.", "any_signals": ["advice", "encouragement"]}
       ],
       "outcomes": [
@@ -133,9 +133,9 @@
       "tags": {"traits": ["kind", "adventurous"], "interests": ["animals", "walking"], "moods": ["excited"], "needs": ["social"]},
       "cooldown_days": 90, "repeatable": false, "learning_targets": ["intent.advice", "grammar.sequence"],
       "stages": [
-        {"id": "visitor", "prompt": "There is a wet little dog sitting outside my door. No owner, just one red collar.", "objective": "Ask for identifying details.", "any_signals": ["curiosity", "empathy"]},
-        {"id": "safe", "prompt": "He's friendly but shaking. What should I do first?", "objective": "Prioritize the dog's safety.", "any_signals": ["advice", "practical_help"]},
-        {"id": "poster", "prompt": "The collar has no number. I could make a neighborhood post with his photo.", "objective": "Help with a plan.", "any_signals": ["encouragement", "practical_help"]}
+        {"id": "visitor", "prompt": "There is a wet little dog sitting outside my door. No owner, just one red collar.", "objective": "Ask for identifying details.", "any_signals": ["curiosity", "empathy"], "animation_cue": "crouch"},
+        {"id": "safe", "prompt": "He's friendly but shaking. What should I do first?", "objective": "Prioritize the dog's safety.", "any_signals": ["advice", "practical_help"], "animation_cue": "crouch"},
+        {"id": "poster", "prompt": "The collar has no number. I could make a neighborhood post with his photo.", "objective": "Help with a plan.", "any_signals": ["encouragement", "practical_help"], "animation_cue": "look_around"}
       ],
       "outcomes": [
         {"id": "owner_found", "trigger_signals": ["empathy", "practical_help"], "relationship_change": 6, "mood_change": 7, "memory": "The player helped me keep a lost dog safe and find its owner."},
@@ -147,9 +147,9 @@
       "tags": {"traits": ["anxious", "resourceful"], "interests": ["technology"], "moods": ["tired", "anxious"], "needs": ["security"]},
       "cooldown_days": 35, "repeatable": true, "learning_targets": ["intent.advice", "grammar.sequence"],
       "stages": [
-        {"id": "dark", "prompt": "The power just went out, and the whole street is dark.", "objective": "Check whether Emma is safe.", "any_signals": ["empathy", "reassurance", "curiosity"]},
-        {"id": "battery", "prompt": "My phone is at twelve percent. I found a candle, but no matches.", "objective": "Offer practical priorities.", "any_signals": ["advice", "practical_help"]},
-        {"id": "neighbor", "prompt": "My elderly neighbor lives alone. Should I check on her before my battery dies?", "objective": "Balance safety and helping someone.", "any_signals": ["advice", "encouragement", "practical_help"]}
+        {"id": "dark", "prompt": "The power just went out, and the whole street is dark.", "objective": "Check whether Emma is safe.", "any_signals": ["empathy", "reassurance", "curiosity"], "animation_cue": "look_around"},
+        {"id": "battery", "prompt": "My phone is at twelve percent. I found a candle, but no matches.", "objective": "Offer practical priorities.", "any_signals": ["advice", "practical_help"], "animation_cue": "crouch"},
+        {"id": "neighbor", "prompt": "My elderly neighbor lives alone. Should I check on her before my battery dies?", "objective": "Balance safety and helping someone.", "any_signals": ["advice", "encouragement", "practical_help"], "animation_cue": "walk"}
       ],
       "outcomes": [
         {"id": "neighbors_help", "trigger_signals": ["reassurance", "practical_help"], "relationship_change": 5, "mood_change": 5, "memory": "During a power cut, the player helped me stay calm and safely check on my neighbor."},
@@ -161,13 +161,13 @@
       "tags": {"traits": ["honest", "kind"], "interests": ["walking"], "moods": ["neutral"]},
       "cooldown_days": 80, "repeatable": false, "learning_targets": ["intent.advice", "grammar.soft_advice"],
       "stages": [
-        {"id": "find", "prompt": "I found a wallet on a park bench. There is cash and an ID inside.", "objective": "Ask for relevant details.", "any_signals": ["curiosity", "practical_help"]},
-        {"id": "options", "prompt": "The address is nearby, but I'm not sure whether visiting a stranger is safe.", "objective": "Discuss safe options.", "any_signals": ["advice", "reassurance"]},
-        {"id": "decision", "prompt": "The police station is farther away, but that feels safer. What would you do?", "objective": "Give and explain an opinion.", "any_signals": ["honesty", "advice", "practical_help"]}
+        {"id": "find", "prompt": "I found a wallet on a park bench. There is cash and an ID inside.", "objective": "Ask for relevant details.", "any_signals": ["curiosity", "practical_help"], "animation_cue": "crouch"},
+        {"id": "options", "prompt": "The address is nearby, but I'm not sure whether visiting a stranger is safe.", "objective": "Discuss safe options.", "any_signals": ["advice", "reassurance"], "animation_cue": "look_around"},
+        {"id": "decision", "prompt": "The police station is farther away, but that feels safer. What would you do?", "objective": "Give and explain an opinion.", "any_signals": ["honesty", "advice", "practical_help"], "animation_cue": "walk"}
       ],
       "outcomes": [
-        {"id": "returned_safely", "trigger_signals": ["reassurance", "practical_help"], "relationship_change": 4, "mood_change": 4, "memory": "The player helped me return a lost wallet without taking an unsafe risk."},
-        {"id": "taken_to_police", "trigger_signals": ["advice"], "relationship_change": 2, "mood_change": 3, "memory": "I took a lost wallet to the police station."}
+        {"id": "returned_safely", "trigger_signals": ["reassurance", "practical_help"], "relationship_change": 4, "mood_change": 4, "memory": "The player helped me return a lost wallet without taking an unsafe risk.", "animation_cue": "walk"},
+        {"id": "taken_to_police", "trigger_signals": ["advice"], "relationship_change": 2, "mood_change": 3, "memory": "I took a lost wallet to the police station.", "animation_cue": "walk"}
       ], "default_outcome": "taken_to_police"
     },
     {
@@ -175,7 +175,7 @@
       "tags": {"traits": ["curious", "quiet", "thoughtful"], "interests": ["books", "reading", "writing", "history"]},
       "cooldown_days": 18, "repeatable": true, "learning_targets": ["intent.follow_up", "grammar.questions"],
       "stages": [
-        {"id":"discovery","prompt":"A handwritten note fell out of my library book. It says, 'If you found this, tell me what courage means to you.'","objective":"Ask about the note.","any_signals":["curiosity","empathy"]},
+        {"id":"discovery","prompt":"A handwritten note fell out of my library book. It says, 'If you found this, tell me what courage means to you.'","objective":"Ask about the note.","any_signals":["curiosity","empathy"],"animation_cue":"look_around"},
         {"id":"answer","prompt":"Part of me wants to write an answer and leave it in the same book. Is that silly?","objective":"Give an honest reaction.","any_signals":["honesty","encouragement","advice"]},
         {"id":"leave","prompt":"I think courage can be something tiny, like replying when you are afraid. What would you write?","objective":"Help compose a reply.","any_signals":["practical_help","encouragement"]}
       ],
@@ -185,36 +185,36 @@
       "id": "daily_open_mic", "category": "daily", "title": "Five Minutes of Open Mic", "base_weight": 3.2,
       "tags": {"traits": ["creative", "outgoing", "brave", "shy"], "interests": ["music", "poetry", "singing", "writing"]},
       "cooldown_days": 24, "repeatable": true, "learning_targets": ["intent.advice", "grammar.soft_advice"],
-      "stages":[{"id":"poster","prompt":"The café is hosting an open mic tonight. I stopped walking when I saw the poster.","objective":"Ask what they might perform.","any_signals":["curiosity","encouragement"]},{"id":"fear","prompt":"I have something I wrote, but my hands shake just imagining the stage.","objective":"Respond to the fear.","any_signals":["empathy","reassurance","advice"]},{"id":"choice","prompt":"They still have one five-minute slot. Should I put my name down?","objective":"Help make the choice.","any_signals":["honesty","encouragement","practical_help"]}],
-      "outcomes":[{"id":"takes_stage","trigger_signals":["encouragement","practical_help"],"relationship_change":5,"mood_change":6,"memory":"The player gave me courage to take a five-minute open-mic slot."},{"id":"watches_first","trigger_signals":[],"relationship_change":2,"mood_change":2,"memory":"We talked about an open mic I might try someday."}],"default_outcome":"watches_first"
+      "stages":[{"id":"poster","prompt":"The café is hosting an open mic tonight. I stopped walking when I saw the poster.","objective":"Ask what they might perform.","any_signals":["curiosity","encouragement"],"animation_cue":"look_around"},{"id":"fear","prompt":"I have something I wrote, but my hands shake just imagining the stage.","objective":"Respond to the fear.","any_signals":["empathy","reassurance","advice"],"animation_cue":"sad"},{"id":"choice","prompt":"They still have one five-minute slot. Should I put my name down?","objective":"Help make the choice.","any_signals":["honesty","encouragement","practical_help"]}],
+      "outcomes":[{"id":"takes_stage","trigger_signals":["encouragement","practical_help"],"relationship_change":5,"mood_change":6,"memory":"The player gave me courage to take a five-minute open-mic slot.","animation_cue":"jump"},{"id":"watches_first","trigger_signals":[],"relationship_change":2,"mood_change":2,"memory":"We talked about an open mic I might try someday."}],"default_outcome":"watches_first"
     },
     {
       "id": "growth_difficult_student", "category": "growth", "title": "The Student Who Stopped Trying", "base_weight": 4,
       "tags": {"traits": ["patient", "kind", "serious"], "interests": ["teaching", "education"], "occupations": ["teacher", "professor", "tutor"]},
       "cooldown_days": 28, "repeatable": true, "learning_targets": ["intent.empathy", "intent.advice"],
-      "stages":[{"id":"silence","prompt":"One of my students handed in a blank page again today. They would not even look at me.","objective":"Ask what may be wrong.","any_signals":["curiosity","empathy"]},{"id":"boundary","prompt":"I want to help, but I do not want to embarrass them in front of the class.","objective":"Offer a considerate approach.","any_signals":["advice","practical_help"]},{"id":"plan","prompt":"Maybe I could ask them to stay for two quiet minutes after class. How should I start?","objective":"Help plan the conversation.","any_signals":["practical_help","reassurance"]}],
+      "stages":[{"id":"silence","prompt":"One of my students handed in a blank page again today. They would not even look at me.","objective":"Ask what may be wrong.","any_signals":["curiosity","empathy"],"animation_cue":"sad"},{"id":"boundary","prompt":"I want to help, but I do not want to embarrass them in front of the class.","objective":"Offer a considerate approach.","any_signals":["advice","practical_help"]},{"id":"plan","prompt":"Maybe I could ask them to stay for two quiet minutes after class. How should I start?","objective":"Help plan the conversation.","any_signals":["practical_help","reassurance"]}],
       "outcomes":[{"id":"private_checkin","trigger_signals":["empathy","practical_help"],"relationship_change":5,"mood_change":4,"memory":"The player helped me plan a private, respectful check-in with a struggling student."},{"id":"gentle_attempt","trigger_signals":[],"relationship_change":2,"mood_change":1,"memory":"I worried about a student who had stopped trying."}],"default_outcome":"gentle_attempt"
     },
     {
       "id": "growth_exhausting_shift", "category": "growth", "title": "After the Longest Shift", "base_weight": 4,
       "tags": {"traits": ["kind", "reliable", "careful"], "interests": ["health", "medicine"], "occupations": ["doctor", "nurse", "paramedic", "therapist"]},
       "cooldown_days": 25, "repeatable": true, "learning_targets": ["intent.empathy", "grammar.past_simple"],
-      "stages":[{"id":"shift","prompt":"My shift ran four hours late. I kept telling everyone I was fine until I reached the bus stop.","objective":"Check how they feel.","any_signals":["empathy","curiosity"]},{"id":"guilt","prompt":"I know I need rest, but I feel guilty leaving work for the next team.","objective":"Address the guilt.","any_signals":["reassurance","honesty","advice"]},{"id":"recovery","prompt":"I have tomorrow morning free. What is one thing I should protect that time for?","objective":"Suggest a recovery plan.","any_signals":["practical_help","advice"]}],
-      "outcomes":[{"id":"rests_without_guilt","trigger_signals":["reassurance","practical_help"],"relationship_change":5,"mood_change":5,"memory":"After an exhausting shift, the player helped me choose rest without guilt."},{"id":"gets_sleep","trigger_signals":[],"relationship_change":2,"mood_change":2,"memory":"I admitted how exhausted I was after a very long shift."}],"default_outcome":"gets_sleep"
+      "stages":[{"id":"shift","prompt":"My shift ran four hours late. I kept telling everyone I was fine until I reached the bus stop.","objective":"Check how they feel.","any_signals":["empathy","curiosity"],"animation_cue":"tired"},{"id":"guilt","prompt":"I know I need rest, but I feel guilty leaving work for the next team.","objective":"Address the guilt.","any_signals":["reassurance","honesty","advice"],"animation_cue":"tired"},{"id":"recovery","prompt":"I have tomorrow morning free. What is one thing I should protect that time for?","objective":"Suggest a recovery plan.","any_signals":["practical_help","advice"],"animation_cue":"tired"}],
+      "outcomes":[{"id":"rests_without_guilt","trigger_signals":["reassurance","practical_help"],"relationship_change":5,"mood_change":5,"memory":"After an exhausting shift, the player helped me choose rest without guilt."},{"id":"gets_sleep","trigger_signals":[],"relationship_change":2,"mood_change":2,"memory":"I admitted how exhausted I was after a very long shift.","animation_cue":"tired"}],"default_outcome":"gets_sleep"
     },
     {
       "id": "relationship_family_call", "category": "relationship", "title": "The Call I Keep Avoiding", "base_weight": 3.5,
       "tags": {"traits": ["independent", "sensitive", "stubborn"], "needs": ["love", "social", "security"]},
       "relationship_range":[30,100], "cooldown_days":35, "repeatable":true, "learning_targets":["intent.empathy","intent.advice"],
-      "stages":[{"id":"missed","prompt":"My family has called three times this week, and I keep letting it ring.","objective":"Invite an explanation.","any_signals":["curiosity","empathy"]},{"id":"pressure","prompt":"They mean well, but every call becomes a list of things I should be doing differently.","objective":"Acknowledge the pressure.","any_signals":["empathy","honesty","reassurance"]},{"id":"boundary","prompt":"I want to call back without turning it into another argument. Can I set a boundary kindly?","objective":"Help phrase a boundary.","any_signals":["advice","practical_help"]}],
+      "stages":[{"id":"missed","prompt":"My family has called three times this week, and I keep letting it ring.","objective":"Invite an explanation.","any_signals":["curiosity","empathy"],"animation_cue":"look_around"},{"id":"pressure","prompt":"They mean well, but every call becomes a list of things I should be doing differently.","objective":"Acknowledge the pressure.","any_signals":["empathy","honesty","reassurance"],"animation_cue":"sad"},{"id":"boundary","prompt":"I want to call back without turning it into another argument. Can I set a boundary kindly?","objective":"Help phrase a boundary.","any_signals":["advice","practical_help"]}],
       "outcomes":[{"id":"kind_boundary","trigger_signals":["empathy","practical_help"],"relationship_change":6,"mood_change":4,"memory":"The player helped me prepare a kind boundary before calling my family."},{"id":"calls_back","trigger_signals":[],"relationship_change":2,"mood_change":1,"memory":"I decided not to avoid my family's calls forever."}],"default_outcome":"calls_back"
     },
     {
       "id": "surprise_train_delay", "category": "surprise", "title": "The Last Train Is Not Coming", "base_weight": 3.7,
       "tags": {"traits": ["anxious", "resourceful", "adventurous"], "interests": ["travel", "city", "music"], "needs": ["security"]},
       "cooldown_days":30, "repeatable":true, "learning_targets":["intent.advice","grammar.sequence"],
-      "stages":[{"id":"board","prompt":"The station board just changed: the last train is cancelled, and my phone is nearly dead.","objective":"Check the situation.","any_signals":["curiosity","reassurance"]},{"id":"options","prompt":"There is a night bus in forty minutes, or I could share a taxi with two people from the queue.","objective":"Compare safe options.","any_signals":["advice","honesty"]},{"id":"wait","prompt":"The night bus feels safer. Could you keep talking to me while I wait?","objective":"Offer support.","any_signals":["accept","reassurance","encouragement"]}],
-      "outcomes":[{"id":"safe_ride_home","trigger_signals":["advice","reassurance"],"relationship_change":5,"mood_change":4,"memory":"The player stayed with me through a late-night train cancellation until I found a safe way home."},{"id":"bus_chosen","trigger_signals":[],"relationship_change":2,"mood_change":1,"memory":"I found a safe night bus after the last train was cancelled."}],"default_outcome":"bus_chosen"
+      "stages":[{"id":"board","prompt":"The station board just changed: the last train is cancelled, and my phone is nearly dead.","objective":"Check the situation.","any_signals":["curiosity","reassurance"],"animation_cue":"look_around"},{"id":"options","prompt":"There is a night bus in forty minutes, or I could share a taxi with two people from the queue.","objective":"Compare safe options.","any_signals":["advice","honesty"],"animation_cue":"look_around"},{"id":"wait","prompt":"The night bus feels safer. Could you keep talking to me while I wait?","objective":"Offer support.","any_signals":["accept","reassurance","encouragement"],"animation_cue":"tired"}],
+      "outcomes":[{"id":"safe_ride_home","trigger_signals":["advice","reassurance"],"relationship_change":5,"mood_change":4,"memory":"The player stayed with me through a late-night train cancellation until I found a safe way home.","animation_cue":"walk"},{"id":"bus_chosen","trigger_signals":[],"relationship_change":2,"mood_change":1,"memory":"I found a safe night bus after the last train was cancelled.","animation_cue":"walk"}],"default_outcome":"bus_chosen"
     }
   ]
 }

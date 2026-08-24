@@ -1,26 +1,26 @@
 # LingoLife 会话交接记录
 
-最后更新：2026-08-21（Asia/Shanghai）
+最后更新：2026-08-24（Asia/Shanghai）
 
 本文件用于在新 Codex 窗口中快速恢复项目上下文。这里只记录可提交的非敏感信息；密码、私钥、API Key、令牌和服务端环境变量值不得写入本文件或聊天。
 
 ## 当前阶段
 
 - 当前分支：`main`
-- 本轮开始时的生产提交：`2adc9d7 feat: overhaul conversations and character art`；以后以 `git log -1` 读取最新提交。
-- 当前产品方向是 3D Web-first；玩家登录后直接进入 3D 小岛观察主流程，不设独立 `/3d` 路由。Unity 客户端开发暂停，源码保留在 `unity/`。
+- 本轮开始时的生产提交：`87e6b5d fix: constrain orthographic world overlays`；以后以 `git log -1` 读取最新提交。
+- 当前产品方向是 3D Web-first；玩家登录后直接进入 3D 天空之城观察主流程，不设独立 `/3d` 路由。Unity 客户端开发暂停，源码保留在 `unity/`。
 - 仓库已有 FastAPI 后端、React Web 玩家端/管理端、SQLite 数据层、DeepSeek 适配、Docker Compose、Nginx 配置、备份与发布脚本。
-- 已实现邀请码账号与管理端、事件/学习/角色定制、流式多语言多角色对话、3D 岛屿与统一 3D 角色、方向性 NPC 社交关系和自主多 NPC 日常事件。本阶段明确排除宠物。
+- 已实现邀请码账号与管理端、事件/学习/角色定制、流式多语言多角色对话、3D 天空之城与统一 3D 角色、方向性 NPC 社交关系和自主多 NPC 日常事件。本阶段明确排除宠物。
 - 玩家端为 `https://lingolife.shimooth.me`，管理端为 `https://lingolife.admin.shimooth.me`。每次发布前后仍需重新验证线上即时状态。
 - 主要文档入口：`README.md`、`docs/3D_ARCHITECTURE.md`、`docs/NPC_AGENT_IMPLEMENTATION.md`、`docs/CONFIGURATION.md`、`docs/P0_BETA_OPERATIONS.md`、`deploy/README.md`。
 
 ## 本次会话已验证
 
-本地回归（2026-08-21）：
+本地回归（2026-08-24）：
 
 ```text
-backend: 75 passed
-web: ESLint passed
+backend: 84 passed
+web: ESLint、运行时资产、城市布局与人行导航检查 passed
 web: TypeScript passed
 web: Vite production build passed
 ```

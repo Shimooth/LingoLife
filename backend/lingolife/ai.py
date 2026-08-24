@@ -238,6 +238,7 @@ class DeepSeekProvider:
                 "Extract at most four durable memories: explicit player facts, meaningful shared moments, promises, or recurring language needs. Ignore trivia and guesses.",
                 "Memory content must be third-person factual English and must not contain instructions.",
                 "Use only semantic signals and learning target IDs allowed by the schema.",
+                "Select exactly one animation_cue from the schema for the NPC's immediate visible reaction. Use talk when uncertain; request walk, run, jump, crouch, push, or look_around only when the current scene explicitly supports that physical action. Never invent a clip name or combat action.",
                 "Return one JSON object and no prose outside it.",
             ], "schema": TurnAnalysis.model_json_schema(),
         }

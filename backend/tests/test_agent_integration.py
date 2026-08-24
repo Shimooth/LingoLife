@@ -48,6 +48,11 @@ def test_profile_event_and_learning_are_one_persisted_loop(tmp_path):
     assert response.status_code == 200
     data = response.json()
     assert data["event_update"]["stage_changed"] is True
+    assert data["animation_cue"] == data["event_update"]["animation_cue"]
+    assert data["active_event"]["stage"]["animation_cue"] in {
+        "idle", "talk", "listen", "happy", "sad", "tired",
+        "look_around", "walk", "run", "jump", "crouch", "push",
+    }
     assert data["learning_summary"]["targets"]
     assert provider.context["npc_profile"]["name"] == "Maya"
     assert provider.context["current_event"]["id"] == room["active_event"]["id"]
@@ -69,6 +74,10 @@ def test_profile_requires_auth_and_rejects_oversized_drawing(tmp_path):
     profile = client.get("/api/v1/npc/profile", headers=auth).json()
     profile["avatar"]["strokes"] = [{"color": "#112233", "width": 4,
                                       "points": [[1, 1]] * 81}]
+    assert client.put("/api/v1/npc/profile", headers=auth, json=profile).status_code == 422
+
+    profile["avatar"]["strokes"] = []
+    profile["avatar"]["model"] = "https://untrusted.example/character.glb"
     assert client.put("/api/v1/npc/profile", headers=auth, json=profile).status_code == 422
 
 
