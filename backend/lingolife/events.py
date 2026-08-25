@@ -7,7 +7,14 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Protocol, Sequence
 
-from .animation import AnimationCue, require_animation_cue
+from .animation import (
+    AnimationCue,
+    AnimationPerformance,
+    outcome_performance,
+    require_animation_cue,
+    require_animation_performance,
+    stage_performance,
+)
 
 
 EVENT_CATEGORIES = {"daily", "growth", "relationship", "surprise"}
@@ -36,10 +43,12 @@ class EventStage:
     id: str
     prompt: str
     objective: str
+    prompt_zh: str = ""
     required_signals: tuple[str, ...] = ()
     any_signals: tuple[str, ...] = ()
     min_turns: int = 1
     animation_cue: AnimationCue = "talk"
+    performance: AnimationPerformance = field(default_factory=lambda: stage_performance("talk"))
 
 
 @dataclass(frozen=True)
@@ -50,6 +59,7 @@ class EventOutcome:
     mood_change: int
     memory: str
     animation_cue: AnimationCue = "happy"
+    performance: AnimationPerformance = field(default_factory=lambda: outcome_performance("happy"))
 
 
 @dataclass(frozen=True)
@@ -150,25 +160,47 @@ def load_event_templates(path: str | Path | None = None) -> tuple[EventTemplate,
         seen.add(item["id"])
         if item["category"] not in EVENT_CATEGORIES:
             raise ValueError(f"invalid category: {item['category']}")
-        stages = tuple(EventStage(
-            id=s["id"], prompt=s["prompt"], objective=s["objective"],
-            required_signals=tuple(s.get("required_signals", ())),
-            any_signals=tuple(s.get("any_signals", ())), min_turns=s.get("min_turns", 1),
-            animation_cue=require_animation_cue(s.get("animation_cue", "talk"),
-                                                 field=f"{item['id']}.{s['id']}.animation_cue"),
-        ) for s in item["stages"])
-        outcomes = tuple(EventOutcome(
-            id=o["id"], trigger_signals=tuple(o.get("trigger_signals", ())),
-            relationship_change=o["relationship_change"], mood_change=o["mood_change"], memory=o["memory"],
-            animation_cue=require_animation_cue(
-                o.get("animation_cue", "happy" if o["mood_change"] > 0 else "sad" if o["mood_change"] < 0 else "idle"),
-                field=f"{item['id']}.{o['id']}.animation_cue",
-            ),
-        ) for o in item["outcomes"])
-        if not stages or not outcomes or item["default_outcome"] not in {o.id for o in outcomes}:
+        stages: list[EventStage] = []
+        for stage_data in item["stages"]:
+            cue = require_animation_cue(
+                stage_data.get("animation_cue", "talk"),
+                field=f"{item['id']}.{stage_data['id']}.animation_cue",
+            )
+            stages.append(EventStage(
+                id=stage_data["id"], prompt=stage_data["prompt"], objective=stage_data["objective"],
+                prompt_zh=str(stage_data.get("prompt_zh", "")),
+                required_signals=tuple(stage_data.get("required_signals", ())),
+                any_signals=tuple(stage_data.get("any_signals", ())),
+                min_turns=stage_data.get("min_turns", 1), animation_cue=cue,
+                performance=require_animation_performance(
+                    stage_data.get("performance"), fallback_cue=cue, kind="stage",
+                    field=f"{item['id']}.{stage_data['id']}.performance",
+                ),
+            ))
+        outcomes: list[EventOutcome] = []
+        for outcome_data in item["outcomes"]:
+            fallback = ("happy" if outcome_data["mood_change"] > 0 else
+                        "sad" if outcome_data["mood_change"] < 0 else "idle")
+            cue = require_animation_cue(
+                outcome_data.get("animation_cue", fallback),
+                field=f"{item['id']}.{outcome_data['id']}.animation_cue",
+            )
+            outcomes.append(EventOutcome(
+                id=outcome_data["id"], trigger_signals=tuple(outcome_data.get("trigger_signals", ())),
+                relationship_change=outcome_data["relationship_change"],
+                mood_change=outcome_data["mood_change"], memory=outcome_data["memory"],
+                animation_cue=cue,
+                performance=require_animation_performance(
+                    outcome_data.get("performance"), fallback_cue=cue, kind="outcome",
+                    field=f"{item['id']}.{outcome_data['id']}.performance",
+                ),
+            ))
+        stages_tuple = tuple(stages)
+        outcomes_tuple = tuple(outcomes)
+        if not stages_tuple or not outcomes_tuple or item["default_outcome"] not in {o.id for o in outcomes_tuple}:
             raise ValueError(f"incomplete event: {item['id']}")
-        unknown = {x for s in stages for x in (*s.required_signals, *s.any_signals)} - SEMANTIC_SIGNALS
-        unknown |= {x for o in outcomes for x in o.trigger_signals} - SEMANTIC_SIGNALS
+        unknown = {x for s in stages_tuple for x in (*s.required_signals, *s.any_signals)} - SEMANTIC_SIGNALS
+        unknown |= {x for o in outcomes_tuple for x in o.trigger_signals} - SEMANTIC_SIGNALS
         if unknown:
             raise ValueError(f"unknown semantic signals in {item['id']}: {sorted(unknown)}")
         templates.append(EventTemplate(
@@ -177,8 +209,8 @@ def load_event_templates(path: str | Path | None = None) -> tuple[EventTemplate,
             tags={k: tuple(v) for k, v in item.get("tags", {}).items()},
             relationship_range=tuple(item.get("relationship_range", (0, 100))),
             cooldown_days=item.get("cooldown_days", 7), repeatable=item.get("repeatable", True),
-            learning_targets=tuple(item.get("learning_targets", ())), stages=stages,
-            outcomes=outcomes, default_outcome=item["default_outcome"],
+            learning_targets=tuple(item.get("learning_targets", ())), stages=stages_tuple,
+            outcomes=outcomes_tuple, default_outcome=item["default_outcome"],
         ))
     return tuple(templates)
 

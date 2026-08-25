@@ -18,7 +18,11 @@ test -s "${PROJECT_ROOT}/web/dist/index.html" || {
 }
 docker compose version >/dev/null
 cd "${PROJECT_ROOT}"
-SOURCE_REVISION="$(git rev-parse --short HEAD 2>/dev/null || echo archive)"
+SOURCE_REVISION="$(git rev-parse HEAD 2>/dev/null || true)"
+if [[ -z "${SOURCE_REVISION}" && -f "${PROJECT_ROOT}/.source-revision" ]]; then
+  SOURCE_REVISION="$(tr -d '[:space:]' < "${PROJECT_ROOT}/.source-revision")"
+fi
+[[ "${SOURCE_REVISION}" =~ ^[0-9a-f]{7,64}$ ]] || SOURCE_REVISION=archive
 docker compose -f "${COMPOSE_FILE}" build --pull api
 docker compose -f "${COMPOSE_FILE}" up -d --remove-orphans api
 for attempt in {1..20}; do

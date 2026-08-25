@@ -302,6 +302,7 @@ class DeepSeekProvider:
         persona = context.get("persona") or compile_persona(context.get("npc_profile") or {})
         trace = {"prompt_version": "agent-v1", "persona_version": persona.get("version"),
                  "model": self.settings.deepseek_model, "fallback_used": bool(dialogue_error or analysis_error),
+                 "dialogue_fallback": bool(dialogue_error),
                  "dialogue_ms": dialogue_ms, "analysis_ms": analysis_ms,
                  "error_type": ",".join(value for value in (dialogue_error, analysis_error) if value) or None,
                  "memory_ids": [item.get("id") for item in context.get("memories", []) if isinstance(item, dict) and item.get("id") is not None]}

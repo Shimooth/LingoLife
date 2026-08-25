@@ -36,21 +36,29 @@ def context():
 def test_content_has_eighteen_unique_multistage_events_across_all_categories(templates):
     assert len(templates) == 18
     assert len({event.id for event in templates}) == 18
+    assert sum(len(event.stages) for event in templates) == 54
+    assert sum(len(event.outcomes) for event in templates) == 37
     assert {event.category for event in templates} == {"daily", "growth", "relationship", "surprise"}
     assert all(len(event.stages) >= 3 for event in templates)
     assert all(event.learning_targets for event in templates)
     assert all(outcome.memory for event in templates for outcome in event.outcomes)
+    assert all(stage.prompt_zh for event in templates for stage in event.stages)
     assert all(stage.animation_cue in ANIMATION_CUES for event in templates for stage in event.stages)
     assert all(outcome.animation_cue in ANIMATION_CUES for event in templates for outcome in event.outcomes)
-    assert {stage.animation_cue for event in templates for stage in event.stages} >= {
-        "talk", "sad", "tired", "look_around", "walk", "jump", "crouch",
-    }
+    assert ({stage.animation_cue for event in templates for stage in event.stages}
+            | {outcome.animation_cue for event in templates for outcome in event.outcomes}) == ANIMATION_CUES
+    assert all(stage.performance.beats for event in templates for stage in event.stages)
+    assert all(outcome.performance.beats for event in templates for outcome in event.outcomes)
+    assert all(stage.performance.hold_cue == "listen" for event in templates for stage in event.stages)
+    assert all(outcome.performance.hold_cue == "idle" for event in templates for outcome in event.outcomes)
 
 
 def test_json_is_utf8_content_not_python_embedded():
     # Content editors can expand the pool without changing engine code.
     raw = json.loads((__import__("pathlib").Path(__file__).parents[1] / "content/events.json").read_text())
     assert raw["version"] == 1
+    assert all("animation_cue" in stage for event in raw["events"] for stage in event["stages"])
+    assert all("animation_cue" in outcome for event in raw["events"] for outcome in event["outcomes"])
 
 
 def test_generated_event_content_cannot_invent_an_animation_clip(tmp_path):
@@ -60,6 +68,18 @@ def test_generated_event_content_cannot_invent_an_animation_clip(tmp_path):
     generated = tmp_path / "generated-events.json"
     generated.write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(ValueError, match="animation_cue"):
+        load_event_templates(generated)
+
+
+def test_authored_event_performance_cannot_escape_the_animation_contract(tmp_path):
+    source = __import__("pathlib").Path(__file__).parents[1] / "content/events.json"
+    raw = json.loads(source.read_text(encoding="utf-8"))
+    raw["events"][0]["stages"][0]["performance"] = {
+        "beats": [{"cue": "combat_spin", "duration_ms": 1200}],
+    }
+    generated = tmp_path / "generated-events.json"
+    generated.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="performance.*cue"):
         load_event_templates(generated)
 
 

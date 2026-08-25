@@ -4,7 +4,7 @@ import {useEffect,useMemo,useRef,useState,type ComponentRef,type MutableRefObjec
 import * as THREE from 'three'
 import {defaultAvatar} from '../../avatar'
 import type {CityCharacter,CityLandmark} from '../../components/CityMap'
-import {Character3D} from '../characters'
+import {DirectedCharacter3D,type CharacterMotion,type CharacterPerformance,type CharacterPerformanceMode} from '../characters'
 import {
  BUILDING_LOTS,BUILDING_MODELS,CITY_PLATFORM_OUTLINE,DISTRICTS,KAYKIT_ASSET_BASE,KAYKIT_PROP_MODELS,KAYKIT_ROAD_MODELS,KIND_COLORS,ROAD_TILES,ROAD_TILE_SCALE,SKY_ROAD_EXITS,STREET_PROPS,TREES,WORLD_DEPTH,WORLD_WIDTH,
  buildingModelFor,hashString,worldPosition,
@@ -37,6 +37,7 @@ type SceneProps={
 
 type KayKitModel=KayKitBuildingModel|KayKitRoadModel|KayKitPropModel
 type InstancePlacement={id:string;position:[number,number,number];rotation:number;scale:number}
+type DirectedWorldAction=NonNullable<CityCharacter['worldAction']>&{performance?:CharacterPerformance;animation_cue?:CharacterMotion}
 
 const BUILDING_HEIGHT:Record<KayKitBuildingModel,number>={
  building_A:1.65,building_B:1.65,building_C:2.98,building_D:2.97,
@@ -110,7 +111,7 @@ function AssetObject({model,item,castShadow=false,receiveShadow=false}:{model:Ka
 
 type ActorRegistry=MutableRefObject<Map<string,THREE.Group>>
 
-function CameraRig({focus,focusVersion,followedCharacterId,actors,reducedMotion,viewMode}:{focus:WorldPoint|null;focusVersion:number;followedCharacterId?:string;actors:ActorRegistry;reducedMotion:boolean;viewMode:WorldViewMode}){
+function CameraRig({focus,focusVersion,followedCharacterId,followCameraOffset,followWalking,actors,reducedMotion,viewMode}:{focus:WorldPoint|null;focusVersion:number;followedCharacterId?:string;followCameraOffset:WorldPoint;followWalking:boolean;actors:ActorRegistry;reducedMotion:boolean;viewMode:WorldViewMode}){
  const {camera,size}=useThree()
  const controls=useRef<ComponentRef<typeof OrbitControls>>(null)
  const moving=useRef(false)
@@ -118,23 +119,32 @@ function CameraRig({focus,focusVersion,followedCharacterId,actors,reducedMotion,
  const desiredTarget=useRef(new THREE.Vector3(0,0,-1.5))
  const desiredZoom=useRef(25)
  const actorPosition=useRef(new THREE.Vector3())
- const followTopOffset=useRef(new THREE.Vector3(.01,28,.01))
- const followIsometricOffset=useRef(new THREE.Vector3(12.5,14,15))
+ const followLookOffset=useRef(new THREE.Vector3(0,.3,0))
+ const staticFollowOffset=useMemo(()=>new THREE.Vector3(...followCameraOffset),[followCameraOffset])
+ const followIsometricOffset=useRef(new THREE.Vector3(...followCameraOffset))
+ const nextFollowOffset=useRef(new THREE.Vector3(...followCameraOffset))
 
  useEffect(()=>{
   const target=new THREE.Vector3(...(focus??[0,0,-1.5]))
   desiredTarget.current.copy(target)
-  const focused=Boolean(focus||followedCharacterId)
-  const offset=viewMode==='top'
-   ?new THREE.Vector3(.01,focused?28:54,.01)
-   :(focused?new THREE.Vector3(12.5,14,15):new THREE.Vector3(38,36,44))
+  const following=Boolean(followedCharacterId)
+  const focused=Boolean(focus||following)
+  followIsometricOffset.current.copy(staticFollowOffset)
+  const offset=following
+   ?followIsometricOffset.current
+   :viewMode==='top'
+    ?new THREE.Vector3(.01,focused?28:54,.01)
+    :(focused?new THREE.Vector3(12.5,14,15):new THREE.Vector3(38,36,44))
   desiredPosition.current.copy(target).add(offset)
   const portrait=size.height>size.width*1.25
   const overviewFit=portrait
    ?Math.min(size.width/(viewMode==='top'?42:40),size.height/(viewMode==='top'?46:48))
    :Math.min(size.width/(viewMode==='top'?52:56),size.height/(viewMode==='top'?35:33))*.96
   const focusFit=Math.min(52,Math.max(30,size.height/17))
-  desiredZoom.current=focused?(viewMode==='top'?Math.min(30,focusFit):focusFit):overviewFit
+  const followFit=portrait
+   ?Math.min(108,Math.max(98,size.width/3.75))
+   :Math.min(118,Math.max(104,size.height/6.35))
+  desiredZoom.current=following?followFit:focused?(viewMode==='top'?Math.min(30,focusFit):focusFit):overviewFit
   moving.current=true
   if(reducedMotion){
    camera.position.copy(desiredPosition.current)
@@ -143,15 +153,36 @@ function CameraRig({focus,focusVersion,followedCharacterId,actors,reducedMotion,
    controls.current?.update()
    moving.current=false
   }
- },[camera,focus,focusVersion,followedCharacterId,reducedMotion,size.height,size.width,viewMode])
+ },[camera,focus,focusVersion,followedCharacterId,reducedMotion,size.height,size.width,staticFollowOffset,viewMode])
 
  useFrame((_,delta)=>{
   if(followedCharacterId){
    const actor=actors.current.get(followedCharacterId)
    if(actor){
     actor.getWorldPosition(actorPosition.current)
-    desiredTarget.current.copy(actorPosition.current)
-    desiredPosition.current.copy(actorPosition.current).add(viewMode==='top'?followTopOffset.current:followIsometricOffset.current)
+    nextFollowOffset.current.copy(staticFollowOffset)
+    if(followWalking){
+     let roadX=actorPosition.current.x,roadZ=actorPosition.current.z,nearestDistance=Number.POSITIVE_INFINITY
+     for(const road of ROAD_TILES){
+      const dx=road.position[0]-actorPosition.current.x,dz=road.position[1]-actorPosition.current.z,distance=dx*dx+dz*dz
+      if(distance<nearestDistance){nearestDistance=distance;roadX=road.position[0];roadZ=road.position[1]}
+     }
+     let roadwardX=roadX-actorPosition.current.x,roadwardZ=roadZ-actorPosition.current.z
+     const roadwardLength=Math.hypot(roadwardX,roadwardZ)
+     const movementX=Math.sin(actor.rotation.y),movementZ=Math.cos(actor.rotation.y)
+     if(roadwardLength>.04){roadwardX/=roadwardLength;roadwardZ/=roadwardLength}
+     else {roadwardX=movementZ;roadwardZ=-movementX}
+     const roadwardProjection=movementX*roadwardX+movementZ*roadwardZ
+     let tangentX=movementX-roadwardX*roadwardProjection,tangentZ=movementZ-roadwardZ*roadwardProjection
+     const tangentLength=Math.hypot(tangentX,tangentZ)
+     if(tangentLength>.04){tangentX/=tangentLength;tangentZ/=tangentLength}
+     else {tangentX=roadwardZ;tangentZ=-roadwardX}
+     nextFollowOffset.current.set(roadwardX*1.8+tangentX*.6,1.7,roadwardZ*1.8+tangentZ*.6)
+    }
+    const followAlpha=1-Math.exp(-delta*5.6)
+    followIsometricOffset.current.lerp(nextFollowOffset.current,followAlpha)
+    desiredTarget.current.copy(actorPosition.current).add(followLookOffset.current)
+    desiredPosition.current.copy(desiredTarget.current).add(followIsometricOffset.current)
     moving.current=true
    }
   }
@@ -173,7 +204,7 @@ function CameraRig({focus,focusVersion,followedCharacterId,actors,reducedMotion,
   }
  })
 
- return <OrbitControls ref={controls} makeDefault enableDamping dampingFactor={reducedMotion?1:.08} minZoom={5} maxZoom={68} minPolarAngle={viewMode==='top' ? .01 : .5} maxPolarAngle={1.22} enablePan={!followedCharacterId} enableRotate={!followedCharacterId} screenSpacePanning maxDistance={110} minDistance={14}/>
+ return <OrbitControls ref={controls} makeDefault enableDamping dampingFactor={reducedMotion?1:.08} minZoom={5} maxZoom={120} minPolarAngle={viewMode==='top' ? .01 : .5} maxPolarAngle={1.22} enablePan={!followedCharacterId} enableRotate={!followedCharacterId} enableZoom={!followedCharacterId} screenSpacePanning maxDistance={110} minDistance={2}/>
 }
 
 // A manufactured, chamfered city deck reads as one district in a much larger
@@ -480,13 +511,19 @@ function LandmarkBuildings({placements,selectedId,hoveredId,language,night,quali
  </group>
 }
 
+const waitingFacing=(lot:BuildingLot,participantIndex:number)=>{
+ const side:[number,number]=[Math.cos(lot.rotation),-Math.sin(lot.rotation)]
+ const direction=participantIndex%2===0?side:[-side[0],-side[1]]
+ return Math.atan2(direction[0],direction[1])
+}
+
 function CharacterMarker({character,lot,route,active,actors,serverTime,reducedMotion,language,onClick,onEvent,onJourneyElapsed}:{character:CityCharacter;lot?:BuildingLot;route?:PedestrianRoute;active:boolean;actors:ActorRegistry;serverTime?:string;reducedMotion:boolean;language:'zh'|'en';onClick:()=>void;onEvent:(eventId:string)=>void;onJourneyElapsed?:()=>void}){
  const [hovered,setHovered]=useState(false)
  useCursor(hovered)
  const actor=useRef<THREE.Group>(null)
  const characterHash=hashString(character.id)
  const fallback=worldPosition(character.location.x,character.location.y,.375)
- const action=character.worldAction
+ const action=character.worldAction as DirectedWorldAction|undefined
  // Rotation points from a parcel to its nearest road. Residents stand on that
  // pavement, so moving a building to a legal parcel also moves its resident.
  const lateral=action?.state==='waiting_at_event'?(action.participant_index ? .7 : -.7):((characterHash%5)-2)*.13
@@ -512,10 +549,20 @@ function CharacterMarker({character,lot,route,active,actors,serverTime,reducedMo
   return()=>{if(registry.get(character.id)===current)registry.delete(character.id)}
  },[actors,character.id])
  useEffect(()=>{arrivalNotified.current=''},[action?.event_id])
- useFrame(()=>{
-  if(!actor.current||!route||action?.state!=='walking_to_event')return
+ const waitingRotation=visualState==='waiting_at_event'&&lot?waitingFacing(lot,action?.participant_index??0):undefined
+ useFrame((_,delta)=>{
+  if(!actor.current)return
+  if(visualState==='waiting_at_event'&&waitingRotation!==undefined){
+   const difference=Math.atan2(Math.sin(waitingRotation-actor.current.rotation.y),Math.cos(waitingRotation-actor.current.rotation.y))
+   actor.current.rotation.y+=difference*(1-Math.exp(-delta*5.2))
+   return
+  }
+  if(!route||action?.state!=='walking_to_event')return
   const duration=arrivesAt-startedAt
-  const progress=reducedMotion?1:duration>0?(Date.now()+serverSkew-startedAt)/duration:1
+  const timedProgress=duration>0?(Date.now()+serverSkew-startedAt)/duration:1
+  // Reduced motion may remove travel interpolation, but it must never advance
+  // the server-owned arrival time or expose an event before it actually starts.
+  const progress=reducedMotion?(timedProgress>=1?1:0):timedProgress
   const sample=samplePedestrianRoute(route,progress)
   actor.current.position.set(...sample.position)
   actor.current.rotation.y=sample.rotation
@@ -527,22 +574,35 @@ function CharacterMarker({character,lot,route,active,actors,serverTime,reducedMo
  })
  const avatar=character.avatar??defaultAvatar
  const cityAsset=avatar.model?.startsWith('city-')??false
- const characterScale=cityAsset?(active||hovered?.19:.175):(active||hovered?.23:.21)
+ const characterScale=cityAsset?(active ? .28 : hovered ? .22 : .175):(active ? .34 : hovered ? .27 : .21)
  const color=`hsl(${characterHash%360} 62% 63%)`
  const moving=visualState==='walking_to_event'
  const waiting=visualState==='waiting_at_event'
- const animation=moving?'walk':waiting?'look_around':character.animationCue??'idle'
+ const animation:CharacterMotion=moving
+  ?(character.animationCue==='run'?'run':'walk')
+  :waiting
+   ?(action?.state==='walking_to_event'?'look_around':character.animationCue??'listen')
+   :character.animationCue??'idle'
+ const directedPerformance=waiting&&action?.state==='walking_to_event'?undefined:action?.performance
+ const performanceMode:CharacterPerformanceMode=moving?'journey':waiting?'encounter':visualState==='event_pending'?'event_pending':'ambient'
+ const rawJourneyDuration=(arrivesAt-startedAt)/1_000
+ const journeyDurationSeconds=Number.isFinite(rawJourneyDuration)&&rawJourneyDuration>0?rawJourneyDuration:undefined
+ const journeySpeed=route?.length&&journeyDurationSeconds?route.length/journeyDurationSeconds:1.18
+ const playbackRate=moving?THREE.MathUtils.clamp(journeySpeed/1.18,.52,1.65):1
  const stateLabel=language==='zh'?({idle:'空闲',event_pending:'有待办',walking_to_event:'前往事件',waiting_at_event:'等待查看'} as const)[visualState]:({idle:'Idle',event_pending:'Pending',walking_to_event:'On the way',waiting_at_event:'Waiting'} as const)[visualState]
  const statusGlyph=moving?'➜':waiting?'!':visualState==='event_pending'?'✦':'·'
- return <group ref={actor} position={position} onClick={event=>{event.stopPropagation();onClick()}} onPointerDown={event=>event.stopPropagation()} onPointerOver={event=>{event.stopPropagation();setHovered(true)}} onPointerOut={()=>setHovered(false)}>
-  <Character3D avatar={avatar} animation={animation} name={character.name} seed={character.id} scale={characterScale}/>
+ return <group ref={actor} position={position} rotation-y={waitingRotation??lot?.rotation??0} onClick={event=>{event.stopPropagation();onClick()}} onPointerDown={event=>event.stopPropagation()} onPointerOver={event=>{event.stopPropagation();setHovered(true)}} onPointerOut={()=>setHovered(false)}>
+  <DirectedCharacter3D avatar={avatar} animation={animation} performance={directedPerformance} performanceMode={performanceMode} performanceKey={`${action?.event_id??'daily'}:${visualState}:${animation}`} performanceVariant={action?.participant_index??characterHash%2} playbackRate={playbackRate} reducedMotion={reducedMotion} name={character.name} seed={character.id} scale={characterScale}/>
   <mesh position-y={.5}>
    <cylinderGeometry args={[.48,.48,1,12]}/><meshBasicMaterial transparent opacity={0} depthWrite={false}/>
   </mesh>
-  <mesh position-y={.012} rotation-x={-Math.PI/2}>
-   <ringGeometry args={[.25,.34,28]}/><meshBasicMaterial color={active?'#ff8d5b':color} transparent opacity={active ? .95 : .62} side={THREE.DoubleSide}/>
+  {active&&<mesh position-y={.01} rotation-x={-Math.PI/2}>
+   <circleGeometry args={[.47,36]}/><meshBasicMaterial color="#ff9a68" transparent opacity={.18} depthWrite={false} side={THREE.DoubleSide}/>
+  </mesh>}
+  <mesh position-y={.012} rotation-x={-Math.PI/2} scale={active?1.25:1}>
+   <ringGeometry args={active?[.264,.376,36]:[.25,.34,32]}/><meshBasicMaterial color={active?'#ff8d5b':color} transparent opacity={active ? .94 : .62} depthWrite={false} side={THREE.DoubleSide}/>
   </mesh>
-  <Html center position={[0,1,0]} zIndexRange={[40,10]}>
+  {!active&&<Html center position={[0,1.72,0]} zIndexRange={[40,10]}>
    <div className="world3d-character-ui" style={{'--character-color':color,'--character-ui-shift':action?.event_id?`${action.participant_index ? 12 : -12}px`:'0px'} as React.CSSProperties}>
     <button type="button" className={`world3d-character-status is-${visualState}`} onPointerDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();if(action?.event_id&&visualState!=='event_pending')onEvent(action.event_id);else onClick()}} aria-label={stateLabel}>{statusGlyph}</button>
     <button type="button" className={`world3d-character world3d-character--model ${active?'is-active':''}`} onPointerDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();onClick()}} aria-label={`${language==='zh'?'跟随':'Follow '}${character.name}`}>
@@ -550,7 +610,7 @@ function CharacterMarker({character,lot,route,active,actors,serverTime,reducedMo
      {(hovered||active||moving||waiting)&&<small>{moving||waiting?stateLabel:character.location.place||(language==='zh'?'正在城市中':'Around town')}</small>}
     </button>
    </div>
-  </Html>
+  </Html>}
  </group>
 }
 
@@ -561,6 +621,16 @@ export function WorldScene({characters,landmarks,followedCharacterId,serverTime,
  const layout=useMemo(()=>resolveCityLayout(landmarks,characters),[characters,landmarks])
  const characterLot=(character:CityCharacter)=>character.locationId?layout.landmarkLots.get(character.locationId):layout.homeLots.get(character.id)
  const targetLot=(character:CityCharacter)=>character.worldAction?.target_location_id?layout.landmarkLots.get(character.worldAction.target_location_id):undefined
+ const followedCharacter=characters.find(character=>character.id===followedCharacterId)
+ const followedLot=followedCharacter?characterLot(followedCharacter):undefined
+ const followCameraOffset=useMemo<WorldPoint>(()=>{
+  if(!followedLot)return [2.2,1.7,2.4]
+  const forward:[number,number]=[Math.sin(followedLot.rotation),Math.cos(followedLot.rotation)]
+  const side:[number,number]=[Math.cos(followedLot.rotation),-Math.sin(followedLot.rotation)]
+  // Stay on the resident's road side of the parcel. A fixed city-wide angle can
+  // put an entire building between the camera and a resident on another facade.
+  return [forward[0]*1.8+side[0]*.6,1.7,forward[1]*1.8+side[1]*.6]
+ },[followedLot])
  const resolvedFocus=useMemo(()=>{
   if(!focus)return null
   const selectedLot=selectedLandmarkId?layout.landmarkLots.get(selectedLandmarkId):undefined
@@ -590,7 +660,7 @@ export function WorldScene({characters,landmarks,followedCharacterId,serverTime,
    const route=character.worldAction?.state==='walking_to_event'&&origin&&target?buildPedestrianRoute(origin,target,{seed:`${character.worldAction.event_id}:${character.id}`,startLateralOffset:participantIndex ? .28 : -.28,endLateralOffset:participantIndex ? .7 : -.7}):undefined
    return <CharacterMarker key={character.id} character={character} lot={origin} route={route} active={character.id===followedCharacterId} actors={actors} serverTime={serverTime} reducedMotion={reducedMotion} language={language} onClick={()=>onCharacterClick(character.id)} onEvent={onCharacterEvent} onJourneyElapsed={onJourneyElapsed}/>
   })}
-  <CameraRig focus={resolvedFocus} focusVersion={focusVersion} followedCharacterId={followedCharacterId} actors={actors} reducedMotion={reducedMotion} viewMode={viewMode}/>
+  <CameraRig focus={resolvedFocus} focusVersion={focusVersion} followedCharacterId={followedCharacterId} followCameraOffset={followCameraOffset} followWalking={followedCharacter?.worldAction?.state==='walking_to_event'} actors={actors} reducedMotion={reducedMotion} viewMode={viewMode}/>
  </>
 }
 

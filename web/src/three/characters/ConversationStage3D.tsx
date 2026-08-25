@@ -1,8 +1,8 @@
 import { useRef, useState, type ReactNode } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
-import { ContactShadows, Html, PerspectiveCamera } from '@react-three/drei'
+import { ContactShadows, PerspectiveCamera } from '@react-three/drei'
 import { MathUtils, Mesh, type Group, type Material } from 'three'
-import { Character3D } from './Character3D'
+import { DirectedCharacter3D } from './DirectedCharacter3D'
 import type { ConversationAtmosphere, ConversationStage3DProps, SpeechLine } from './types'
 import './characters.css'
 
@@ -27,23 +27,6 @@ function inferAtmosphere(locationKind?: string): ConversationAtmosphere {
   if (/office|studio|school|university|hospital/.test(kind)) return 'office'
   if (/evening|night|music|theatre|theater/.test(kind)) return 'evening'
   return 'neutral'
-}
-
-function SetDressing({ atmosphere, palette }: { atmosphere: ConversationAtmosphere; palette: Palette }) {
-  const building = atmosphere === 'home' || atmosphere === 'cafe' || atmosphere === 'office'
-  return <group>
-    <mesh position={[0, 2, -2.8]}><planeGeometry args={[16, 8]} /><meshBasicMaterial color={palette.horizon} /></mesh>
-    <mesh position={[0, -.2, 0]} rotation={[-Math.PI / 2, 0, 0]}><planeGeometry args={[16, 14]} /><meshStandardMaterial color={palette.floor} roughness={1} /></mesh>
-    {building ? <>
-      <mesh position={[-3.2, 1.4, -2.35]}><boxGeometry args={[2.4, 3.5, .25]} /><meshStandardMaterial color={palette.sky} /></mesh>
-      <mesh position={[3.4, 1.55, -2.35]}><boxGeometry args={[2.8, 3.8, .25]} /><meshStandardMaterial color={palette.sky} /></mesh>
-      {[-3.55, -2.8, 3, 3.8].map(x => <mesh key={x} position={[x,1.75,-2.18]}><boxGeometry args={[.48,.85,.08]} /><meshStandardMaterial color={palette.light} emissive={palette.light} emissiveIntensity={.16} /></mesh>)}
-    </> : <>
-      {[-4.2,-3.3,3.2,4.1].map((x,index) => <group key={x} position={[x,0,-2.25]}><mesh position={[0,.8,0]}><cylinderGeometry args={[.09,.14,1.7,7]} /><meshStandardMaterial color="#63564d" /></mesh><mesh position={[0,1.75,0]} scale={[1,index % 2 ? .8 : 1.15,1]}><dodecahedronGeometry args={[.72,0]} /><meshStandardMaterial color={atmosphere === 'harbor' ? '#7aa0a1' : '#6f916f'} /></mesh></group>)}
-      {atmosphere === 'harbor' && <mesh position={[0,.23,-2.15]} rotation={[-Math.PI/2,0,0]}><planeGeometry args={[8,2.6]} /><meshStandardMaterial color="#75aab6" metalness={.08} roughness={.32} /></mesh>}
-    </>}
-    <mesh position={[0, 4, -2.6]}><circleGeometry args={[1.1, 24]} /><meshBasicMaterial color={palette.accent} transparent opacity={atmosphere === 'evening' ? .34 : .16} /></mesh>
-  </group>
 }
 
 function ObserverPresence({ accent }: { accent: string }) {
@@ -79,17 +62,22 @@ function FadingCast({ hidden, immediate, children }: { hidden: boolean; immediat
 }
 
 function SpeechBubble({ line, name, side, language, translationVisible, onToggle }: { line: SpeechLine; name: string; side: 'left' | 'right'; language: 'zh' | 'en'; translationVisible: boolean; onToggle: () => void }) {
-  return <Html center distanceFactor={6.7} zIndexRange={[12, 0]} style={{ pointerEvents: 'auto' }}>
-    <article className={`world-speech world-speech--${side}`} role="status" aria-live={line.streaming ? 'polite' : 'off'}>
-      <strong>{name}</strong>
-      <p>{line.text || (language === 'zh' ? '正在组织语言…' : 'Finding the words…')} {line.streaming && <i className="world-speech__cursor" />}</p>
-      {line.translation && <button type="button" onClick={onToggle} aria-expanded={translationVisible}>{translationVisible ? (language === 'zh' ? '收起翻译' : 'Hide translation') : (language === 'zh' ? '查看翻译' : 'Show translation')}</button>}
+  const translationLabel = translationVisible
+    ? (language === 'zh' ? '收起翻译' : 'Hide translation')
+    : (language === 'zh' ? '查看翻译' : 'Show translation')
+  return <article className={`world-speech world-speech--${side}`}>
+    <div className="world-speech__surface">
+      <div className="world-speech__message" role="status" aria-live={line.streaming ? 'polite' : 'off'} aria-atomic="true">
+        <strong>{name}</strong>
+        <p>{line.text || (language === 'zh' ? '正在组织语言…' : 'Finding the words…')} {line.streaming && <i className="world-speech__cursor" />}</p>
+      </div>
+      {line.translation && <button type="button" onClick={onToggle} aria-expanded={translationVisible} aria-label={`${translationLabel}：${name}`}>{translationLabel}</button>}
       {line.translation && translationVisible && <div className="world-speech__translation"><small>{language === 'zh' ? '中文' : 'Translation'}</small>{line.translation}</div>}
-    </article>
-  </Html>
+    </div>
+  </article>
 }
 
-export function ConversationStage3D({ npcAvatar, playerAvatar, showPlayerAvatar = false, npcName, playerName, place, locationKind, atmosphere: requestedAtmosphere, npcAnimation, playerAnimation, liveSpeech, messages = [], language = 'zh', showTranslation, onTranslationChange, className = '', reducedMotion = false, sceneryMode = false }: ConversationStage3DProps) {
+export function ConversationStage3D({ npcAvatar, playerAvatar, showPlayerAvatar = false, npcName, playerName, place, locationKind, atmosphere: requestedAtmosphere, npcAnimation, playerAnimation, performance, performanceKey, liveSpeech, messages = [], language = 'zh', showTranslation, onTranslationChange, className = '', reducedMotion = false, sceneryMode = false }: ConversationStage3DProps) {
   const [internalTranslation, setInternalTranslation] = useState(false)
   const atmosphere = requestedAtmosphere ?? inferAtmosphere(locationKind)
   const palette = atmospheres[atmosphere]
@@ -109,31 +97,37 @@ export function ConversationStage3D({ npcAvatar, playerAvatar, showPlayerAvatar 
         ? 'talk'
         : npcAnimation ?? (speaker === 'npc' ? 'talk' : 'idle')
   const playerMotion = reducedMotion ? 'idle' : playerAnimation ?? (speaker === 'player' ? 'talk' : 'listen')
+  const npcPerformanceMode = speaker === 'player'
+    ? 'conversation_listen'
+    : fallbackLine?.streaming
+      ? 'conversation_speak'
+      : 'conversation_react'
+  const lineKey = performanceKey ?? fallbackLine?.key ?? 'opening'
   const you = playerName ?? (language === 'zh' ? '你' : 'You')
+  const compactViewport = typeof window !== 'undefined' && window.matchMedia('(max-width: 779px)').matches
 
   return <section className={`conversation-stage-3d ${sceneryMode ? 'is-scenery' : ''} ${reducedMotion ? 'is-reduced-motion' : ''} ${className}`.trim()} style={{ '--conversation-sky': palette.sky } as React.CSSProperties} aria-label={language === 'zh' ? `在${place ?? '天空之城'}与${npcName}对话` : `Conversation with ${npcName} at ${place ?? 'the Sky City'}`}>
-    <Canvas dpr={[1, 1.65]} gl={{ antialias: true, alpha: false }}>
-      <color attach="background" args={[palette.sky]} />
+    <Canvas dpr={[1, 1.65]} gl={{ antialias: true, alpha: true }}>
       <fog attach="fog" args={[palette.sky, 8, 18]} />
       <PerspectiveCamera makeDefault position={[0, 2.1, 7.2]} fov={37} near={.1} far={40} />
       <ambientLight intensity={1.15} />
       <hemisphereLight args={[palette.light, palette.floor, 1.7]} />
       <directionalLight position={[-4, 7, 6]} intensity={2.4} color={palette.light} castShadow />
       <pointLight position={[4, 3, 2]} intensity={10} distance={9} color={palette.accent} />
-      <SetDressing atmosphere={atmosphere} palette={palette} />
       <FadingCast hidden={sceneryMode} immediate={reducedMotion}>
         {showPlayerAvatar && playerAvatar
-          ? <group position={[-1.92, -.05, 1.28]} rotation={[0, .2, 0]}><Character3D avatar={playerAvatar} animation={playerMotion} detail="portrait" scale={1.18} name={you} seed={you} /></group>
+          ? <group position={[-1.92, -.05, 1.28]} rotation={[0, .2, 0]}><DirectedCharacter3D avatar={playerAvatar} animation={playerMotion} performanceMode={speaker === 'player' ? 'conversation_speak' : 'conversation_listen'} performanceKey={`player:${lineKey}`} reducedMotion={reducedMotion} detail="portrait" scale={1.18} name={you} seed={you} /></group>
           : <ObserverPresence accent={palette.accent} />}
-        {fallbackLine?.speaker === 'player' && <group position={[-1.35, 3.68, .55]}><SpeechBubble line={fallbackLine} name={you} side="left" language={language} translationVisible={translationVisible} onToggle={toggleTranslation} /></group>}
-        <group position={[1.48, .02, -.28]} rotation={[0, -.16, 0]}>
-          <Character3D avatar={npcAvatar} animation={npcMotion} scale={1.02} name={npcName} seed={npcName} />
-          {fallbackLine?.speaker === 'npc' && <group position={[.68, 3.58, .2]}><SpeechBubble line={fallbackLine} name={npcName} side="right" language={language} translationVisible={translationVisible} onToggle={toggleTranslation} /></group>}
+        <group position={[compactViewport ? .72 : 1.48, .02, -.28]} rotation={[0, compactViewport ? -.08 : -.16, 0]}>
+          <DirectedCharacter3D avatar={npcAvatar} animation={npcMotion} performance={speaker === 'npc' && !fallbackLine?.streaming ? performance : undefined} performanceMode={npcPerformanceMode} performanceKey={`npc:${lineKey}`} reducedMotion={reducedMotion} scale={1.02} name={npcName} seed={npcName} />
         </group>
       </FadingCast>
       <ContactShadows position={[0, -.2, .15]} opacity={.34} scale={8} blur={2.6} far={4} />
     </Canvas>
     <div className="conversation-stage-3d__vignette" aria-hidden />
     {place && <span className="conversation-stage-3d__place">⌖ {place}</span>}
+    {fallbackLine && <div key={`${fallbackLine.speaker}-${fallbackLine.key??'latest'}`} className={`conversation-stage-3d__speech-layer conversation-stage-3d__speech-layer--${fallbackLine.speaker}`}>
+      <SpeechBubble line={fallbackLine} name={fallbackLine.speaker==='player'?you:npcName} side={fallbackLine.speaker==='player'?'left':'right'} language={language} translationVisible={translationVisible} onToggle={toggleTranslation} />
+    </div>}
   </section>
 }

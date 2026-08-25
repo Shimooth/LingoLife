@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from itertools import combinations
@@ -11,7 +12,8 @@ from .animation import AnimationCue, animation_cue
 
 SOCIAL_ACTIONS = {"mediate", "encourage", "give_space", "let_them_handle_it"}
 OPEN_SOCIAL_STATUSES = {"traveling", "awaiting_observation", "awaiting_management"}
-SOCIAL_TRAVEL_SECONDS = (24, 34)
+SOCIAL_TRAVEL_SECONDS = (12, 72)
+SOCIAL_FALLBACK_TRAVEL_SECONDS = (24, 34)
 SOCIAL_EVENT_EXPIRY_HOURS = 24
 
 SOCIAL_TEMPLATE_CUES: dict[str, tuple[AnimationCue, AnimationCue]] = {
@@ -104,6 +106,29 @@ def _timestamp(value: str | None) -> datetime | None:
         return None
 
 
+def social_travel_seconds(origin_ids: Sequence[str], target_id: str,
+                          positions: Mapping[str, tuple[float, float]] | None,
+                          seed: str) -> int:
+    """Estimate a human-paced, server-authoritative journey duration.
+
+    Logical city coordinates are normalized to the 56 x 38 rendered world.
+    The route factor accounts for pavement turns; deterministic jitter keeps
+    journeys from feeling mechanical without making replay unstable.
+    """
+    if positions and target_id in positions:
+        target_x, target_y = positions[target_id]
+        distances = [math.hypot((positions[origin][0] - target_x) * 56 / 4800,
+                                (positions[origin][1] - target_y) * 38 / 3000)
+                     for origin in origin_ids if origin in positions]
+        if distances:
+            route_distance = max(distances) * 1.22
+            jitter = .94 + (_number(seed, "travel-pace") % 13) / 100
+            estimate = round(route_distance / 1.18 * jitter)
+            return max(SOCIAL_TRAVEL_SECONDS[0], min(SOCIAL_TRAVEL_SECONDS[1], estimate))
+    low, high = SOCIAL_FALLBACK_TRAVEL_SECONDS
+    return low + _number(seed, "travel") % (high - low + 1)
+
+
 def _words(values: Sequence[str]) -> set[str]:
     return {word.casefold().strip(".,!?;:'\"") for value in values for word in str(value).split() if len(word) > 2}
 
@@ -139,6 +164,7 @@ class SocialWorldEngine:
                      game_day: date, current_slot: str = "afternoon",
                      location_names: Mapping[str, str] | None = None,
                      runtime_states: Mapping[str, dict] | None = None,
+                     location_positions: Mapping[str, tuple[float, float]] | None = None,
                      now: datetime | None = None) -> list[dict]:
         day = game_day.isoformat()
         current_time = _utc(now)
@@ -265,8 +291,7 @@ class SocialWorldEngine:
             candidates_for_origin.extend(value for value in fallback_origins
                                          if value != location and value not in candidates_for_origin)
             origins[npc_id] = candidates_for_origin[_number(event_id, npc_id, "origin") % len(candidates_for_origin)]
-        travel_seconds = SOCIAL_TRAVEL_SECONDS[0] + _number(event_id, "travel") % (
-            SOCIAL_TRAVEL_SECONDS[1] - SOCIAL_TRAVEL_SECONDS[0] + 1)
+        travel_seconds = social_travel_seconds(tuple(origins.values()), location, location_positions, event_id)
         arrives_at = current_time + timedelta(seconds=travel_seconds)
         summary = template.summary.format(a=name_a, b=name_b, place=place)
         if template_id == "shared_interest_chat" and shared_subject:

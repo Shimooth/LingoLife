@@ -10,6 +10,7 @@ test -z "$(git status --porcelain --untracked-files=normal)" || {
 }
 
 REVISION="$(git rev-parse --short HEAD)"
+FULL_REVISION="$(git rev-parse HEAD)"
 TARGET="${1:-/tmp/lingolife-${REVISION}.tar}"
 case "${TARGET}" in
   /*) ;;
@@ -28,5 +29,7 @@ trap 'rm -rf "${TEMP_DIR}"' EXIT
 ARCHIVE="${TEMP_DIR}/release.tar"
 git archive --format=tar --output="${ARCHIVE}" HEAD
 COPYFILE_DISABLE=1 tar --format ustar --no-xattrs --append --file="${ARCHIVE}" web/dist
+printf '%s\n' "${FULL_REVISION}" > "${TEMP_DIR}/.source-revision"
+COPYFILE_DISABLE=1 tar --format ustar --no-xattrs --append --file="${ARCHIVE}" -C "${TEMP_DIR}" .source-revision
 mv "${ARCHIVE}" "${TARGET}"
 echo "Release package created: ${TARGET} (${REVISION})"

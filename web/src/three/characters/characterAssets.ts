@@ -166,32 +166,32 @@ export function resolveChibiAccessory(value: string): string {
 }
 
 export const CITY_CLIPS: Record<CharacterMotion, readonly string[]> = {
-  idle: ['Idle_A', 'Idle_B'],
-  talk: ['Idle_A'],
-  listen: ['LookingAround', 'Idle_B'],
+  idle: ['Idle_A', 'Idle_B', 'Idle_A_Pose'],
+  talk: ['Idle_A', 'Idle_A_Pose', 'LookingAround'],
+  listen: ['LookingAround', 'Idle_B', 'Idle_A_Pose'],
   happy: ['Jump_C_Full', 'Jump_B_Full'],
-  sad: ['Idle_B'],
-  tired: ['Idle_B'],
-  look_around: ['LookingAround'],
+  sad: ['Idle_B', 'Idle_A_Pose'],
+  tired: ['Idle_B', 'Idle_A_Pose'],
+  look_around: ['LookingAround', 'Idle_A_Pose'],
   walk: ['Walk_A', 'Walk_B', 'Walk_C'],
   run: ['Runing_A', 'Runing_B'],
   jump: ['Jump_B_Full', 'Jump_C_Full'],
-  crouch: ['Idle_B'],
-  push: ['LookingAround'],
+  crouch: ['Idle_A_Pose', 'Idle_B'],
+  push: ['LookingAround', 'Idle_A_Pose'],
 }
 
 export const CHIBI_CLIPS: Record<CharacterMotion, readonly string[]> = {
   idle: ['anim_iddle', 'anim_iddle.001'],
-  talk: ['anim_iddle.001'],
-  listen: ['anim_iddle'],
+  talk: ['anim_iddle.001', 'anim_iddle'],
+  listen: ['anim_iddle', 'anim_iddle.001'],
   happy: ['anim_jump', 'anim_flip'],
   sad: ['anim_crouchiddle'],
   tired: ['anim_crouchiddle'],
-  look_around: ['anim_iddle.001'],
+  look_around: ['anim_iddle.001', 'anim_iddle'],
   walk: ['anim_walk'],
   run: ['anim_run'],
   jump: ['anim_jump'],
-  crouch: ['anim_crouchiddle', 'anim_crouch'],
+  crouch: ['anim_crouchiddle'],
   push: ['anim_push'],
 }
 

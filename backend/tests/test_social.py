@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from lingolife.app import DEFAULT_NPC_PROFILE, create_app
 from lingolife.config import Settings
 from lingolife.db import Database
-from lingolife.social import SocialWorldEngine
+from lingolife.social import SOCIAL_TRAVEL_SECONDS, SocialWorldEngine, social_travel_seconds
 
 
 def database(tmp_path, name="social.db") -> Database:
@@ -50,6 +50,14 @@ def move_journey_into_observation_window(db: Database, player_id: str, event: di
     journey["auto_resolve_at"] = (now + timedelta(minutes=5)).isoformat()
     value["journey"] = journey
     return db.update_social_event(player_id, value)
+
+
+def test_social_travel_duration_scales_with_city_distance_and_stays_bounded():
+    positions = {"target": (2400, 1500), "near": (2600, 1500), "far": (4700, 2800)}
+    near = social_travel_seconds(("near",), "target", positions, "stable-event")
+    far = social_travel_seconds(("far",), "target", positions, "stable-event")
+    assert SOCIAL_TRAVEL_SECONDS[0] <= near < far <= SOCIAL_TRAVEL_SECONDS[1]
+    assert social_travel_seconds(("far",), "target", positions, "stable-event") == far
 
 
 def test_existing_social_table_is_incrementally_migrated_and_data_is_kept(tmp_path):
@@ -217,6 +225,10 @@ def test_city_and_world_lazy_generate_observable_social_interactions(tmp_path):
     participant_rows = [resident for resident in city["npcs"] if resident["id"] in participant_ids]
     assert all(resident["world_action"]["state"] == "walking_to_event" for resident in participant_rows)
     assert all(resident["animation_cue"] == "walk" for resident in participant_rows)
+    assert all(resident["world_action"]["performance"]["hold_cue"] == "walk"
+               for resident in participant_rows)
+    assert all(resident["world_action"]["performance"]["beats"][0]["cue"] == "walk"
+               for resident in participant_rows)
     assert city["server_time"]
     assert all("social_interaction_ids" in resident and "related_npc_ids" in resident for resident in city["npcs"])
     listing = client.get("/api/v1/social-events", headers=headers).json()["social_interactions"]
@@ -229,6 +241,13 @@ def test_city_and_world_lazy_generate_observable_social_interactions(tmp_path):
     assert client.post(observe_endpoint, headers=headers).status_code == 409
     player_id = client.app.state.db.authenticate(registered["session_token"])["player_id"]
     move_journey_into_observation_window(client.app.state.db, player_id, listing[0])
+    waiting_city = client.get("/api/v1/city", headers=headers).json()
+    waiting_rows = [resident for resident in waiting_city["npcs"] if resident["id"] in participant_ids]
+    assert all(resident["world_action"]["state"] == "waiting_at_event" for resident in waiting_rows)
+    assert all(resident["world_action"]["performance"]["hold_cue"] == "listen"
+               for resident in waiting_rows)
+    assert all({beat["cue"] for beat in resident["world_action"]["performance"]["beats"]}
+               & {"talk", "listen"} for resident in waiting_rows)
     observed = client.post(observe_endpoint, headers=headers)
     replay = client.post(observe_endpoint, headers=headers)
     assert observed.status_code == replay.status_code == 200

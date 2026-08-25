@@ -89,7 +89,8 @@ deploy/scripts/package-release.sh
 ```
 
 该脚本依次执行 `npm ci`、ESLint、TypeScript 和 Vite 生产构建，然后输出
-`/tmp/lingolife-<commit>.tar`。Docker 运行镜像只复制该构建产物。若发布目录缺少
+`/tmp/lingolife-<commit>.tar`。发布包根目录同时包含只记录 Git 提交 SHA 的
+`.source-revision`，用于在无 `.git` 的生产发布目录中核对版本。Docker 运行镜像只复制该构建产物。若发布目录缺少
 `web/dist/index.html`，VPS 部署会立即停止且不会替换现有容器。
 
 画面质量由玩家设备上的 `auto / high / low` 设置决定；VPS 只传输静态资源和运行 API。
@@ -102,10 +103,16 @@ deploy/scripts/package-release.sh
 ```bash
 cd /opt/lingolife/app
 deploy/scripts/backup-database.sh
-git rev-parse HEAD
+cat .source-revision 2>/dev/null || git rev-parse HEAD
 docker compose -f deploy/compose.yaml images -q api
 deploy/scripts/deploy-release.sh
 ```
+
+自动发布应优先把 tar 包上传到 `/home/lingolife-deploy/`，然后运行包内的
+`deploy/scripts/promote-release.sh <tar路径> <本地SHA-256>`。该脚本先在独立目录解包并校验
+`.source-revision` 与 `web/dist`，复制当前应用作为回滚树，创建 SQLite 在线备份，再用
+`rsync --delete` 同步两个发布目录，避免遗留旧 hashed 资源；新版本健康检查失败时会自动恢复旧树并重建旧服务。
+临时解包目录会在退出时清理，源代码回滚树只保留最新三个，避免频繁部署持续占用 VPS 磁盘。
 
 部署脚本只构建并启动本项目 `api` 服务，等待健康检查；不会执行 `compose down`，也不会
 操作其他 Compose 项目或 8000 端口。回滚时，将记录的旧 commit 发布到

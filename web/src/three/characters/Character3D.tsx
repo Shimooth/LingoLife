@@ -110,7 +110,7 @@ function Leg({ x, color, kind, skin, legRef }: { x: number; color: string; kind:
   </group>
 }
 
-export function ProceduralCharacter3D({ avatar, animation = 'idle', detail = 'full', mirrored = false, name, position = [0, 0, 0], rotation = [0, 0, 0], scale = 1, seed }: Character3DProps) {
+export function ProceduralCharacter3D({ avatar, animation = 'idle', detail = 'full', mirrored = false, name, position = [0, 0, 0], rotation = [0, 0, 0], scale = 1, seed, motionScale = 1, animationSpeed = 1 }: Character3DProps) {
   const root = useRef<Group>(null)
   const body = useRef<Group>(null)
   const head = useRef<Group>(null)
@@ -124,18 +124,18 @@ export function ProceduralCharacter3D({ avatar, animation = 'idle', detail = 'fu
   const characterTilt = stableCharacterTilt(seed ?? name)
 
   useFrame(({ clock }, delta) => {
-    const pose = getPose(animation, clock.elapsedTime + characterTilt * 50)
+    const pose = getPose(animation, (clock.elapsedTime + characterTilt * 50) * animationSpeed)
     const ease = Math.min(1, delta * 9)
     if (root.current) {
-      root.current.position.y = MathUtils.lerp(root.current.position.y, pose.bob, ease)
-      root.current.rotation.z = MathUtils.lerp(root.current.rotation.z, pose.lean + characterTilt, ease)
+      root.current.position.y = MathUtils.lerp(root.current.position.y, pose.bob * motionScale, ease)
+      root.current.rotation.z = MathUtils.lerp(root.current.rotation.z, pose.lean * motionScale + characterTilt, ease)
     }
-    if (body.current) body.current.rotation.x = MathUtils.lerp(body.current.rotation.x, pose.lean, ease)
-    if (head.current) head.current.rotation.z = MathUtils.lerp(head.current.rotation.z, pose.head, ease)
-    if (leftArm.current) leftArm.current.rotation.x = MathUtils.lerp(leftArm.current.rotation.x, pose.leftArm, ease)
-    if (rightArm.current) rightArm.current.rotation.x = MathUtils.lerp(rightArm.current.rotation.x, pose.rightArm, ease)
-    if (leftLeg.current) leftLeg.current.rotation.x = MathUtils.lerp(leftLeg.current.rotation.x, pose.leftLeg, ease)
-    if (rightLeg.current) rightLeg.current.rotation.x = MathUtils.lerp(rightLeg.current.rotation.x, pose.rightLeg, ease)
+    if (body.current) body.current.rotation.x = MathUtils.lerp(body.current.rotation.x, pose.lean * motionScale, ease)
+    if (head.current) head.current.rotation.z = MathUtils.lerp(head.current.rotation.z, pose.head * motionScale, ease)
+    if (leftArm.current) leftArm.current.rotation.x = MathUtils.lerp(leftArm.current.rotation.x, pose.leftArm * motionScale, ease)
+    if (rightArm.current) rightArm.current.rotation.x = MathUtils.lerp(rightArm.current.rotation.x, pose.rightArm * motionScale, ease)
+    if (leftLeg.current) leftLeg.current.rotation.x = MathUtils.lerp(leftLeg.current.rotation.x, pose.leftLeg * motionScale, ease)
+    if (rightLeg.current) rightLeg.current.rotation.x = MathUtils.lerp(rightLeg.current.rotation.x, pose.rightLeg * motionScale, ease)
     if (eyes.current) {
       const phase = clock.elapsedTime % 4.7
       eyes.current.scale.y = phase > 4.55 ? .08 : 1

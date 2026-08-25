@@ -22,7 +22,17 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
-from .animation import animation_cue, resolve_turn_animation, state_animation_cue
+from .animation import (
+    ambient_performance,
+    animation_cue,
+    encounter_performance,
+    journey_performance,
+    outcome_performance,
+    performance_to_dict,
+    resolve_turn_animation,
+    stage_performance,
+    state_animation_cue,
+)
 from .ai import DeepSeekProvider, DialogueProvider, ResilientProvider
 from .agent import (advance_goal, advance_relationship, advance_runtime, compile_goal,
                     compile_persona, daily_plan, dialogue_objective, initial_relationship,
@@ -137,9 +147,12 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         name = str((profile or {}).get("name", "Emma"))
         adapt = lambda value: value.replace("Emma", name)
         return {"id": template.id, "title": adapt(template.title), "category": template.category,
-                "stage": {"id": stage.id, "prompt": adapt(stage.prompt), "objective": adapt(stage.objective),
-                          "animation_cue": stage.animation_cue},
-                "stage_index": active.stage_index, "stage_count": len(template.stages),
+                "stage": {"id": stage.id, "prompt": adapt(stage.prompt), "translation": adapt(stage.prompt_zh),
+                          "objective": adapt(stage.objective),
+                          "animation_cue": stage.animation_cue,
+                          "performance": performance_to_dict(stage.performance)},
+                "stage_index": active.stage_index, "stage_turns": active.stage_turns,
+                "stage_count": len(template.stages),
                 "learning_targets": list(template.learning_targets)}
 
     def agent_bundle(player_id: str, npc_id: str, profile: dict, stats, learning_state) -> dict:
@@ -185,7 +198,9 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         plans = {npc_id: bundle["daily_plan"] for npc_id, bundle in bundles.items()}
         runtime_states = {npc_id: bundle["runtime_state"] for npc_id, bundle in bundles.items()}
         names = {location.id: location.name for location in CITY_LOCATIONS}
-        return social_engine.ensure_daily(player_id, profiles, plans, game_today(), slot, names, runtime_states)
+        positions = {location.id: (location.x, location.y) for location in CITY_LOCATIONS}
+        return social_engine.ensure_daily(player_id, profiles, plans, game_today(), slot, names, runtime_states,
+                                          positions)
 
     def provider_reply(message: str, stats, history: list[dict], context: dict, on_chunk=None):
         # Preserve compatibility with small test/custom providers implementing the original contract.
@@ -368,15 +383,30 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
             else:
                 resident["world_action"] = {"state": "idle"}
             event_cue = (resident.get("active_event") or {}).get("stage", {}).get("animation_cue")
-            if event_cue in {"talk", "listen"}:
-                event_cue = None  # Conversation-only cues should not make a resident talk alone on the map.
-            social_cue = next((event.get("animation_cues", {}).get(resident["id"])
-                               for event in resident_events
-                               if event.get("time_slot") == agents[resident["id"]]["current_slot"]
-                               and event.get("animation_cues", {}).get(resident["id"])), None)
+            if event_cue in {"talk", "listen", "walk", "run"}:
+                # Speech and locomotion need a partner/route. An unattended
+                # resident must not talk alone or walk in place on the map.
+                event_cue = None
+            open_social_cue = ((open_social.get("animation_cues") or {}).get(resident["id"])
+                               if open_social else None)
+            social_cue = open_social_cue or next((event.get("animation_cues", {}).get(resident["id"])
+                                                  for event in resident_events
+                                                  if event.get("time_slot") == agents[resident["id"]]["current_slot"]
+                                                  and event.get("animation_cues", {}).get(resident["id"])), None)
             resident["animation_cue"] = animation_cue(("walk" if open_social and open_social.get("status") == "traveling" else None)
                                                         or social_cue or event_cue or
                                                         agents[resident["id"]].get("animation_cue"))
+            # The map gets finite ambient choreography rather than conversation
+            # talk/listen loops. The full dialogue plan remains available on
+            # resident.active_event.stage.performance.
+            resident["world_action"]["animation_cue"] = resident["animation_cue"]
+            action_state = resident["world_action"]["state"]
+            performance = (journey_performance(resident["animation_cue"])
+                           if action_state == "walking_to_event" else
+                           encounter_performance(resident["animation_cue"])
+                           if action_state == "waiting_at_event" else
+                           ambient_performance(resident["animation_cue"]))
+            resident["world_action"]["performance"] = performance_to_dict(performance)
         payload["time_slot"] = time_slot(datetime.now(game_zone).hour)
         payload["server_time"] = server_time.isoformat()
         payload["social_interactions"] = social_events
@@ -425,7 +455,8 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         if len(db.list_npc_profiles(player_id)) >= 5:
             raise HTTPException(409, {"code": "NPC_LIMIT_REACHED", "message": "You can create up to five characters."})
         npc_id = "npc-" + uuid.uuid4().hex[:12]
-        db.ensure_npc(player_id, npc_id, f"Hi, I'm {body.name}. What would you like to talk about?")
+        db.ensure_npc(player_id, npc_id, f"Hi, I'm {body.name}. What would you like to talk about?",
+                      f"嗨，我是{body.name}。你想聊些什么？")
         db.save_npc_profile(player_id, npc_id, body.model_dump())
         db.ensure_social_edges(player_id, [entry["id"] for entry in db.list_npc_profiles(player_id)])
         return {"id": npc_id, "profile": body.model_dump()}
@@ -485,7 +516,28 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
                 cached_agent.setdefault("animation_cue", cached["animation_cue"])
             cached_event = cached.get("active_event")
             if isinstance(cached_event, dict) and isinstance(cached_event.get("stage"), dict):
-                cached_event["stage"].setdefault("animation_cue", cached["animation_cue"])
+                cached_stage = cached_event["stage"]
+                cached_stage.setdefault("animation_cue", cached["animation_cue"])
+                cached_stage.setdefault(
+                    "performance",
+                    performance_to_dict(stage_performance(cached_stage["animation_cue"])),
+                )
+            cached_update = cached.get("event_update")
+            if isinstance(cached_update, dict):
+                cached_outcome = cached_update.get("outcome")
+                if isinstance(cached_outcome, dict):
+                    cached_outcome.setdefault("animation_cue", cached["animation_cue"])
+                    cached_outcome.setdefault(
+                        "performance",
+                        performance_to_dict(outcome_performance(cached_outcome["animation_cue"])),
+                    )
+                cached_update.setdefault(
+                    "performance",
+                    performance_to_dict(
+                        outcome_performance(cached["animation_cue"])
+                        if cached_update.get("completed") else stage_performance(cached["animation_cue"])
+                    ),
+                )
             return user, body.message.strip(), {**cached, "quota": db.quota(user["id"])}
         message = body.message.strip()
         if not message or len(message) > settings.max_message_characters or any(ord(c) < 32 and c not in "\n\t" for c in message):
@@ -508,12 +560,27 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
                                             relationship_stage=agent["relationship"]["stage"])
         summaries = db.list_conversation_summaries(player_id, npc_id, limit=3)
         event_view = public_event(active, profile)
-        context = {"npc_profile": profile, "current_event": event_view,
+        # Renderer timing is not story context and would waste dialogue-model
+        # tokens, so keep the public event rich while sending the model only
+        # narrative fields.
+        prompt_event = ({**event_view, "stage": {
+            key: value for key, value in event_view["stage"].items() if key != "performance"
+        }} if event_view else None)
+        context = {"npc_profile": profile, "current_event": prompt_event,
                    "learning_targets": learning_engine.targets(learning_state, limit=3),
                    "memories": memories, "conversation_summaries": summaries, **agent,
                    "dialogue_objective": dialogue_objective(event_view, agent["runtime_state"],
                                                              agent["goal"], agent["relationship"])}
         result = provider_reply(message, old, db.messages(player_id, settings.recent_message_limit, npc_id), context, on_chunk)
+        dialogue_fallback = bool(
+            result.agent_trace.get("dialogue_fallback")
+            or result.agent_trace.get("model") == "rules"
+        )
+        fallback_translation_parts = []
+        if dialogue_fallback and event_view:
+            stage_translation = event_view.get("stage", {}).get("translation")
+            if stage_translation:
+                fallback_translation_parts.append(str(stage_translation))
         evidence = [Evidence(**item.model_dump()) for item in result.learning_evidence]
         learning_engine.apply(learning_state, evidence)
         db.save_learning_state(player_id, learning_state)
@@ -521,18 +588,21 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         event_rel = event_mood = 0
         event_cue = event_engine.stage(active).animation_cue if active else None
         outcome_cue = None
+        event_performance = event_engine.stage(active).performance if active else None
         if active:
             transition = event_engine.advance(active, result.semantic_signals)
             event_update = {"stage_changed": transition.stage_changed, "completed": transition.completed}
             if transition.completed and transition.outcome and transition.memory:
                 event_rel, event_mood = transition.outcome.relationship_change, transition.outcome.mood_change
                 outcome_cue = transition.outcome.animation_cue
+                event_performance = transition.outcome.performance
                 db.add_npc_memory(player_id, npc_id, "event", transition.memory.memory,
                                   transition.memory.template_id, importance=3,
                                   tags=["event", transition.memory.category], confidence=1)
                 event_update.update({"outcome": {"id": transition.outcome.id,
                                                  "memory": transition.memory.memory,
-                                                 "animation_cue": transition.outcome.animation_cue},
+                                                 "animation_cue": transition.outcome.animation_cue,
+                                                 "performance": performance_to_dict(transition.outcome.performance)},
                                      "memory": transition.memory.memory})
             elif transition.stage_changed and transition.event:
                 # The next story beat must remain visible even while the live
@@ -540,13 +610,20 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
                 # while names are adapted to the selected custom character.
                 next_stage = event_engine.stage(transition.event)
                 event_cue = next_stage.animation_cue
+                event_performance = next_stage.performance
                 result.npc_reply = f"{result.npc_reply}\n\n{next_stage.prompt.replace('Emma', profile['name'])}"
+                if dialogue_fallback and next_stage.prompt_zh:
+                    fallback_translation_parts.append(next_stage.prompt_zh.replace('Emma', profile['name']))
             active = transition.event
+        translated_reply = result.npc_reply_zh.strip()
         if hasattr(provider, "translate"):
             try:
-                result.npc_reply_zh = provider.translate(result.npc_reply)  # type: ignore[attr-defined]
+                translated_reply = provider.translate(result.npc_reply).strip()  # type: ignore[attr-defined]
             except Exception:
-                result.npc_reply_zh = ""
+                translated_reply = ""
+        if not translated_reply and fallback_translation_parts:
+            translated_reply = "\n\n".join(fallback_translation_parts)
+        result.npc_reply_zh = translated_reply[:1200]
         understandable = result.english_feedback.is_understandable
         rel = max(-10, min(10, max(-5, min(5, result.relationship_change)) + event_rel))
         if rel > 0:
@@ -558,6 +635,9 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         )
         if event_update is not None:
             event_update["animation_cue"] = final_animation_cue
+            event_update["performance"] = performance_to_dict(
+                event_performance or stage_performance(final_animation_cue)
+            )
         xp = max(0, min(5, result.english_xp_change)) if understandable else 0
         stats = {"relationship": max(0, min(100, old.relationship + rel)), "mood": max(0, min(100, old.mood + mood)), "english_xp": max(0, min(100, old.english_xp + xp))}
         relationship = advance_relationship(agent["relationship"], rel, result.semantic_signals)

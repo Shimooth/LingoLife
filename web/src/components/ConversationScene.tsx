@@ -52,7 +52,7 @@ function sceneKind(kind?:string,locationId?:string){
  return palettes[kind||'']?kind||'default':'default'
 }
 
-function LocationBackdrop({kind,locationId,place,background,backgroundPosition,accent}:{kind?:string;locationId?:string;place:string;background?:string;backgroundPosition?:string;accent?:string}){
+function LocationBackdrop({kind,locationId,place,background,backgroundPosition,accent,showName=true}:{kind?:string;locationId?:string;place:string;background?:string;backgroundPosition?:string;accent?:string;showName?:boolean}){
  const variant=sceneKind(kind,locationId),palette=palettes[variant]||palettes.default
  const style={'--scene-deep':palette[0],'--scene-light':palette[1],'--scene-shadow':palette[2],'--scene-accent':accent||palette[3]} as CSSProperties
  const outdoors=variant==='park'||variant==='waterfront'||variant==='plaza'
@@ -66,7 +66,7 @@ function LocationBackdrop({kind,locationId,place,background,backgroundPosition,a
    <path d="M0 596Q285 556 585 594t615-10v136H0z" fill="var(--scene-shadow)" opacity=".2"/>
    <g className="scene-ambient"><circle cx="108" cy="94" r="52" fill="var(--scene-accent)" opacity=".17" filter="url(#scene-soft)"/><circle cx="1050" cy="170" r="90" fill="#fff" opacity=".12" filter="url(#scene-soft)"/></g>
   </svg>
-  <span className="location-backdrop__name">⌖ {place}</span>
+  {showName&&<span className="location-backdrop__name">⌖ {place}</span>}
  </div>
 }
 
@@ -111,7 +111,8 @@ export function ConversationScene({npcName,playerName,avatar,mood,place,location
  const toggleTranslation=(key:string)=>setTranslations(current=>{const next=new Set(current);if(next.has(key))next.delete(key);else next.add(key);return next})
  const translationButton=(key:string,translation?:string)=>translation?<button type="button" className="translation-toggle" aria-expanded={translations.has(key)} onClick={()=>toggleTranslation(key)}>{translations.has(key)?(zh?'收起中文':'Hide Chinese'):(zh?'中英对照':'Show Chinese')}</button>:null
  return <section className={`dialogue-scene ${historyOpen?'is-reviewing':''} ${sceneryOpen?'is-scenery':''}`} aria-label={zh?`在${place}与${npcName}对话`:`Conversation with ${npcName} at ${place}`}>
-  {visualStage||<LocationBackdrop kind={locationKind} locationId={locationId} place={place} background={locationBackground} backgroundPosition={locationBackgroundPosition} accent={locationAccent}/>}
+  <LocationBackdrop kind={locationKind} locationId={locationId} place={place} background={locationBackground} backgroundPosition={locationBackgroundPosition} accent={locationAccent} showName={!visualStage}/>
+  {visualStage}
   <button className="scene-scenery-trigger" type="button" onClick={sceneryOpen?onSceneryClose:onSceneryOpen} aria-label={sceneryOpen?(zh?'返回对话':'Return to conversation'):(zh?'浏览背景风景':'Browse the scenery')}/>
   <button className="scene-history-button" type="button" onClick={onHistoryOpen}>↺ {zh?'回顾历史会话':'Review history'}</button>
   <AnimatePresence>{sceneryOpen&&<motion.aside className="scenery-info" initial={reduce?false:{opacity:0,y:24,scale:.96}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:15}}><small>{zh?'正在浏览':'SCENERY MODE'}</small><h2>{place}</h2><p>{locationDescription||(zh?'看看角色今天所在的地方，点击任意背景区域返回对话。':'Take in the place your character is visiting. Click the background again to return.')}</p><span>{zh?'再次点击背景，返回对话':'Click the background again to return'}</span></motion.aside>}</AnimatePresence>

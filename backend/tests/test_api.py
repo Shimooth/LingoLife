@@ -76,9 +76,16 @@ def test_health_and_new_room(tmp_path):
     assert room["stats"] == {"relationship": 35, "mood": 35, "english_xp": 0}
     assert room["messages"][0]["speaker"] == "npc"
     assert room["messages"][0]["text"] == "I had a terrible day at work..."
+    assert room["messages"][0]["translation"] == "我今天工作过得糟透了……"
     assert room["messages"][0]["created_at"]
     assert room["npc"]["animation_cue"] in ANIMATION_CUES
+    assert room["active_event"]["stage"]["translation"]
     assert room["active_event"]["stage"]["animation_cue"] == room["npc"]["animation_cue"]
+    performance = room["active_event"]["stage"]["performance"]
+    assert performance["version"] == 1 and performance["hold_cue"] == "listen"
+    assert performance["beats"][0]["cue"] in ANIMATION_CUES
+    assert {"role", "duration_ms", "loop", "transition_ms", "facing", "energy"} <= performance["beats"][0].keys()
+    assert room["active_event"]["stage_turns"] == 0
 
 
 def test_chat_clamps_and_is_idempotent(tmp_path):
@@ -92,8 +99,12 @@ def test_chat_clamps_and_is_idempotent(tmp_path):
     assert first.json()["stats"] == {"relationship": 40, "mood": 38, "english_xp": 5}
     assert first.json()["animation"] == "happy"
     assert first.json()["animation_cue"] in ANIMATION_CUES
+    assert first.json()["event_update"]["performance"]["beats"]
     assert stub.calls == 1
-    assert len(c.get("/api/v1/room", headers=headers).json()["messages"]) == 3
+    reopened = c.get("/api/v1/room", headers=headers).json()
+    assert len(reopened["messages"]) == 3
+    assert reopened["messages"][-1]["text"] == first.json()["npc_reply"]
+    assert reopened["active_event"]["stage_turns"] == 1
 
 
 def test_legacy_cached_chat_is_upgraded_to_the_animation_cue_contract(tmp_path):
@@ -107,6 +118,8 @@ def test_legacy_cached_chat_is_upgraded_to_the_animation_cue_contract(tmp_path):
     legacy = dict(first)
     legacy.pop("animation_cue", None)
     legacy.get("agent", {}).pop("animation_cue", None)
+    legacy.get("active_event", {}).get("stage", {}).pop("performance", None)
+    legacy.get("event_update", {}).pop("performance", None)
     with c.app.state.db._connection:
         c.app.state.db._connection.execute(
             "UPDATE chat_requests SET response_json=? WHERE player_id=? AND idempotency_key=?",
@@ -115,6 +128,8 @@ def test_legacy_cached_chat_is_upgraded_to_the_animation_cue_contract(tmp_path):
     replay = c.post("/api/v1/chat", headers=headers, json={"message": "ignored"}).json()
     assert replay["animation"] == "happy"
     assert replay["animation_cue"] == "happy"
+    assert replay["active_event"]["stage"]["performance"]["beats"]
+    assert replay["event_update"]["performance"]["beats"]
 
 
 def test_positive_relationship_growth_has_a_per_character_daily_cap(tmp_path):
@@ -143,6 +158,8 @@ def test_fallback_when_primary_raises(tmp_path):
     response = c.post("/api/v1/chat", headers={**auth(c), "Idempotency-Key": "abcdefgh"}, json={"message": "Are you okay?"})
     assert response.status_code == 200
     assert response.json()["english_xp_change"] == 1
+    assert response.json()["npc_reply_zh"]
+    assert c.get("/api/v1/room", headers=response.request.headers).json()["messages"][-1]["translation"]
 
 
 def test_ununderstandable_never_gains_xp(tmp_path):

@@ -129,4 +129,14 @@ def test_city_api_requires_auth_and_includes_event_summary(tmp_path):
     assert body["npcs"][0]["name"] == "Emma"
     assert body["npcs"][0]["active_event"]["stage_count"] == 3
     resident = body["npcs"][0]
+    assert {key: resident["world_action"][key] for key in (
+        "state", "event_id", "target_location_id",
+    )} == {
+        "state": "event_pending",
+        "event_id": resident["active_event"]["id"],
+        "target_location_id": resident["current_location_id"],
+    }
+    assert resident["active_event"]["stage"]["performance"]["beats"]
+    assert resident["world_action"]["animation_cue"] == resident["animation_cue"]
+    assert resident["world_action"]["performance"]["hold_cue"] == "idle"
     assert resident["is_home"] or any(place["id"] == resident["current_location_id"] for place in body["locations"])

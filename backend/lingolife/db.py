@@ -138,6 +138,22 @@ class Database:
                 self._connection.execute("ALTER TABLE messages ADD COLUMN npc_id TEXT NOT NULL DEFAULT 'emma'")
             if "translation" not in columns:
                 self._connection.execute("ALTER TABLE messages ADD COLUMN translation TEXT")
+            self._connection.execute(
+                "UPDATE messages SET translation='我今天工作过得糟透了……' "
+                "WHERE speaker='npc' AND text='I had a terrible day at work...' "
+                "AND (translation IS NULL OR trim(translation)='')"
+            )
+            self._connection.execute(
+                "UPDATE messages SET translation='很高兴见到你。你今天过得怎么样？' "
+                "WHERE speaker='npc' AND text='It is good to see you. How was your day?' "
+                "AND (translation IS NULL OR trim(translation)='')"
+            )
+            self._connection.execute(
+                "UPDATE messages SET translation=replace(replace(text, 'Hi, I''m ', '嗨，我是'), "
+                "'. What would you like to talk about?', '。你想聊些什么？') "
+                "WHERE speaker='npc' AND text LIKE 'Hi, I''m %. What would you like to talk about?' "
+                "AND (translation IS NULL OR trim(translation)='')"
+            )
             user_columns = {row[1] for row in self._connection.execute("PRAGMA table_info(users)")}
             if "password_hash" not in user_columns:
                 self._connection.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
@@ -371,11 +387,12 @@ class Database:
             )
             if cur.rowcount:
                 self._connection.execute(
-                    "INSERT INTO messages(player_id,speaker,text,npc_id) VALUES (?,'npc',?,'emma')",
-                    (player_id, "I had a terrible day at work..."),
+                    "INSERT INTO messages(player_id,speaker,text,npc_id,translation) VALUES (?,'npc',?,'emma',?)",
+                    (player_id, "I had a terrible day at work...", "我今天工作过得糟透了……"),
                 )
 
-    def ensure_npc(self, player_id: str, npc_id: str, greeting: str = "It is good to see you. How was your day?"):
+    def ensure_npc(self, player_id: str, npc_id: str, greeting: str = "It is good to see you. How was your day?",
+                   greeting_translation: str = "很高兴见到你。你今天过得怎么样？"):
         self.ensure_player(player_id)
         with self._lock, self._connection:
             cur = self._connection.execute(
@@ -384,8 +401,8 @@ class Database:
             )
             if cur.rowcount:
                 self._connection.execute(
-                    "INSERT INTO messages(player_id,speaker,text,npc_id) VALUES (?,'npc',?,?)",
-                    (player_id, greeting, npc_id),
+                    "INSERT INTO messages(player_id,speaker,text,npc_id,translation) VALUES (?,'npc',?,?,?)",
+                    (player_id, greeting, npc_id, greeting_translation),
                 )
 
     def state(self, player_id: str, npc_id: str = "emma") -> Stats:

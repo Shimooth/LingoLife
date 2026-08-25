@@ -49,6 +49,8 @@ def test_profile_event_and_learning_are_one_persisted_loop(tmp_path):
     data = response.json()
     assert data["event_update"]["stage_changed"] is True
     assert data["animation_cue"] == data["event_update"]["animation_cue"]
+    assert data["event_update"]["performance"] == data["active_event"]["stage"]["performance"]
+    assert data["event_update"]["performance"]["hold_cue"] == "listen"
     assert data["active_event"]["stage"]["animation_cue"] in {
         "idle", "talk", "listen", "happy", "sad", "tired",
         "look_around", "walk", "run", "jump", "crouch", "push",

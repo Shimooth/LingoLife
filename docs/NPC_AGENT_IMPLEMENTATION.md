@@ -37,6 +37,12 @@ NPC-to-NPC relationships and events are a core world-system requirement, not a p
 
 If either AI task fails, its rule-based equivalent takes over. The trace records the failure type without storing the chat body or API credentials.
 
+## Event performance contract
+
+Rules also own the semantic performance attached to a personal-event stage or outcome. `performance v1` contains a bounded sequence of semantic beats plus a final hold cue; a beat may specify role, duration, loop, transition, facing, and normalized energy. It never exposes an asset clip name and it is not sent to the dialogue model.
+
+The room/chat event view and city resident world action both expose this contract. A traveling social participant receives a journey plan that holds `walk` until the authoritative world state changes; ambient map plans never turn conversation-only `talk` or `listen` cues into unattended speech. Web renderers may vary clips and add visual-only micro motion, but they cannot advance an event, move an NPC to a new world location, or alter an outcome.
+
 ## Persistence
 
 Schema creation is incremental and runs at application startup. Existing accounts, messages, character profiles, events, and learning records remain intact.
