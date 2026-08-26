@@ -1,7 +1,10 @@
 import {
+ OPPOSITE_ROAD_DIRECTION,
  ROAD_TILES,
  ROAD_TILE_STEP,
+ roadConnections,
  type BuildingLot,
+ type RoadDirection,
  type RoadTilePlacement,
  type WorldPoint,
 } from './worldData'
@@ -71,6 +74,7 @@ const nodeId=(road:RoadTilePlacement,corner:CornerName)=>`${road.id}:${corner}`
 const navigationNodes=new Map<string,NavigationNode>()
 const navigationEdges=new Map<string,Map<string,number>>()
 const roadsByCell=new Map<string,RoadTilePlacement>()
+const roadPorts=new Map<string,ReadonlySet<RoadDirection>>()
 
 const distance2=(a:Point2,b:Point2)=>Math.hypot(b[0]-a[0],b[1]-a[1])
 const edgeMap=(id:string)=>{
@@ -89,6 +93,7 @@ const addEdge=(from:string,to:string)=>{
 for(const road of ROAD_TILES){
  const [gx,gz]=cellForPoint(road.position)
  roadsByCell.set(cellKey(gx,gz),road)
+ roadPorts.set(road.id,new Set(roadConnections(road)))
  for(const [corner,offset] of Object.entries(CORNERS) as [CornerName,Point2][]){
   const id=nodeId(road,corner)
   navigationNodes.set(id,{id,position:[road.position[0]+offset[0],road.position[1]+offset[1]]})
@@ -99,17 +104,23 @@ for(const road of ROAD_TILES){
  addEdge(nodeId(road,'sw'),nodeId(road,'nw'))
 }
 
+const roadsConnect=(road:RoadTilePlacement,neighbour:RoadTilePlacement,direction:RoadDirection)=>
+ roadPorts.get(road.id)?.has(direction)===true&&
+ roadPorts.get(neighbour.id)?.has(OPPOSITE_ROAD_DIRECTION[direction])===true
+
 // Join the matching pavement edges of neighbouring road modules. Only east
-// and south are considered here because addEdge is bidirectional.
+// and south are considered here because addEdge is bidirectional. A physical
+// neighbour alone is not enough: the painted KayKit road ports must agree, so
+// pedestrians can no longer cross a curb hidden by a mismatched road model.
 for(const road of ROAD_TILES){
  const [gx,gz]=cellForPoint(road.position)
  const east=roadsByCell.get(cellKey(gx+1,gz))
- if(east){
+ if(east&&roadsConnect(road,east,'east')){
   addEdge(nodeId(road,'ne'),nodeId(east,'nw'))
   addEdge(nodeId(road,'se'),nodeId(east,'sw'))
  }
  const south=roadsByCell.get(cellKey(gx,gz+1))
- if(south){
+ if(south&&roadsConnect(road,south,'south')){
   addEdge(nodeId(road,'sw'),nodeId(south,'nw'))
   addEdge(nodeId(road,'se'),nodeId(south,'ne'))
  }

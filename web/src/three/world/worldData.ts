@@ -5,6 +5,7 @@ export type TimeSlot='morning'|'afternoon'|'evening'
 export type BuildingFamily='residential'|'commercial'|'public'
 export type KayKitBuildingModel='building_A'|'building_B'|'building_C'|'building_D'|'building_E'|'building_F'|'building_G'|'building_H'
 export type KayKitRoadModel='road_straight'|'road_straight_crossing'|'road_junction'|'road_tsplit'|'road_corner'|'road_corner_curved'
+export type RoadDirection='north'|'east'|'south'|'west'
 export type KayKitPropModel=
  |'base'|'streetlight'|'trafficlight_A'|'trafficlight_B'|'trafficlight_C'
  |'bush'|'bench'|'watertower'|'firehydrant'|'dumpster'|'trash_A'|'trash_B'|'box_A'|'box_B'
@@ -75,6 +76,41 @@ export const CITY_PLATFORM_OUTLINE:readonly [number,number][]= [
 export const KAYKIT_ROAD_MODELS:readonly KayKitRoadModel[]=[
  'road_straight','road_straight_crossing','road_junction','road_tsplit','road_corner','road_corner_curved',
 ]
+
+const ROAD_DIRECTIONS:readonly RoadDirection[]=['north','east','south','west']
+const ROAD_BASE_CONNECTIONS:Record<KayKitRoadModel,readonly RoadDirection[]>={
+ road_straight:['north','south'],
+ road_straight_crossing:['north','south'],
+ road_junction:['north','east','south','west'],
+ // KayKit's unrotated T has its closed curb on the north edge.
+ road_tsplit:['east','south','west'],
+ // KayKit's unrotated corner joins its east and south edges.
+ road_corner:['east','south'],
+ road_corner_curved:['east','south'],
+}
+
+const normalizedQuarterTurns=(rotation:number)=>((Math.round(rotation/(Math.PI/2))%4)+4)%4
+
+/**
+ * Visual road ports after applying the same positive-Y rotation used by Three.
+ * Keeping this beside the placement data gives layout guards and pedestrian
+ * navigation one shared interpretation of every KayKit road module.
+ */
+export const roadConnections=(road:Pick<RoadTilePlacement,'model'|'rotation'>):readonly RoadDirection[]=>{
+ const turns=normalizedQuarterTurns(road.rotation)
+ return ROAD_BASE_CONNECTIONS[road.model].map(direction=>{
+  const index=ROAD_DIRECTIONS.indexOf(direction)
+  return ROAD_DIRECTIONS[(index-turns+4)%4]
+ })
+}
+
+export const ROAD_DIRECTION_OFFSET:Readonly<Record<RoadDirection,readonly [number,number]>>={
+ north:[0,-1],east:[1,0],south:[0,1],west:[-1,0],
+}
+
+export const OPPOSITE_ROAD_DIRECTION:Readonly<Record<RoadDirection,RoadDirection>>={
+ north:'south',east:'west',south:'north',west:'east',
+}
 
 export const KAYKIT_PROP_MODELS:readonly KayKitPropModel[]=[
  'base','streetlight','trafficlight_A','trafficlight_B','trafficlight_C',
@@ -150,11 +186,11 @@ for(let gz=-4;gz<0;gz+=1)addRoad(-7,gz,'road_straight')
 for(let gx=-6;gx<5;gx+=1)addRoad(gx,-5,'road_straight',Math.PI/2)
 for(let gz=-4;gz<0;gz+=1)addRoad(5,gz,'road_straight')
 addRoad(-7,-5,'road_corner_curved',0)
-addRoad(5,-5,'road_corner_curved',Math.PI/2)
+addRoad(5,-5,'road_corner_curved',-Math.PI/2)
 addRoad(-7,0,'road_tsplit',Math.PI)
 addRoad(5,0,'road_tsplit',Math.PI)
 for(let gz=-10;gz<-5;gz+=1)addRoad(-2,gz,'road_straight')
-addRoad(-2,-5,'road_tsplit',0)
+addRoad(-2,-5,'road_tsplit',Math.PI)
 addRoad(-2,-7,'road_straight_crossing')
 
 // Moonrail bends around a pedestrian-scaled inner street.
@@ -163,8 +199,8 @@ for(let gx=-8;gx<3;gx+=1)addRoad(gx,5,'road_straight',Math.PI/2)
 for(let gz=1;gz<5;gz+=1)addRoad(3,gz,'road_straight')
 addRoad(-9,0,'road_tsplit',0)
 addRoad(3,0,'road_tsplit',0)
-addRoad(-9,5,'road_corner_curved',-Math.PI/2)
-addRoad(3,5,'road_junction')
+addRoad(-9,5,'road_corner_curved',Math.PI/2)
+addRoad(3,5,'road_tsplit',Math.PI)
 for(let gx=-8;gx<-3;gx+=1)addRoad(gx,3,'road_straight',Math.PI/2)
 for(let gz=1;gz<3;gz+=1)addRoad(-3,gz,'road_straight')
 addRoad(-9,3,'road_tsplit',Math.PI/2)
@@ -175,15 +211,16 @@ addRoad(-6,3,'road_straight_crossing',Math.PI/2)
 // The station quarter grows out of old town instead of mirroring it.
 for(let gx=4;gx<10;gx+=1)addRoad(gx,5,'road_straight',Math.PI/2)
 for(let gz=1;gz<5;gz+=1)addRoad(9,gz,'road_straight')
-addRoad(9,0,'road_tsplit',0)
+addRoad(9,0,'road_junction')
 addRoad(9,5,'road_corner_curved',Math.PI)
 addRoad(6,5,'road_straight_crossing',Math.PI/2)
 
 // Dawn District has a short branch rather than another complete block.
 for(let gz=-3;gz<0;gz+=1)addRoad(9,gz,'road_straight')
 for(let gx=6;gx<9;gx+=1)addRoad(gx,-3,'road_straight',Math.PI/2)
-addRoad(9,-3,'road_corner',Math.PI/2)
-addRoad(6,-3,'road_tsplit',-Math.PI/2)
+addRoad(9,-3,'road_corner',-Math.PI/2)
+addRoad(6,-3,'road_straight',Math.PI/2)
+addRoad(5,-3,'road_tsplit',Math.PI/2)
 addRoad(9,-1,'road_straight_crossing')
 
 export const ROAD_TILES:readonly RoadTilePlacement[]=Array.from(roadMap.values())
@@ -317,11 +354,11 @@ export const STREET_PROPS:readonly PropPlacement[]=[
 // A perimeter ring would flatten the floating-city silhouette; use groves.
 export const TREES:readonly [number,number][]=[
  [-24,-15],[-22.9,-14.2],[-21.7,-15.4],[-20.7,-13.9],
- [-7.1,-12.1],[-6.1,-13],[-4.9,-12.2],[-3.8,-13.1],[-2.8,-12],
+ [-7.7,-9.8],[-6,-8.8],[-4.2,-8.8],[-2.7,-9.8],
  [-6.4,-7.6],[-3.2,-5.5],[1.2,-7.5],[4.7,-5.7],[6.4,-7.2],
- [-5.3,10.4],[-4.2,11.4],[-3,10.6],[-1.8,11.5],
- [10.4,10.1],[11.4,11.2],[12.6,10.2],[13.8,11.3],[14.8,10.2],
- [24.2,-14.1],[25.1,-12.7],[23.6,-11.8],[-25,13.7],[-23.7,14.7],
+ [-5.5,8.2],[-3.5,8.3],[-1.4,8.9],[-.4,10.4],
+ [9.7,8.7],[14.8,9.3],[15.2,10.7],
+ [24.2,-14.1],[25.1,-12.7],[23.6,-11.8],
 ]
 
 export const worldPosition=(x:number,y:number,yOffset=.8):WorldPoint=>[

@@ -10,11 +10,25 @@ import {
  buildingModelFor,hashString,worldPosition,
  type BuildingLot,type CityBuildingPlacement,type KayKitBuildingModel,type KayKitPropModel,type KayKitRoadModel,type TimeSlot,type WorldPoint,
 } from './worldData'
+import {cameraDampingAlpha,cameraPoseSettled,topViewOffset} from './worldCamera'
+import {WorldDecorationPlacementSurface} from './WorldDecorationPlacementSurface'
+import {WorldDecorations3D} from './WorldDecorations3D'
+import type {WorldDecorationEditorMode} from './useWorldDecorationEditor'
+import {createWorldDecorationValidationApi,type WorldDecoration,type WorldDecorationKind,type WorldDecorationValidationApi} from './worldDecorations'
 import {buildPedestrianRoute,samplePedestrianRoute,type PedestrianRoute} from './worldNavigation'
 
 type Quality='low'|'high'
 export type WorldQuality='auto'|Quality
 export type WorldViewMode='isometric'|'top'
+export type WorldDecorationSceneEditor={
+ active:boolean
+ mode:WorldDecorationEditorMode
+ selectedKind:WorldDecorationKind
+ selectedId?:string
+ decorations:readonly WorldDecoration[]
+ onSelect:(id?:string)=>void
+ onPlace:(position:[number,number])=>void
+}
 
 type SceneProps={
  characters:readonly CityCharacter[]
@@ -29,6 +43,8 @@ type SceneProps={
  focusVersion:number
  viewMode:WorldViewMode
  quality:Quality
+ decorationEditor?:WorldDecorationSceneEditor
+ onDecorationValidationApi?:(api:WorldDecorationValidationApi|null)=>void
  onCharacterClick:(id:string)=>void
  onCharacterEvent:(eventId:string)=>void
  onJourneyElapsed?:()=>void
@@ -121,19 +137,34 @@ function CameraRig({focus,focusVersion,followedCharacterId,followCameraOffset,fo
  const actorPosition=useRef(new THREE.Vector3())
  const followLookOffset=useRef(new THREE.Vector3(0,.3,0))
  const staticFollowOffset=useMemo(()=>new THREE.Vector3(...followCameraOffset),[followCameraOffset])
- const followIsometricOffset=useRef(new THREE.Vector3(...followCameraOffset))
- const nextFollowOffset=useRef(new THREE.Vector3(...followCameraOffset))
+ const smoothedFollowOffset=useRef(new THREE.Vector3(...followCameraOffset))
+ const previousFollowedCharacterId=useRef<string|undefined>(undefined)
+ const manuallyControlled=useRef(false)
+ const previousCameraCommand=useRef('')
 
  useEffect(()=>{
-  const target=new THREE.Vector3(...(focus??[0,0,-1.5]))
-  desiredTarget.current.copy(target)
+  const cameraCommand=[viewMode,focusVersion,followedCharacterId??'',focus?.join(',')??'',staticFollowOffset.toArray().join(',')].join(':')
+  const semanticChange=cameraCommand!==previousCameraCommand.current
+  previousCameraCommand.current=cameraCommand
+  if(semanticChange)manuallyControlled.current=false
+  // A late ResizeObserver update is common while the opening cloud layer is
+  // leaving. Once the player has taken control, that layout-only update must
+  // not re-arm the initial framing animation and pull the map back.
+  if(!semanticChange&&manuallyControlled.current){moving.current=false;return}
   const following=Boolean(followedCharacterId)
+  const actor=followedCharacterId?actors.current.get(followedCharacterId):undefined
+  const target=new THREE.Vector3(...(focus??[0,0,-1.5]))
+  if(actor){actor.getWorldPosition(target);target.add(followLookOffset.current)}
+  desiredTarget.current.copy(target)
   const focused=Boolean(focus||following)
-  followIsometricOffset.current.copy(staticFollowOffset)
+  if(previousFollowedCharacterId.current!==followedCharacterId){
+   smoothedFollowOffset.current.copy(staticFollowOffset)
+   previousFollowedCharacterId.current=followedCharacterId
+  }
   const offset=following
-   ?followIsometricOffset.current
+   ?smoothedFollowOffset.current
    :viewMode==='top'
-    ?new THREE.Vector3(.01,focused?28:54,.01)
+    ?new THREE.Vector3(...topViewOffset(focused?28:54))
     :(focused?new THREE.Vector3(12.5,14,15):new THREE.Vector3(38,36,44))
   desiredPosition.current.copy(target).add(offset)
   const portrait=size.height>size.width*1.25
@@ -153,41 +184,25 @@ function CameraRig({focus,focusVersion,followedCharacterId,followCameraOffset,fo
    controls.current?.update()
    moving.current=false
   }
- },[camera,focus,focusVersion,followedCharacterId,reducedMotion,size.height,size.width,staticFollowOffset,viewMode])
+ },[actors,camera,focus,focusVersion,followedCharacterId,reducedMotion,size.height,size.width,staticFollowOffset,viewMode])
 
  useFrame((_,delta)=>{
   if(followedCharacterId){
    const actor=actors.current.get(followedCharacterId)
    if(actor){
     actor.getWorldPosition(actorPosition.current)
-    nextFollowOffset.current.copy(staticFollowOffset)
-    if(followWalking){
-     let roadX=actorPosition.current.x,roadZ=actorPosition.current.z,nearestDistance=Number.POSITIVE_INFINITY
-     for(const road of ROAD_TILES){
-      const dx=road.position[0]-actorPosition.current.x,dz=road.position[1]-actorPosition.current.z,distance=dx*dx+dz*dz
-      if(distance<nearestDistance){nearestDistance=distance;roadX=road.position[0];roadZ=road.position[1]}
-     }
-     let roadwardX=roadX-actorPosition.current.x,roadwardZ=roadZ-actorPosition.current.z
-     const roadwardLength=Math.hypot(roadwardX,roadwardZ)
-     const movementX=Math.sin(actor.rotation.y),movementZ=Math.cos(actor.rotation.y)
-     if(roadwardLength>.04){roadwardX/=roadwardLength;roadwardZ/=roadwardLength}
-     else {roadwardX=movementZ;roadwardZ=-movementX}
-     const roadwardProjection=movementX*roadwardX+movementZ*roadwardZ
-     let tangentX=movementX-roadwardX*roadwardProjection,tangentZ=movementZ-roadwardZ*roadwardProjection
-     const tangentLength=Math.hypot(tangentX,tangentZ)
-     if(tangentLength>.04){tangentX/=tangentLength;tangentZ/=tangentLength}
-     else {tangentX=roadwardZ;tangentZ=-roadwardX}
-     nextFollowOffset.current.set(roadwardX*1.8+tangentX*.6,1.7,roadwardZ*1.8+tangentZ*.6)
-    }
-    const followAlpha=1-Math.exp(-delta*5.6)
-    followIsometricOffset.current.lerp(nextFollowOffset.current,followAlpha)
+    // Follow from one stable, parcel-aware isometric side. Re-selecting the
+    // nearest road tile here used to flip the camera heading at every cell
+    // boundary, especially while an actor turned at a junction.
+    const followResponsiveness=followWalking?2.8:4.2
+    smoothedFollowOffset.current.lerp(staticFollowOffset,cameraDampingAlpha(delta,followResponsiveness))
     desiredTarget.current.copy(actorPosition.current).add(followLookOffset.current)
-    desiredPosition.current.copy(desiredTarget.current).add(followIsometricOffset.current)
+    desiredPosition.current.copy(desiredTarget.current).add(smoothedFollowOffset.current)
     moving.current=true
    }
   }
   if(!moving.current||!controls.current)return
-  const alpha=1-Math.exp(-delta*4.8)
+  const alpha=cameraDampingAlpha(delta,followedCharacterId&&followWalking?3.6:4.8)
   camera.position.lerp(desiredPosition.current,alpha)
   controls.current.target.lerp(desiredTarget.current,alpha)
   if(camera instanceof THREE.OrthographicCamera){
@@ -195,8 +210,8 @@ function CameraRig({focus,focusVersion,followedCharacterId,followCameraOffset,fo
    camera.updateProjectionMatrix()
   }
   controls.current.update()
-  const zoomSettled=!(camera instanceof THREE.OrthographicCamera)||Math.abs(camera.zoom-desiredZoom.current)<.015
-  if(!followedCharacterId&&camera.position.distanceToSquared(desiredPosition.current)<.005&&controls.current.target.distanceToSquared(desiredTarget.current)<.003&&zoomSettled){
+  const zoomDelta=camera instanceof THREE.OrthographicCamera?camera.zoom-desiredZoom.current:0
+  if(!followedCharacterId&&cameraPoseSettled(camera.position.distanceToSquared(desiredPosition.current),controls.current.target.distanceToSquared(desiredTarget.current),zoomDelta)){
    camera.position.copy(desiredPosition.current)
    if(camera instanceof THREE.OrthographicCamera){camera.zoom=desiredZoom.current;camera.updateProjectionMatrix()}
    controls.current.target.copy(desiredTarget.current)
@@ -204,7 +219,8 @@ function CameraRig({focus,focusVersion,followedCharacterId,followCameraOffset,fo
   }
  })
 
- return <OrbitControls ref={controls} makeDefault enableDamping dampingFactor={reducedMotion?1:.08} minZoom={5} maxZoom={120} minPolarAngle={viewMode==='top' ? .01 : .5} maxPolarAngle={1.22} enablePan={!followedCharacterId} enableRotate={!followedCharacterId} enableZoom={!followedCharacterId} screenSpacePanning maxDistance={110} minDistance={2}/>
+ const cancelProgrammaticMove=()=>{if(!followedCharacterId){manuallyControlled.current=true;moving.current=false}}
+ return <OrbitControls ref={controls} makeDefault enableDamping dampingFactor={reducedMotion?1:.08} minZoom={5} maxZoom={120} minPolarAngle={viewMode==='top' ? .01 : .5} maxPolarAngle={1.22} enablePan={!followedCharacterId} enableRotate={!followedCharacterId} enableZoom={!followedCharacterId} screenSpacePanning maxDistance={110} minDistance={2} onStart={cancelProgrammaticMove}/>
 }
 
 // A manufactured, chamfered city deck reads as one district in a much larger
@@ -517,23 +533,30 @@ const waitingFacing=(lot:BuildingLot,participantIndex:number)=>{
  return Math.atan2(direction[0],direction[1])
 }
 
+const characterStandingPosition=(character:CityCharacter,lot?:BuildingLot):WorldPoint=>{
+ const characterHash=hashString(character.id)
+ const fallback=worldPosition(character.location.x,character.location.y,.375)
+ if(!lot)return fallback
+ const action=character.worldAction as DirectedWorldAction|undefined
+ const lateral=action?.state==='waiting_at_event'?(action.participant_index ? .7 : -.7):((characterHash%5)-2)*.13
+ const forward:[number,number]=[Math.sin(lot.rotation),Math.cos(lot.rotation)]
+ const side:[number,number]=[Math.cos(lot.rotation),-Math.sin(lot.rotation)]
+ return [
+  THREE.MathUtils.clamp(lot.position[0]+forward[0]*1.56+side[0]*lateral,-WORLD_WIDTH/2+1.5,WORLD_WIDTH/2-1.5),
+  .375,
+  THREE.MathUtils.clamp(lot.position[1]+forward[1]*1.56+side[1]*lateral,-WORLD_DEPTH/2+1.5,WORLD_DEPTH/2-1.5),
+ ]
+}
+
 function CharacterMarker({character,lot,route,active,actors,serverTime,reducedMotion,language,onClick,onEvent,onJourneyElapsed}:{character:CityCharacter;lot?:BuildingLot;route?:PedestrianRoute;active:boolean;actors:ActorRegistry;serverTime?:string;reducedMotion:boolean;language:'zh'|'en';onClick:()=>void;onEvent:(eventId:string)=>void;onJourneyElapsed?:()=>void}){
  const [hovered,setHovered]=useState(false)
  useCursor(hovered)
  const actor=useRef<THREE.Group>(null)
  const characterHash=hashString(character.id)
- const fallback=worldPosition(character.location.x,character.location.y,.375)
  const action=character.worldAction as DirectedWorldAction|undefined
  // Rotation points from a parcel to its nearest road. Residents stand on that
  // pavement, so moving a building to a legal parcel also moves its resident.
- const lateral=action?.state==='waiting_at_event'?(action.participant_index ? .7 : -.7):((characterHash%5)-2)*.13
- const forward=lot?[Math.sin(lot.rotation),Math.cos(lot.rotation)]:[0,0]
- const side=lot?[Math.cos(lot.rotation),-Math.sin(lot.rotation)]:[0,0]
- const position:WorldPoint=lot?[
-  THREE.MathUtils.clamp(lot.position[0]+forward[0]*1.56+side[0]*lateral,-WORLD_WIDTH/2+1.5,WORLD_WIDTH/2-1.5),
-  .375,
-  THREE.MathUtils.clamp(lot.position[1]+forward[1]*1.56+side[1]*lateral,-WORLD_DEPTH/2+1.5,WORLD_DEPTH/2-1.5),
- ]:fallback
+ const position=characterStandingPosition(character,lot)
  const serverSkew=useMemo(()=>{const parsed=Date.parse(serverTime||'');return Number.isFinite(parsed)?parsed-Date.now():0},[serverTime])
  const startedAt=Date.parse(action?.started_at||''),arrivesAt=Date.parse(action?.arrives_at||'')
  const alreadyArrived=action?.state==='walking_to_event'&&Number.isFinite(arrivesAt)&&Date.now()+serverSkew>=arrivesAt
@@ -614,23 +637,40 @@ function CharacterMarker({character,lot,route,active,actors,serverTime,reducedMo
  </group>
 }
 
-export function WorldScene({characters,landmarks,followedCharacterId,serverTime,language,timeSlot,reducedMotion,selectedLandmarkId,focus,focusVersion,viewMode,quality,onCharacterClick,onCharacterEvent,onJourneyElapsed,onLandmarkSelect}:SceneProps){
+export function WorldScene({characters,landmarks,followedCharacterId,serverTime,language,timeSlot,reducedMotion,selectedLandmarkId,focus,focusVersion,viewMode,quality,decorationEditor,onDecorationValidationApi,onCharacterClick,onCharacterEvent,onJourneyElapsed,onLandmarkSelect}:SceneProps){
  const night=timeSlot==='evening'
  const [hoveredLandmarkId,setHoveredLandmarkId]=useState<string>()
  const actors=useRef(new Map<string,THREE.Group>())
  const layout=useMemo(()=>resolveCityLayout(landmarks,characters),[characters,landmarks])
  const characterLot=(character:CityCharacter)=>character.locationId?layout.landmarkLots.get(character.locationId):layout.homeLots.get(character.id)
- const targetLot=(character:CityCharacter)=>character.worldAction?.target_location_id?layout.landmarkLots.get(character.worldAction.target_location_id):undefined
+ const characterNavigation=useMemo(()=>characters.slice(0,24).map(character=>{
+  const origin=character.locationId?layout.landmarkLots.get(character.locationId):layout.homeLots.get(character.id)
+  const target=character.worldAction?.target_location_id?layout.landmarkLots.get(character.worldAction.target_location_id):undefined
+  const participantIndex=character.worldAction?.participant_index??0
+  const route=character.worldAction?.state==='walking_to_event'&&origin&&target?buildPedestrianRoute(origin,target,{seed:`${character.worldAction.event_id}:${character.id}`,startLateralOffset:participantIndex ? .28 : -.28,endLateralOffset:participantIndex ? .7 : -.7}):undefined
+  return {character,origin,route}
+ }),[characters,layout.homeLots,layout.landmarkLots])
+ const decorationValidationApi=useMemo(()=>createWorldDecorationValidationApi({
+  buildings:layout.occupiedPositions,
+  characterRoutes:characterNavigation.flatMap(item=>item.route?[item.route]:[]),
+  characterPositions:characterNavigation.map(item=>{const [x,,z]=characterStandingPosition(item.character,item.origin);return [x,z] as [number,number]}),
+ }),[characterNavigation,layout.occupiedPositions])
+ useEffect(()=>{
+  onDecorationValidationApi?.(decorationValidationApi)
+  return()=>onDecorationValidationApi?.(null)
+ },[decorationValidationApi,onDecorationValidationApi])
  const followedCharacter=characters.find(character=>character.id===followedCharacterId)
  const followedLot=followedCharacter?characterLot(followedCharacter):undefined
+ const followedLotRotation=followedLot?.rotation
  const followCameraOffset=useMemo<WorldPoint>(()=>{
-  if(!followedLot)return [2.2,1.7,2.4]
-  const forward:[number,number]=[Math.sin(followedLot.rotation),Math.cos(followedLot.rotation)]
-  const side:[number,number]=[Math.cos(followedLot.rotation),-Math.sin(followedLot.rotation)]
+  if(followedLotRotation===undefined)return [2.2,1.7,2.4]
+  const rotation=followedLotRotation
+  const forward:[number,number]=[Math.sin(rotation),Math.cos(rotation)]
+  const side:[number,number]=[Math.cos(rotation),-Math.sin(rotation)]
   // Stay on the resident's road side of the parcel. A fixed city-wide angle can
   // put an entire building between the camera and a resident on another facade.
   return [forward[0]*1.8+side[0]*.6,1.7,forward[1]*1.8+side[1]*.6]
- },[followedLot])
+ },[followedLotRotation])
  const resolvedFocus=useMemo(()=>{
   if(!focus)return null
   const selectedLot=selectedLandmarkId?layout.landmarkLots.get(selectedLandmarkId):undefined
@@ -643,7 +683,9 @@ export function WorldScene({characters,landmarks,followedCharacterId,serverTime,
   const nearest=candidates.reduce<{raw:[number,number];lot:BuildingLot}|undefined>((best,item)=>!best||pointDistanceSquared(item.raw,rawFocus)<pointDistanceSquared(best.raw,rawFocus)?item:best,undefined)
   return nearest?[nearest.lot.position[0],.5,nearest.lot.position[1]] as WorldPoint:focus
  },[characters,focus,landmarks,layout.homeLots,layout.landmarkLots,selectedLandmarkId])
- useCursor(Boolean(hoveredLandmarkId))
+ const editing=decorationEditor?.active===true
+ const selectedDecoration=decorationEditor?.decorations.find(item=>item.id===decorationEditor.selectedId)
+ useCursor(!editing&&Boolean(hoveredLandmarkId))
  return <>
   <FloatingCityBase quality={quality}/>
   <SkyRoadDecks quality={quality}/>
@@ -651,15 +693,26 @@ export function WorldScene({characters,landmarks,followedCharacterId,serverTime,
   <RoadNetwork/>
   <CourtyardFeatures quality={quality}/>
   <CityFabric buildings={layout.fillerBuildings} quality={quality}/>
-  <ResidentialHomes homes={layout.homePlacements} quality={quality} language={language} onSelect={onCharacterClick}/>
+  <ResidentialHomes homes={layout.homePlacements} quality={quality} language={language} onSelect={editing?()=>undefined:onCharacterClick}/>
   <StreetLife quality={quality} occupiedPositions={layout.occupiedPositions}/>
   <Trees quality={quality} occupiedPositions={layout.occupiedPositions}/>
-  <LandmarkBuildings placements={layout.landmarkPlacements} selectedId={selectedLandmarkId} hoveredId={hoveredLandmarkId} language={language} night={night} quality={quality} onHover={setHoveredLandmarkId} onSelect={onLandmarkSelect}/>
-  {characters.slice(0,24).map(character=>{
-   const origin=characterLot(character),target=targetLot(character),participantIndex=character.worldAction?.participant_index??0
-   const route=character.worldAction?.state==='walking_to_event'&&origin&&target?buildPedestrianRoute(origin,target,{seed:`${character.worldAction.event_id}:${character.id}`,startLateralOffset:participantIndex ? .28 : -.28,endLateralOffset:participantIndex ? .7 : -.7}):undefined
-   return <CharacterMarker key={character.id} character={character} lot={origin} route={route} active={character.id===followedCharacterId} actors={actors} serverTime={serverTime} reducedMotion={reducedMotion} language={language} onClick={()=>onCharacterClick(character.id)} onEvent={onCharacterEvent} onJourneyElapsed={onJourneyElapsed}/>
-  })}
+  {decorationEditor&&<WorldDecorations3D
+   decorations={decorationEditor.decorations}
+   editing={editing}
+   selectedId={decorationEditor.selectedId}
+   quality={quality}
+   onSelect={decorationEditor.onSelect}
+  />}
+  <LandmarkBuildings placements={layout.landmarkPlacements} selectedId={editing?undefined:selectedLandmarkId} hoveredId={editing?undefined:hoveredLandmarkId} language={language} night={night} quality={quality} onHover={editing?()=>undefined:setHoveredLandmarkId} onSelect={editing?()=>undefined:onLandmarkSelect}/>
+  {characterNavigation.map(({character,origin,route})=><CharacterMarker key={character.id} character={character} lot={origin} route={route} active={!editing&&character.id===followedCharacterId} actors={actors} serverTime={serverTime} reducedMotion={reducedMotion} language={language} onClick={editing?()=>undefined:()=>onCharacterClick(character.id)} onEvent={editing?()=>undefined:onCharacterEvent} onJourneyElapsed={onJourneyElapsed}/>)}
+  {decorationEditor&&editing&&<WorldDecorationPlacementSurface
+   mode={decorationEditor.mode}
+   selectedKind={decorationEditor.selectedKind}
+   selectedDecoration={selectedDecoration}
+   decorations={decorationEditor.decorations}
+   validationApi={decorationValidationApi}
+   onPlace={decorationEditor.onPlace}
+  />}
   <CameraRig focus={resolvedFocus} focusVersion={focusVersion} followedCharacterId={followedCharacterId} followCameraOffset={followCameraOffset} followWalking={followedCharacter?.worldAction?.state==='walking_to_event'} actors={actors} reducedMotion={reducedMotion} viewMode={viewMode}/>
  </>
 }
