@@ -1,5 +1,11 @@
 # NPC Agent implementation
 
+> Status: current runtime baseline as of 2026-08-26. This document describes
+> behavior that exists in code today; it is not the target life-simulation
+> design. The planned migration from daily social events to Desire →
+> Commitment → Life Action → Moment / Incident / Story Thread is tracked in
+> [LIFE_SIMULATION_IMPLEMENTATION_PLAN.md](LIFE_SIMULATION_IMPLEMENTATION_PLAN.md).
+
 The runtime follows one invariant: rules own world facts and progression; the language model performs dialogue and reports bounded evidence.
 
 ## Player role boundary
@@ -75,3 +81,13 @@ The room and chat responses include an `agent` snapshot. The city response inclu
 `backend/content/agent_eval_scenarios.json` defines five reference archetypes. Automated tests cover persona differentiation, disclosure gates, prompt-data isolation, memory scoping and deletion, lazy state bounds, goal progression, schedule-driven city movement, fallback behavior, and backward-compatible database migration.
 
 The social-world suite additionally covers directional relationship updates, participant schedule/location compatibility, separate participant memories, unattended outcomes, player intervention windows, duplicate suppression, deterministic replay, and incremental migration from the earlier affinity-only schema.
+
+## Planned replacement boundary
+
+The existing `SocialWorldEngine` remains the production path until the staged
+life-simulation migration passes its own compatibility, idempotency, database,
+API, and player-flow checks. New design documents must not be read as evidence
+that Desire, Household resources, Unresolved Threads, uncertain intervention,
+or romance states are already implemented. The migration is additive and
+feature-flagged; old tables and APIs remain readable until a separate removal
+plan is approved.

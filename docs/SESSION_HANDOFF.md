@@ -1,20 +1,30 @@
 # LingoLife 会话交接记录
 
-最后更新：2026-08-24（Asia/Shanghai）
+最后更新：2026-08-26（Asia/Shanghai）
 
 本文件用于在新 Codex 窗口中快速恢复项目上下文。这里只记录可提交的非敏感信息；密码、私钥、API Key、令牌和服务端环境变量值不得写入本文件或聊天。
 
 ## 当前阶段
 
 - 当前分支：`main`
-- 本轮开始时的生产提交：`87e6b5d fix: constrain orthographic world overlays`；以后以 `git log -1` 读取最新提交。
+- 本轮玩法文档改造前的本地基线：`7c552a2 fix: make backend editable installs reproducible`；本文提交后继续以 `git log -1` 读取最新本地提交。生产环境实际版本必须在发布前单独核对，不能由本文件推断。
 - 当前产品方向是 3D Web-first；玩家登录后直接进入 3D 天空之城观察主流程，不设独立 `/3d` 路由。Unity 客户端开发暂停，源码保留在 `unity/`。
 - 仓库已有 FastAPI 后端、React Web 玩家端/管理端、SQLite 数据层、DeepSeek 适配、Docker Compose、Nginx 配置、备份与发布脚本。
 - 已实现邀请码账号与管理端、事件/学习/角色定制、流式多语言多角色对话、3D 天空之城与统一 3D 角色、方向性 NPC 社交关系和自主多 NPC 日常事件。本阶段明确排除宠物。
+- 下一阶段已确定为生活模拟 v2：Desire → Commitment → Life Action → Moment / Incident / Story Thread，并先验证四名居民共享 Household。目标设计见仓库根目录三份 v0.3 文档，分阶段技术方案与家里/公司交接记录统一维护在 `docs/LIFE_SIMULATION_IMPLEMENTATION_PLAN.md`。
+- 当前运行时尚未实现 Household、共享资源、Desire、Unresolved Thread 和不确定干预；不要把目标设计误写成已完成能力。`docs/NPC_AGENT_IMPLEMENTATION.md` 只记录当前代码事实。
 - 玩家端为 `https://lingolife.shimooth.me`，管理端为 `https://lingolife.admin.shimooth.me`。每次发布前后仍需重新验证线上即时状态。
-- 主要文档入口：`README.md`、`docs/3D_ARCHITECTURE.md`、`docs/NPC_AGENT_IMPLEMENTATION.md`、`docs/CONFIGURATION.md`、`docs/P0_BETA_OPERATIONS.md`、`deploy/README.md`。
+- 主要文档入口：`README.md`、三份根目录 v0.3 设计文档、`docs/LIFE_SIMULATION_IMPLEMENTATION_PLAN.md`、`docs/NPC_AGENT_IMPLEMENTATION.md`、`docs/3D_ARCHITECTURE.md`、`docs/CONFIGURATION.md`、`docs/P0_BETA_OPERATIONS.md`、`deploy/README.md`。
 
 ## 本次会话已验证
+
+本地回归（2026-08-26）：
+
+```text
+backend: 90 passed
+web: TypeScript、ESLint、运行时资产、角色动画、城市布局、道路、装饰、导航、镜头检查 passed
+web: Vite production build passed
+```
 
 本地回归（2026-08-24）：
 

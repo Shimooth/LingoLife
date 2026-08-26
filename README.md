@@ -4,7 +4,7 @@ AI 驱动的 3D 天空之城生活模拟 / 英语学习游戏。Web 是唯一玩
 
 ## 当前目标
 
-玩家每天从 3D 天空之城观察视角查看居民、地点、日程和事件，再以管理者身份聚焦居民、用英语对话或介入重要生活事件。居民拥有可自定义的统一 3D 外观、人格、状态、目标、记忆、日程和方向性社交关系；DeepSeek 负责符合角色的英文表达，服务端规则负责世界事实、数值和学习结算。
+目标玩法是让居民根据需求、欲望、习惯、关系和 Household 环境持续生活，行为碰撞后才形成 Moment、Incident 和跨日 Story Thread；玩家从 3D 天空之城观察，并在少数重要时刻用英语询问或施加有限影响。DeepSeek 负责符合角色的英文表达，服务端规则负责世界事实、数值、稳定随机性和学习结算。当前代码仍处于“日程 + 每日社交事件”基线，目标架构与迁移进度分别见三份 v0.3 设计文档和实施方案。
 
 内测 P0 使用邀请码和唯一用户名进入。玩家端位于
 `https://lingolife.shimooth.me`，受密码保护的管理端位于
@@ -13,6 +13,11 @@ AI 驱动的 3D 天空之城生活模拟 / 英语学习游戏。Web 是唯一玩
 ## 文档入口
 
 - [当前进展与跨会话交接](docs/SESSION_HANDOFF.md)
+- [游戏设计文档 v0.3](LingoLife%20GDD.md)
+- [NPC Agent 目标设计 v0.3](NPC%20Agent%20系统设计文档.md)
+- [生活模拟与涌现剧情设计 v0.3](随机事件生成系统设计文档.md)
+- [生活模拟技术实施与跨环境交接方案](docs/LIFE_SIMULATION_IMPLEMENTATION_PLAN.md)
+- [当前 NPC Agent 运行时基线](docs/NPC_AGENT_IMPLEMENTATION.md)
 - [3D 主流程架构与性能预算](docs/3D_ARCHITECTURE.md)
 - [Demo 产品与技术方案](docs/DEMO_MVP.md)
 - [配置与秘密管理](docs/CONFIGURATION.md)
@@ -22,7 +27,8 @@ AI 驱动的 3D 天空之城生活模拟 / 英语学习游戏。Web 是唯一玩
 - [非敏感配置模板](config/lingolife.example.yaml)
 - [服务端环境变量模板](config/server.env.example)
 
-原始设计文档保留在仓库根目录，是后续系统扩展的设计依据。
+仓库根目录三份 v0.3 设计文档定义目标玩法；`docs/NPC_AGENT_IMPLEMENTATION.md`
+记录当前代码事实；`docs/LIFE_SIMULATION_IMPLEMENTATION_PLAN.md` 维护两者之间的迁移进度。
 
 ## 当前阶段边界
 

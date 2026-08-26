@@ -1,7 +1,12 @@
 # LingoLife 单房间 Demo 产品与技术方案
 
 版本：0.2
-状态：Web-first 核心玩法验证
+状态：历史验证基线；不再定义当前产品循环和下一实施阶段
+
+本文保留用于理解早期单房间聊天 Demo、兼容旧接口和复用旧测试指标。当前目标设计与实施范围由
+[`../LingoLife GDD.md`](../LingoLife%20GDD.md) 和
+[`LIFE_SIMULATION_IMPLEMENTATION_PLAN.md`](LIFE_SIMULATION_IMPLEMENTATION_PLAN.md)
+定义。
 
 ## 1. Demo 要验证什么
 

@@ -1,5 +1,7 @@
 # LingoLife Demo API
 
+> 本文描述当前已实现 API。下一阶段会在保持这些接口可读和旧数据可迁移的前提下，引入 Desire、Commitment、Life Action、Household、Moment / Incident / Story Thread。目标与分阶段方案见 [`../docs/LIFE_SIMULATION_IMPLEMENTATION_PLAN.md`](../docs/LIFE_SIMULATION_IMPLEMENTATION_PLAN.md)，不要将该目标文档中的字段视为已上线 API。
+
 Python 3.11+：
 
 ```bash

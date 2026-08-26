@@ -1,572 +1,517 @@
 # NPC Agent 系统设计文档
 
-版本：0.1
+- 版本：0.3
+- 项目：LingoLife
+- 文档性质：目标设计契约
+- 实施计划：[`docs/LIFE_SIMULATION_IMPLEMENTATION_PLAN.md`](docs/LIFE_SIMULATION_IMPLEMENTATION_PLAN.md)
 
-项目：《LingoLife》
+---
 
-# 一、系统概述
+# 一、系统目标与边界
 
-## 1.1 设计目标
+## 1.1 目标
 
-NPC Agent 是游戏世界中的智能角色系统。
+NPC Agent 的目标不是让 NPC 更会聊天，而是让居民在玩家不操作时也能持续、可解释地生活。
 
-每个 NPC 不只是一个聊天机器人，而是拥有：
+每名 NPC 必须能够：
 
-- 独立人格
-- 长期记忆
-- 当前状态
-- 个人目标
-- 社交关系
-- 行为倾向
+- 在日程约束内产生多个短期欲望；
+- 根据人格、风险、关系和环境选择或压抑欲望；
+- 执行、打断和重新规划生活行为；
+- 与居民、住宅资源和城市环境发生碰撞；
+- 对同一共同经历形成不同解释；
+- 在没有玩家介入时自主推进；
+- 接受、延迟、拒绝或误解玩家建议；
+- 用符合其人格和玩家英语水平的语言表达已经确定的事实。
 
-的虚拟生命。
+## 1.2 玩家边界
 
-NPC 的目标：
+玩家始终是城市的观察者或管理者，不是 NPC 的扮演者。
 
-> 让玩家感觉自己生活在一个持续运行、有情感、有变化的世界中。
+玩家可以观察、询问、提供资源、建议、调解、撮合或离开，但不能直接设置 NPC 的情绪、欲望、关系和决定。所有重大行为都由规则层依据 NPC 内部状态结算。
 
-## 1.2 玩家与 NPC 的身份边界
+## 1.3 规则层与 LLM
 
-玩家始终是城市的观察者和管理者，不是任何 NPC 的扮演者。
+规则层负责：
 
-观察状态下：
+- 时间、位置、资源和参与资格；
+- Desire、Commitment、Life Action 和中断；
+- 关系、家庭、记忆、未解决问题及结果；
+- 稳定种子和幂等；
+- 玩家干预接受度；
+- 离线推进和学习结算。
 
-- 玩家观看 NPC 的位置、状态、行为和事件
-- NPC 根据自己的日程、需求、目标和关系自主生活
-- 玩家聚焦角色不会接管该角色，也不会改变其内部状态
+LLM 负责：
 
-管理交互下：
+- 按既定事实生成人格化英文台词；
+- 表达角色的主观解释；
+- 调整语言难度；
+- 提取受约束的语义与学习证据。
 
-- 玩家以自己的身份与 NPC 对话、提出建议、提供资源或作出城市管理选择
-- NPC 根据人格、情绪、记忆、关系边界和长期目标决定如何回应
-- 重大行为必须由 NPC Agent 判断是否接受，不能因玩家点击或输入而无条件执行
-- 玩家输入不能伪装成 NPC 的台词、记忆或内心状态
+普通环境行为不得调用 LLM。LLM 失败时，模板表达必须能完成整个流程。
 
-因此系统不提供“附身 NPC”“代替 NPC 与其他角色说话”或“直接操纵 NPC 决策”的模式。玩家影响角色，但不成为角色。
+---
 
-# 二、NPC Agent 核心结构
-
-一个 NPC 由以下模块组成：
-
-```
-NPC Agent
-
-├── 人格系统 Personality
-│
-├── 状态系统 State
-│
-├── 记忆系统 Memory
-│
-├── 关系系统 Relationship
-│
-├── 目标系统 Goal
-│
-├── 行为决策系统 Behavior
-│
-├── 对话系统 Dialogue
-│
-└── 学习交互系统 Language Interaction
-```
-
-# 三、人格系统（Personality System）
-
-## 3.1 基础信息
-
-每个 NPC 拥有固定身份：
-
-```
-{
-"name":"Lisa",
-"age":25,
-"occupation":"music producer",
-"location":"Sky City"
-}
-```
-
-## 3.2 性格模型
-
-人格影响：
-
-- 说话方式
-- 行为选择
-- 事件类型
-- 对玩家反馈
-
-示例：
-
-```
-{
-"traits":[
-"creative",
-"introverted",
-"kind"
-]
-}
-```
-
-效果：
-
-创造型 NPC：
-
-- 更容易产生创作相关事件
-
-内向型 NPC：
-
-- 不主动交流
-- 需要提高关系后开放更多内容
-
-# 四、兴趣系统（Interest System）
-
-NPC 拥有兴趣标签：
-
-例如：
-
-```
-Music
-Technology
-Cooking
-Sports
-Travel
-Art
-```
-
-兴趣影响：
-
-## 事件生成
-
-音乐家：
-
-可能：
-
-- 邀请玩家制作歌曲
-- 寻找乐器
-- 举办音乐会
-
-厨师：
-
-可能：
-
-- 开发新菜品
-- 寻找食材
-- 参加比赛
-
-# 五、状态系统（State System）
-
-NPC 每天拥有动态状态。
-
-## 5.1 情绪状态
-
-例如：
-
-```
-Happy
-Sad
-Angry
-Excited
-Lonely
-Tired
-```
-
-影响：
-
-- 对话内容
-- 事件概率
-- 玩家互动反馈
-
-## 5.2 当前需求
-
-类似模拟人生：
-
-```
-Need:
-
-Food
-Rest
-Social
-Achievement
-Love
-```
-
-NPC 会主动产生行为。
-
-# 六、记忆系统（Memory System）
-
-NPC 必须拥有长期记忆，否则无法形成真实关系。
-
-## 6.1 短期记忆
-
-保存：
-
-最近事件：
-
-```
-Yesterday:
-
-Player helped Lisa find guitar.
-
-Relationship +10
-```
-
-有效期：
-
-数天。
-
-## 6.2 长期记忆
-
-保存重要信息：
-
-例如：
-
-```
-Player likes electronic music.
-
-Player helped me when I was sad.
-
-Player often makes grammar mistakes.
-```
-
-长期影响：
-
-NPC 后续行为。
-
-## 6.3 记忆检索
-
-生成对话时：
-
-流程：
-
-```
-当前对话
-
-↓
-
-检索相关记忆
-
-↓
-
-生成符合历史的回复
-```
-
-避免：
-
-NPC 前后矛盾。
-
-# 七、关系系统（Relationship System）
-
-## 7.1 玩家与 NPC 的关系
-
-NPC 与玩家拥有关系值：
-
-```
-0-20 Stranger
-
-20-50 Acquaintance
-
-50-80 Friend
-
-80-100 Close Friend
-```
-
-关系影响：
-
-## 对话权限
-
-低关系：
-
-普通聊天。
-
-高关系：
-
-分享秘密、个人故事。
-
-## 事件类型
-
-陌生：
-
-请求帮助。
-
-朋友：
-
-邀请活动。
-
-亲密：
-
-共同目标。
-
-## 7.2 NPC 之间的关系
-
-每个 NPC 也与其他居民拥有独立关系。关系不是单一的全局好感，而是带有方向和历史的社交边：
-
-```
-NPC A → NPC B
-
-熟悉度 Familiarity
-信任 Trust
-亲近 Affinity
-矛盾 Tension
-关系状态 Status
-共同经历 Shared Memories
-```
-
-A 对 B 的感受可以与 B 对 A 不同。NPC 之间的关系影响：
-
-- 是否愿意主动见面、合作、求助或分享信息
-- 共同日程和地点选择
-- 社交、合作、竞争、冲突及和解事件的概率
-- 对话中如何评价或提起其他居民
-- 是否愿意参与对方的长期目标
-- 共同事件结束后的情绪、记忆和未来行为
-
-NPC 之间的互动不依赖玩家触发。每日世界刷新可以根据关系、日程、地点、需求、人格和目标生成多 NPC 事件。玩家可以观察事件，也可以作为管理者介入，但系统必须允许 NPC 自己建立、改变和延续关系。
-
-NPC 间事件不是一条立即结算的通知，而是一段在城市中可见的行为链：
+# 二、Agent 组成
 
 ```text
-规则层选择参与者、地点和事件模板
-  ↓
-双方进入 traveling，从各自地点自动步行
-  ↓
-到达共同地点，头顶状态改为等待查看
-  ├─ 普通事件：awaiting_observation，玩家点击后观看互动
-  └─ 高影响事件：awaiting_management，玩家可以有限介入
-  ↓
-规则层一次性写入双向关系、双方视角记忆和后续行为线索
+NPC Agent
+├── Identity & Persona
+├── Preferences & Quirks
+├── Emotion & Needs
+├── Daily Plan
+├── Desire Stack
+├── Commitment
+├── Life Action
+├── Goal
+├── Relationship Graph
+├── Household Role
+├── Memory
+├── Unresolved Threads
+├── Observability
+└── Dialogue & Learning Adapter
 ```
 
-居民列表允许玩家随时进入跟随视角。跟随只改变摄像机，不会附身、遥控或替 NPC 决策；NPC 始终沿自己的计划行动。若玩家当天没有查看，事件在下一游戏日首次同步世界时自主结算，保证 Agent 的生活不会因为玩家离线而停滞。
+Daily Plan 是背景约束，Desire 和 Commitment 才驱动即时生活。Incident 是行为碰撞后的产物，不是 Agent 每天直接领取的任务。
 
-Agent 负责提供筛选依据和结果语境：人格、当前需求、目标、日程、兴趣、双方关系以及近期记忆。规则层负责参与资格、状态机、数值和幂等结算；语言模型只把已确定的事实表达成符合双方人格的英文互动，不能改变目的地、关系增量或事件结局。
+---
 
-# 八、目标系统（Goal System）
+# 三、身份、人格与偏好
 
-每个 NPC 有长期目标。
+## 3.1 固定身份
 
-例如：
+固定身份包括：姓名、年龄、职业、长期目标、家庭身份和角色边界。修改角色外观或职业不能重置已有记忆和关系。
 
-Lisa：
+## 3.2 人格轴
 
-```
-Goal:
-Hold a personal concert
-```
+保留当前的人格轴：
 
-阶段：
+- warmth；
+- extraversion；
+- assertiveness；
+- openness；
+- emotional_stability；
+- humor。
 
-```
-寻找乐器
+人格影响行为选择、表达方式、冲突策略、求助意愿和干预接受度，但不直接决定结果。
 
-↓
+## 3.3 行为倾向
 
-练习歌曲
+由人格轴派生：
 
-↓
+- initiative：主动程度；
+- conflict_style：回避、协商或直接；
+- support_style：倾听、实用帮助或保持距离；
+- disclosure_style：公开、选择性或隐藏；
+- persistence：欲望被阻碍后是否继续尝试；
+- flexibility：是否容易改变计划；
+- pride：是否抗拒他人介入。
 
-邀请朋友
+## 3.4 偏好、厌恶与怪癖
 
-↓
+兴趣不足以产生人味。每名 NPC 还需要：
 
-举办演出
-```
+- `likes`：食物、音乐、活动、地点和相处方式；
+- `dislikes`：噪声、混乱、迟到、特定食物或行为；
+- `quirks`：反复检查门、收藏杯子、吃饭很慢等低风险怪癖；
+- `habits`：固定时间喝咖啡、睡前阅读、周末打扫等习惯；
+- `boundaries`：隐私、借物、身体距离、金钱和关系边界。
 
-玩家可以参与目标推进。
+这些字段必须进入候选行为和碰撞条件，而不是只进入 LLM Prompt。
 
-# 九、行为决策系统（Behavior System）
+---
 
-NPC 每日生成行为。
+# 四、动态状态
 
-输入：
+## 4.1 情绪
 
-```
-人格
+运行时情绪继续使用：
 
-+
-
-状态
-
-+
-
-目标
-
-+
-
-历史事件
-
-+
-
-其他 NPC 的关系、状态与共同日程
-
-+
-
-城市环境
-```
-
-输出：
-
-```
-今天行动
-```
-
-例如：
-
-Lisa：
-
-```
-Morning:
-Practice guitar
-
-Afternoon:
-Talk with player
-
-Night:
-Write songs
-```
-
-# 十、对话系统（Dialogue System）
-
-## 10.1 对话目标
-
-NPC 对话不是自由聊天。
-
-每次交流应该有目的：
-
-例如：
-
-- 获取信息
-- 建立关系
-- 完成任务
-- 解决问题
-
-## 10.2 对话生成输入
-
-LLM Prompt 包含：
-
-```
-NPC identity
-
-Personality
-
-Current emotion
-
-Relationship
-
-Relevant memories
-
-Current event
-
-Player English level
-```
-
-# 十一、英语学习融合系统
-
-NPC 是英语使用场景。
-
-不是老师。
-
-## 11.1 难度适配
-
-根据玩家等级：
-
-A1：
-
-```
-Where is the shop?
-```
-
-B2：
-
-```
-Could you explain why the supply chain was interrupted?
-```
-
-## 11.2 错误反馈
-
-NPC 不直接批改。
-
-自然反馈：
-
-玩家：
-
-"I go yesterday."
-
-NPC：
-
-"Oh, you went yesterday? That sounds interesting."
-
-通过自然纠正学习。
-
-# 十二、NPC Agent 数据结构示例
-
-```
+```json
 {
-"name":"Lisa",
-
-"personality":{
-"creative":90,
-"friendly":70,
-"shy":60
-},
-
-"interest":[
-"music",
-"photography"
-],
-
-"memory":[
-{
-"event":"player helped me",
-"importance":80
-}
-],
-
-"relationship":{
-"player":65
-},
-
-"goal":{
-"concert":40
-},
-
-"state":{
-"mood":"happy",
-"energy":70
-}
+  "valence": 62,
+  "stress": 38,
+  "energy": 68
 }
 ```
 
-# 十三、未来扩展方向
+情绪影响欲望强度、行为速度、冲突升级和干预接受度。情绪是连续状态，不用一个 `happy/sad` 标签替代。
 
-## 多 NPC 社交网络高级扩展
+## 4.2 需求
 
-基础 NPC 社交关系和多 NPC 事件属于核心系统；未来在此基础上扩展：
+核心需求：
 
-- 群体关系与朋友圈
-- 恋爱、家庭和长期伙伴关系
-- 阵营、组织和社区声誉
-- 多阶段合作与群体冲突
+- food；
+- rest；
+- social；
+- achievement；
+- love；
+- privacy；
+- fun；
+- security。
 
-形成更复杂的动态社会。
+需求只能通过实际或离线模拟的行为改变。不能继续仅靠“每日计划暗含吃饭和睡觉”自动恢复而不产生任何生活记录。
 
-## NPC 自主成长
+## 4.3 状态推进
 
-NPC经历：
+在线时按世界 Tick 惰性推进，离线时按时间段批量模拟。两种方式必须使用相同规则和稳定种子，最终事实保持一致。
 
-事件 → 学习 → 改变人格。
+为控制成本，只有状态发生可观察变化、资源被占用或产生碰撞时才持久化 Life Action；普通数值衰减可以批量结算。
 
-例如：
+---
 
-害羞角色：
+# 五、Daily Plan
 
-经过玩家帮助：
+Daily Plan 表示不能轻易违背的背景约束：工作、课程、睡眠和已接受的邀约。
 
-逐渐变得自信。
+```json
+{
+  "date": "2026-08-27",
+  "blocks": [
+    {"start": "09:00", "end": "17:00", "kind": "work", "location_id": "innovation_hub"},
+    {"start": "23:00", "end": "07:00", "kind": "sleep_window", "location_id": "room-emma"}
+  ]
+}
+```
 
-# 十四、设计原则
+在空闲窗口内，NPC 根据 Desire 决定行为。紧急需求、事故或高强度关系事件可以打断计划，并留下迟到、疲惫或失约后果。
 
-1. NPC 首先是生命，其次才是教学工具。
-2. 玩家应该因为关心 NPC 而使用英语。
-3. 语言学习应该隐藏在互动过程中。
-4. NPC 的记忆和一致性比随机生成数量更重要。
+不再使用“早上工作、下午目标、晚上恢复”三槽位作为完整行为系统。
 
-目标：
+---
 
-创造一个玩家愿意每天回来的 AI 世界，而英语只是连接人与人的方式。
+# 六、Desire Stack
+
+## 6.1 数据结构
+
+Desire 是尚未承诺执行的候选短期欲望。
+
+```json
+{
+  "id": "desire-emma-tv-20260827-01",
+  "type": "use_shared_resource",
+  "target_id": "living-room-tv",
+  "subject_id": null,
+  "intensity": 68,
+  "urgency": 35,
+  "visibility": "observable",
+  "expires_at": "2026-08-27T21:00:00+08:00",
+  "blocked_by": ["resource_occupied"],
+  "reason": "favorite_show",
+  "source": "habit"
+}
+```
+
+`visibility` 可为 `hidden`、`observable` 或 `shareable`。内部欲望分数不直接暴露给玩家。
+
+## 6.2 欲望来源
+
+- 低需求值；
+- 日常习惯；
+- 兴趣和偏好；
+- 长期目标的当前步骤；
+- 对某人的关系和记忆；
+- Household 责任；
+- 环境机会和资源稀缺；
+- 最近被阻碍的欲望；
+- 他人的邀请、请求或行为。
+
+## 6.3 候选评分
+
+```text
+desire_score =
+  need_pressure
+  + habit_strength
+  + goal_relevance
+  + relationship_pull
+  + environment_opportunity
+  + urgency
+  - schedule_conflict
+  - social_risk
+  - resource_cost
+  - personality_inhibition
+  + stable_seed_variation
+```
+
+稳定种子只制造可复现的差异，不替代逻辑条件。
+
+## 6.4 压抑与替换
+
+高分 Desire 仍可能因害羞、自尊、疲劳、边界、过去失败和对方状态而被压抑。压抑结果可以：
+
+- 直接过期；
+- 延后；
+- 替换为更安全的行为；
+- 增加 stress 或 resentment；
+- 形成可观察的犹豫；
+- 转化为向他人求助。
+
+---
+
+# 七、Commitment 与 Life Action
+
+## 7.1 Commitment
+
+Commitment 是 NPC 已决定尝试执行的意图，包含目标、可接受替代方案、坚持度和取消条件。
+
+一个 NPC 同时只能拥有一个主要 Commitment，可以保留一个排队意图。新高优先级 Desire 可以中断当前承诺。
+
+## 7.2 Life Action 状态机
+
+```text
+planned
+→ traveling
+→ performing
+→ completed
+
+planned / traveling / performing
+→ blocked
+→ retrying / substituted / abandoned
+
+任意进行中状态
+→ interrupted
+→ replanned
+```
+
+每次状态变化需要记录原因，避免客户端或 LLM 猜测世界事实。
+
+## 7.3 首轮行为库
+
+至少实现 12 种规则行为：
+
+- prepare_food；
+- eat；
+- sleep；
+- shower；
+- use_television；
+- read；
+- practice_hobby；
+- clean_shared_space；
+- leave_dishes；
+- rest_alone；
+- seek_company；
+- talk_to_resident。
+
+行为模板定义需求、资源、地点、时长、动画、可中断性、完成效果和碰撞 Hook。
+
+## 7.4 环境碰撞
+
+当行为目标不可用或另一个 NPC 同时使用资源时，系统根据双方 Commitment、关系和人格决定：等待、协商、让步、加入、争抢、离开或求助。
+
+碰撞先生成规则事实，再决定是否提升为 Moment 或 Incident。
+
+---
+
+# 八、Household Agent Context
+
+## 8.1 家庭成员状态
+
+每名成员拥有：
+
+- household_id；
+- private_room_id；
+- household_role；
+- chore_preferences；
+- personal_inventory；
+- privacy_need；
+- 对共享规则的主观期待。
+
+## 8.2 共享资源
+
+资源包含容量、占用者、使用队列、状态和清洁度。例如电视容量可以大于 1，但节目偏好可能冲突；浴室容量通常为 1。
+
+## 8.3 家务与责任
+
+家务不是每日打卡任务。系统记录：
+
+- 谁制造了工作；
+- 谁预期应该处理；
+- 谁实际处理；
+- 是否被提醒；
+- 是否形成亏欠或积怨。
+
+重复不平衡可以形成分工、主动照顾、争吵或边界谈判。
+
+---
+
+# 九、关系系统
+
+## 9.1 方向性社交边
+
+A → B 与 B → A 分开保存：
+
+```json
+{
+  "familiarity": 48,
+  "trust": 57,
+  "affinity": 61,
+  "tension": 24,
+  "comfort": 66,
+  "resentment": 18,
+  "attraction": 0,
+  "dependency": 12,
+  "jealousy": 0,
+  "friendship_status": "friend",
+  "romance_status": "none"
+}
+```
+
+不允许将多维关系压缩成单一“relationship +10”作为 NPC–NPC 社交的唯一结算。
+
+## 9.2 关系状态机
+
+友情状态由多维数据和共同历史共同决定。恋爱状态额外需要双方角色边界、年龄规则、吸引、熟悉、时机和明确结果。
+
+一方心动不自动改变另一方。告白可以被拒绝；拒绝不必必然摧毁友情；分手后保留前任关系和共同记忆。
+
+## 9.3 第三人影响
+
+jealousy、被排除感和传闻必须引用明确第三人或事件来源，不能凭空增长。群体事件在后续阶段实现，但数据结构不能假设事件永远只有两名参与者。
+
+---
+
+# 十、记忆与未解决问题
+
+## 10.1 记忆类型
+
+- episodic：具体经历；
+- relationship：对某人的关系解释；
+- household：共同生活和责任；
+- secret：受披露边界保护的信息；
+- language：与玩家学习相关的表达证据；
+- player_fact：玩家自己透露的信息。
+
+## 10.2 主观记忆
+
+共同事件先保存客观事实，再为每名参与者生成受规则约束的主观视角。LLM 可以润色文字，但视角标签、情绪方向、责任归因和访问权限由规则决定。
+
+## 10.3 Unresolved Thread
+
+```json
+{
+  "id": "thread-dishes-emma-alex",
+  "kind": "household_conflict",
+  "topic": "dishwashing",
+  "participant_ids": ["emma", "alex"],
+  "source_event_ids": ["moment-001", "incident-004"],
+  "intensity": 42,
+  "recurrence_count": 2,
+  "status": "unspoken",
+  "perspectives": {
+    "emma": "I keep cleaning up after Alex.",
+    "alex": "Emma never told me it bothered her."
+  }
+}
+```
+
+状态包括 `unspoken`、`raised`、`escalated`、`temporarily_settled`、`resolved`、`dormant`。暂时解决可以复发，真正解决需要符合主题的行为证据。
+
+---
+
+# 十一、Trouble Signal 与可观察性
+
+## 11.1 信号条件
+
+Trouble Signal 只在 NPC 愿意对玩家披露时出现。判定考虑：
+
+- 问题强度和紧迫度；
+- 对玩家的信任；
+- disclosure_style；
+- 自尊和隐私边界；
+- 是否已经向其他居民求助；
+- 事件是否仍有有效干预窗口。
+
+## 11.2 玩家可见层级
+
+1. 动画、位置和环境痕迹；
+2. 简短行为标签；
+3. 可分享意图或烦恼气泡；
+4. 玩家询问后的主观说明；
+5. 关系足够深入后才开放的秘密和历史。
+
+Agent 调试面板可以展示内部数据，但正式玩家界面不能直接显示欲望分数和隐藏吸引力。
+
+---
+
+# 十二、玩家干预
+
+## 12.1 管理动作
+
+管理动作必须针对上下文生成受限集合，例如：询问、安慰、建议、提供资源、调解、鼓励、给空间、撮合或不介入。
+
+不能对所有 Incident 固定显示同一组四个按钮。
+
+## 12.2 接受度
+
+```text
+acceptance_score =
+  action_fit
+  + trust_in_player
+  + current_openness
+  + relationship_context
+  - pride
+  - stress
+  - boundary_violation
+  + stable_seed_variation
+```
+
+结果分为：
+
+- accepted_now；
+- accepted_later；
+- politely_refused；
+- misunderstood；
+- backfired；
+- mixed：多名参与者反应不同。
+
+按钮不能直接携带“最佳答案”视觉暗示。结算后应通过行为、台词和余波解释结果，而不是只显示数值。
+
+## 12.3 幂等
+
+结果种子至少包含玩家、Incident、动作和规则版本。相同动作的重复请求返回相同结果，不重复写入关系和记忆。
+
+---
+
+# 十三、对话与英语适配
+
+## 13.1 对话输入
+
+仅加载与当前交流相关的：人格合同、当前事实、可披露意图、关系阶段、相关记忆、未解决问题、玩家学习前沿和最近对话。
+
+不把隐藏欲望、第三人的秘密和无关全量记忆交给模型。
+
+## 13.2 对话目标
+
+对话目标来自实际生活上下文：解释正在做的事、表达感受、请求帮助、回应玩家、谈论他人或继续 Story Thread。没有上下文时允许闲聊，但不能伪造新世界事件。
+
+## 13.3 学习结算
+
+模型只返回语义信号和学习证据。规则层决定关系变化、英语 XP、掌握度和事件推进。语法错误不直接等于不尊重或关系下降。
+
+---
+
+# 十四、运行与性能原则
+
+- 生活模拟必须采用规则和模板，不能为每个 NPC Tick 调用 LLM；
+- 同一玩家世界使用稳定世界种子；
+- 在线只模拟可见或即将影响可见区域的详细行为；
+- 离线使用批量时间段模拟，不逐秒重放；
+- 客户端只表现服务端事实，不能上报位置来跳过状态机；
+- 所有关系、资源、记忆和 Incident 结算必须事务化；
+- 旧数据通过增量迁移保留，禁止要求清空玩家数据库。
+
+---
+
+# 十五、首轮验收
+
+- 每名居民在十分钟内至少更换两次具体 Life Action；
+- 需求变化能够触发可观察行为，不只是后台数值变化；
+- 共享资源同时被两个 Commitment 指向时能产生至少三种人格化处理方式；
+- 一个被压抑的 Desire 可以过期、替代或形成情绪/关系余波；
+- A 和 B 对同一事件能够保存不同记忆；
+- 玩家干预至少覆盖成功、延迟、拒绝和反效果；
+- Unresolved Thread 能跨日复发并通过对应行为解决；
+- NPC 无玩家在场时仍可自主完成行为和关系推进；
+- 普通生活模拟在 DeepSeek 不可用时完整运行。
+
+以上标准优先于增加更多聊天模板、宏大任务和外观编辑选项。
