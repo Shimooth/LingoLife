@@ -118,6 +118,14 @@ def test_legacy_cached_chat_is_upgraded_to_the_animation_cue_contract(tmp_path):
     legacy = dict(first)
     legacy.pop("animation_cue", None)
     legacy.get("agent", {}).pop("animation_cue", None)
+    legacy["agent"]["runtime_state"] = {
+        "emotion": {"valence": 67, "stress": 42, "energy": 53},
+        "needs": {"food": 41, "rest": 62, "social": 55, "achievement": 58,
+                  "love": 17, "privacy": 12, "security": 8},
+        "active_desire_ids": ["desire-from-old-cache"],
+        "current_commitment_id": "commitment-from-old-cache",
+        "queued_commitment_id": "queued-from-old-cache",
+    }
     legacy.get("active_event", {}).get("stage", {}).pop("performance", None)
     legacy.get("event_update", {}).pop("performance", None)
     with c.app.state.db._connection:
@@ -130,6 +138,15 @@ def test_legacy_cached_chat_is_upgraded_to_the_animation_cue_contract(tmp_path):
     assert replay["animation_cue"] == "happy"
     assert replay["active_event"]["stage"]["performance"]["beats"]
     assert replay["event_update"]["performance"]["beats"]
+    assert replay["agent"]["runtime_state"]["needs"]["food"] == "strained"
+    encoded = json.dumps(replay["agent"])
+    assert all(value not in encoded for value in (
+        "desire-from-old-cache", "commitment-from-old-cache", '"love"', '"privacy"', '"security"',
+    ))
+    streamed = c.post("/api/v1/chat/stream", headers=headers, json={"message": "ignored again"})
+    stream_events = [json.loads(line) for line in streamed.text.splitlines()]
+    assert stream_events[-1]["type"] == "final"
+    assert stream_events[-1]["data"]["agent"] == replay["agent"]
 
 
 def test_positive_relationship_growth_has_a_per_character_daily_cap(tmp_path):
@@ -196,6 +213,8 @@ def test_chat_stream_sends_delta_then_validated_final_result(tmp_path):
     assert events[-1]["type"] == "final"
     assert events[-1]["data"]["npc_reply"].startswith(events[0]["data"])
     assert events[-1]["data"]["stats"]["english_xp"] == 1
+    assert all(isinstance(value, str)
+               for value in events[-1]["data"]["agent"]["runtime_state"]["needs"].values())
 
 
 def test_invite_registration_unique_username_session_and_logout(tmp_path):

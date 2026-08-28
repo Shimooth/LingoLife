@@ -36,14 +36,15 @@ from .animation import (
 from .ai import DeepSeekProvider, DialogueProvider, ResilientProvider
 from .agent import (advance_goal, advance_relationship, advance_runtime, compile_goal,
                     compile_persona, daily_plan, dialogue_objective, initial_relationship,
-                    initial_runtime, time_slot)
+                    initial_runtime, project_dialogue_agent, project_public_agent, time_slot)
 from .config import Settings, load_settings
 from .city import CITY_LOCATIONS, LOCATION_BY_ID, city_payload
 from .db import Database
 from .events import ActiveEvent, EventEngine, NPCEventContext
 from .learning import Evidence, LearningEngine
+from .life_service import LifeWorldService
 from .models import (AdminLoginRequest, AdminUserPatch, ChatRequest, ChatResponse,
-                     InviteCreateRequest, LoginRequest, NpcProfile, PasswordChangeRequest, RegisterRequest,
+                     InviteCreateRequest, LifeInterventionRequest, LoginRequest, NpcProfile, PasswordChangeRequest, RegisterRequest,
                      SocialInterventionRequest)
 from .social import SocialWorldEngine
 
@@ -55,6 +56,7 @@ DEFAULT_NPC_PROFILE = {
     "personality": ["kind", "thoughtful", "quiet"],
     "interests": ["art", "music", "photography"], "occupation": "Designer",
     "longTermGoal": "Open a small independent design studio.",
+    "romanceEnabled": True, "relationshipBoundaries": [],
     "avatar": {"model": "chibi", "hair": "hair-variant", "hairColor": "#563B38", "face": "round",
                "skin": "#EFB99B", "eyes": "dot", "brows": "soft", "nose": "button",
                "mouth": "smile", "outfit": "student", "outfitColor": "#D87362",
@@ -68,6 +70,7 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
     learning_engine = LearningEngine()
     event_engine = EventEngine(db)
     social_engine = SocialWorldEngine(db)
+    life_world = LifeWorldService(db, settings.game_timezone) if settings.life_simulation_v2 else None
     try:
         game_zone = ZoneInfo(settings.game_timezone)
     except ZoneInfoNotFoundError as exc:
@@ -202,6 +205,52 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         return social_engine.ensure_daily(player_id, profiles, plans, game_today(), slot, names, runtime_states,
                                           positions)
 
+    def life_profiles(player_id: str) -> list[dict]:
+        """Return the complete resident set after materializing the legacy default."""
+        profile_for(player_id)
+        return db.list_npc_profiles(player_id)
+
+    def life_dialogue_bundle(player_id: str, npc_id: str, profile: dict, stats,
+                             learning_state: dict) -> tuple[dict, dict]:
+        """Build dialogue context without running the retired daily scheduler."""
+        assert life_world is not None
+        entries = life_profiles(player_id)
+        life_context = life_world.npc_context(player_id, entries, npc_id)
+        runtime = life_world.load(player_id, entries)["residents"][npc_id]["runtime"]
+        relationship = db.get_relationship(player_id, npc_id) or initial_relationship(stats.relationship)
+        if not db.get_relationship(player_id, npc_id):
+            db.save_relationship(player_id, npc_id, relationship)
+        goal = db.get_goal(player_id, npc_id)
+        if not goal or goal.get("title") != (profile.get("longTermGoal") or "Build a meaningful everyday life"):
+            goal = db.save_goal(player_id, npc_id, compile_goal(profile))
+        persona = compile_persona(profile, runtime.get("growth"))
+        if db.get_persona(player_id, npc_id) != persona:
+            db.save_persona(player_id, npc_id, persona)
+        progress = learning_engine.progress(learning_state)
+        mastery = int(progress["overall_mastery"])
+        current_action = life_context["current_action"]
+        slot = time_slot(datetime.now(game_zone).hour)
+        compatible_plan = {
+            "date": game_today().isoformat(),
+            "slots": {name: {"activity_id": current_action["type"],
+                              "activity": current_action["visible_intent"],
+                              "location_id": current_action.get("location_id") or "home"}
+                      for name in ("morning", "afternoon", "evening")},
+        }
+        bundle = {
+            "persona": persona, "runtime_state": runtime, "relationship": relationship,
+            "goal": goal, "daily_plan": compatible_plan, "current_slot": slot,
+            "language_controller": {
+                "estimated_level": progress["level"],
+                "max_sentence_length": 12 if mastery < 25 else 18 if mastery < 50 else 26,
+                "vocabulary": "common" if mastery < 45 else "everyday_plus",
+                "correction_style": "natural_recast",
+                "stretch_targets": [item["id"] for item in progress["recommended"][:2]],
+            },
+            "animation_cue": current_action.get("animation_cue") or "idle",
+        }
+        return bundle, life_context
+
     def provider_reply(message: str, stats, history: list[dict], context: dict, on_chunk=None):
         # Preserve compatibility with small test/custom providers implementing the original contract.
         parameters = inspect.signature(provider.reply).parameters
@@ -291,6 +340,17 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         user = current_user(authorization); player_id = user["player_id"]
         profile = profile_for(player_id, npc_id)
         stats = db.state(player_id, npc_id)
+        if life_world is not None:
+            entries = life_profiles(player_id)
+            context = life_world.npc_context(player_id, entries, npc_id)
+            cue = context["current_action"].get("animation_cue") or "idle"
+            return {"room_id": f"{npc_id}-room",
+                    "npc": {"id": npc_id, "name": profile["name"],
+                            "animation": "sad" if stats.mood < 40 else "happy" if stats.mood >= 60 else "idle",
+                            "animation_cue": cue},
+                    "stats": stats, "messages": db.messages(player_id, 200, npc_id),
+                    "quota": db.quota(user["id"]), "active_event": None,
+                    "life_context": context, "social_interactions": []}
         learning_state = db.get_learning_state(player_id)
         agent = agent_bundle(player_id, npc_id, profile, stats, learning_state)
         active = event_engine.daily_event(event_context(player_id, npc_id, profile, stats, learning_state,
@@ -302,7 +362,8 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         return {"room_id": f"{npc_id}-room", "npc": {"id": npc_id, "name": profile["name"],
                                                        "animation": animation, "animation_cue": cue},
                 "stats": stats, "messages": db.messages(player_id, 200, npc_id),
-                "quota": db.quota(user["id"]), "active_event": active_view, "agent": agent,
+                "quota": db.quota(user["id"]), "active_event": active_view,
+                "agent": project_public_agent(agent),
                 "social_interactions": [event for event in social_events if npc_id in event["participant_ids"]]}
 
     @app.get(settings.api_prefix + "/npc/profile")
@@ -325,6 +386,8 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
     @app.get(settings.api_prefix + "/city")
     def city(authorization: Optional[str] = Header(None)):
         user = current_user(authorization); player_id = user["player_id"]
+        if life_world is not None:
+            return life_world.city(player_id, life_profiles(player_id))
         profile_for(player_id)  # Materialize the default resident for older accounts.
         profiles = db.list_npc_profiles(player_id)
         learning_state = db.get_learning_state(player_id)
@@ -416,6 +479,8 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
     def social_events(game_date: Optional[str] = None, npc_id: Optional[str] = None,
                       authorization: Optional[str] = Header(None)):
         user = current_user(authorization); player_id = user["player_id"]
+        if life_world is not None:
+            return {"social_interactions": []}
         profiles = db.list_npc_profiles(player_id)
         if not profiles:
             profile_for(player_id)
@@ -427,6 +492,9 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
     def intervene_social_event(event_id: str, body: SocialInterventionRequest,
                                authorization: Optional[str] = Header(None)):
         user = current_user(authorization)
+        if life_world is not None:
+            raise HTTPException(410, {"code": "LEGACY_SOCIAL_EVENT_RETIRED",
+                                      "message": "This interaction now belongs to the life-story system."})
         try:
             return social_engine.intervene(user["player_id"], event_id, body.action)
         except KeyError:
@@ -441,12 +509,77 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
     @app.post(settings.api_prefix + "/social-events/{event_id}/observe")
     def observe_social_event(event_id: str, authorization: Optional[str] = Header(None)):
         user = current_user(authorization)
+        if life_world is not None:
+            raise HTTPException(410, {"code": "LEGACY_SOCIAL_EVENT_RETIRED",
+                                      "message": "This interaction now belongs to the life-story system."})
         try:
             return social_engine.observe(user["player_id"], event_id)
         except KeyError:
             raise HTTPException(404, {"code": "SOCIAL_EVENT_NOT_FOUND", "message": "Social event was not found."})
         except RuntimeError:
             raise HTTPException(409, {"code": "SOCIAL_EVENT_NOT_READY", "message": "The residents have not reached the event yet."})
+
+    @app.get(settings.api_prefix + "/life-stories")
+    def life_stories(level: Optional[str] = None, status: Optional[str] = None,
+                     npc_id: Optional[str] = None, household_id: Optional[str] = None,
+                     game_date: Optional[str] = None,
+                     authorization: Optional[str] = Header(None)):
+        user = current_user(authorization)
+        if life_world is None:
+            return {"stories": [], "world_version": None,
+                    "server_time": datetime.now(timezone.utc).isoformat(), "next_transition_at": None}
+        if level and level not in {"moment", "incident", "thread"}:
+            raise HTTPException(422, {"code": "INVALID_STORY_LEVEL", "message": "Unknown story level."})
+        if status and status not in {"open", "observed", "awaiting_management", "resolved_autonomously",
+                                     "resolved_with_management", "closed"}:
+            raise HTTPException(422, {"code": "INVALID_STORY_STATUS", "message": "Unknown story status."})
+        return life_world.stories(user["player_id"], life_profiles(user["player_id"]),
+                                  level=level, status=status, npc_id=npc_id,
+                                  household_id=household_id, game_date=game_date)
+
+    @app.post(settings.api_prefix + "/life-stories/{story_id}/observe")
+    def observe_life_story(story_id: str, authorization: Optional[str] = Header(None)):
+        user = current_user(authorization)
+        if life_world is None:
+            raise HTTPException(404, {"code": "LIFE_STORY_NOT_FOUND", "message": "Life story was not found."})
+        profiles = life_profiles(user["player_id"])
+        try:
+            state = life_world.observe(user["player_id"], profiles, story_id)
+            return life_world.story(user["player_id"], profiles, story_id, state=state)
+        except KeyError:
+            raise HTTPException(404, {"code": "LIFE_STORY_NOT_FOUND", "message": "Life story was not found."})
+
+    @app.post(settings.api_prefix + "/life-stories/{story_id}/intervene")
+    def intervene_life_story(story_id: str, body: LifeInterventionRequest,
+                             authorization: Optional[str] = Header(None)):
+        user = current_user(authorization)
+        if life_world is None:
+            raise HTTPException(404, {"code": "LIFE_STORY_NOT_FOUND", "message": "Life story was not found."})
+        try:
+            return life_world.intervene(user["player_id"], life_profiles(user["player_id"]),
+                                        story_id, body.action, body.idempotency_key)
+        except KeyError:
+            raise HTTPException(404, {"code": "LIFE_STORY_NOT_FOUND", "message": "Life story was not found."})
+        except ValueError as error:
+            raise HTTPException(409, {"code": "LIFE_INTERVENTION_REJECTED", "message": str(error)})
+
+    @app.get(settings.api_prefix + "/households")
+    def households(authorization: Optional[str] = Header(None)):
+        user = current_user(authorization)
+        if life_world is None:
+            return {"households": [], "world_version": None,
+                    "server_time": datetime.now(timezone.utc).isoformat()}
+        return life_world.households(user["player_id"], life_profiles(user["player_id"]))
+
+    @app.get(settings.api_prefix + "/households/{household_id}")
+    def household(household_id: str, authorization: Optional[str] = Header(None)):
+        user = current_user(authorization)
+        if life_world is None:
+            raise HTTPException(404, {"code": "HOUSEHOLD_NOT_FOUND", "message": "Household was not found."})
+        try:
+            return life_world.household(user["player_id"], life_profiles(user["player_id"]), household_id)
+        except KeyError:
+            raise HTTPException(404, {"code": "HOUSEHOLD_NOT_FOUND", "message": "Household was not found."})
 
     @app.post(settings.api_prefix + "/npcs", status_code=201)
     def create_npc(body: NpcProfile, authorization: Optional[str] = Header(None)):
@@ -459,6 +592,8 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
                       f"嗨，我是{body.name}。你想聊些什么？")
         db.save_npc_profile(player_id, npc_id, body.model_dump())
         db.ensure_social_edges(player_id, [entry["id"] for entry in db.list_npc_profiles(player_id)])
+        if life_world is not None:
+            life_world.load(player_id, life_profiles(player_id), force_advance=True)
         return {"id": npc_id, "profile": body.model_dump()}
 
     @app.put(settings.api_prefix + "/npcs/{npc_id}")
@@ -472,16 +607,28 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         existing_goal = db.get_goal(player_id, npc_id)
         if not existing_goal or existing_goal.get("title") != (saved.get("longTermGoal") or "Build a meaningful everyday life"):
             db.save_goal(player_id, npc_id, compile_goal(saved))
+        if life_world is not None:
+            life_world.load(player_id, life_profiles(player_id), force_advance=True)
         return {"id": npc_id, "profile": saved}
 
     @app.get(settings.api_prefix + "/npcs/{npc_id}/agent")
     def npc_agent(npc_id: str, authorization: Optional[str] = Header(None)):
         user = current_user(authorization); player_id = user["player_id"]
         profile = profile_for(player_id, npc_id, create_default=False)
+        if life_world is not None:
+            learning_state = db.get_learning_state(player_id)
+            bundle, context = life_dialogue_bundle(player_id, npc_id, profile,
+                                                   db.state(player_id, npc_id), learning_state)
+            return {**project_public_agent(bundle), **context,
+                    "memories": db.list_npc_memories(player_id, npc_id, 50),
+                    "conversation_summaries": db.list_conversation_summaries(player_id, npc_id),
+                    "social_connections": context["npc_relationships"],
+                    "social_interactions": []}
         bundle = agent_bundle(player_id, npc_id, profile, db.state(player_id, npc_id),
                               db.get_learning_state(player_id))
         edges = db.ensure_social_edges(player_id, [entry["id"] for entry in db.list_npc_profiles(player_id)])
-        return {**bundle, "memories": db.list_npc_memories(player_id, npc_id, 50),
+        return {**project_public_agent(bundle),
+                "memories": db.list_npc_memories(player_id, npc_id, 50),
                 "conversation_summaries": db.list_conversation_summaries(player_id, npc_id),
                 "social_connections": [edge for edge in edges if edge["npc_a"] == npc_id],
                 "social_interactions": db.list_social_events(player_id, npc_id=npc_id)}
@@ -513,6 +660,8 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
             cached["animation_cue"] = animation_cue(cached.get("animation_cue") or cached.get("animation"))
             cached_agent = cached.get("agent")
             if isinstance(cached_agent, dict):
+                cached_agent = project_public_agent(cached_agent)
+                cached["agent"] = cached_agent
                 cached_agent.setdefault("animation_cue", cached["animation_cue"])
             cached_event = cached.get("active_event")
             if isinstance(cached_event, dict) and isinstance(cached_event.get("stage"), dict):
@@ -553,9 +702,14 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         profile = profile_for(player_id, npc_id)
         old = db.state(player_id, npc_id)
         learning_state = db.get_learning_state(player_id)
-        agent = agent_bundle(player_id, npc_id, profile, old, learning_state)
-        active = event_engine.daily_event(event_context(player_id, npc_id, profile, old, learning_state,
-                                                        agent["runtime_state"]), game_today())
+        if life_world is not None:
+            agent, life_context = life_dialogue_bundle(player_id, npc_id, profile, old, learning_state)
+            active = None
+        else:
+            agent = agent_bundle(player_id, npc_id, profile, old, learning_state)
+            active = event_engine.daily_event(event_context(player_id, npc_id, profile, old, learning_state,
+                                                            agent["runtime_state"]), game_today())
+            life_context = None
         memories = db.relevant_npc_memories(player_id, npc_id, message, limit=8,
                                             relationship_stage=agent["relationship"]["stage"])
         summaries = db.list_conversation_summaries(player_id, npc_id, limit=3)
@@ -566,9 +720,11 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         prompt_event = ({**event_view, "stage": {
             key: value for key, value in event_view["stage"].items() if key != "performance"
         }} if event_view else None)
+        dialogue_agent = project_dialogue_agent(agent)
         context = {"npc_profile": profile, "current_event": prompt_event,
+                   "current_life": life_context,
                    "learning_targets": learning_engine.targets(learning_state, limit=3),
-                   "memories": memories, "conversation_summaries": summaries, **agent,
+                   "memories": memories, "conversation_summaries": summaries, **dialogue_agent,
                    "dialogue_objective": dialogue_objective(event_view, agent["runtime_state"],
                                                              agent["goal"], agent["relationship"])}
         result = provider_reply(message, old, db.messages(player_id, settings.recent_message_limit, npc_id), context, on_chunk)
@@ -653,9 +809,11 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
             if set(result.semantic_signals) & {"encouragement", "reassurance", "practical_help"}:
                 growth["assertiveness"] = min(15, float(growth.get("assertiveness", 0)) + .5)
                 growth["emotional_stability"] = min(15, float(growth.get("emotional_stability", 0)) + .5)
-        public_agent = {"runtime_state": runtime, "relationship": relationship, "goal": goal,
-                        "daily_plan": agent["daily_plan"], "current_slot": agent["current_slot"],
-                        "animation_cue": final_animation_cue}
+        public_agent = project_public_agent({
+            "runtime_state": runtime, "relationship": relationship, "goal": goal,
+            "daily_plan": agent["daily_plan"], "current_slot": agent["current_slot"],
+            "animation_cue": final_animation_cue,
+        })
         response = {**result.model_dump(), "npc_id": npc_id, "game_date": game_today().isoformat(),
                     "relationship_change": rel, "mood_change": mood,
                     "english_xp_change": xp, "stats": stats,
@@ -666,7 +824,14 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         committed, created = db.commit_chat(player_id, idempotency_key, message, response, npc_id)
         if created:
             db.save_relationship(player_id, npc_id, relationship)
-            db.save_runtime_state(player_id, npc_id, runtime)
+            if life_world is None:
+                db.save_runtime_state(player_id, npc_id, runtime)
+            else:
+                life_world.player_interaction(
+                    player_id, life_profiles(player_id), npc_id, idempotency_key,
+                    mood_change=mood, relationship_change=rel,
+                    semantic_signals=result.semantic_signals,
+                )
             db.save_goal(player_id, npc_id, goal)
             db.save_persona(player_id, npc_id, compile_persona(profile, runtime.get("growth")))
             summary_observations = []

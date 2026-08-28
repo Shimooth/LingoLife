@@ -13,9 +13,82 @@ RELATIONSHIP_STAGES = (
     (101, "close_friend"),
 )
 
+PUBLIC_NEED_KEYS = ("food", "rest", "social", "achievement", "fun")
+_PUBLIC_AGENT_FIELDS = (
+    "persona", "relationship", "goal", "daily_plan", "current_slot",
+    "language_controller", "animation_cue",
+)
+
 
 def _clamp(value: float, low: float = 0, high: float = 100) -> int:
     return round(max(low, min(high, value)))
+
+
+def _semantic_band(value: Any, thresholds: tuple[float, float, float],
+                   labels: tuple[str, str, str, str]) -> str:
+    """Coarsen an internal numeric state without preserving its exact value."""
+    if isinstance(value, str) and value in labels:
+        return value
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return labels[2]
+    if number < thresholds[0]:
+        return labels[0]
+    if number < thresholds[1]:
+        return labels[1]
+    if number < thresholds[2]:
+        return labels[2]
+    return labels[3]
+
+
+def observable_runtime_state(runtime: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Project authoritative runtime into coarse, player-observable bands.
+
+    This is intentionally an allow-list. New needs, decision identifiers and
+    commitments remain private unless they are explicitly reviewed here.
+    """
+    source = runtime if isinstance(runtime, Mapping) else {}
+    raw_emotion = source.get("emotion") if isinstance(source.get("emotion"), Mapping) else {}
+    raw_needs = source.get("needs") if isinstance(source.get("needs"), Mapping) else {}
+    emotion_specs = {
+        "valence": ((35, 65, 82), ("subdued", "balanced", "bright", "radiant")),
+        "stress": ((30, 55, 78), ("calm", "noticeable", "tense", "overwhelmed")),
+        "energy": ((30, 55, 78), ("tired", "steady", "energetic", "lively")),
+    }
+    emotion = {
+        key: _semantic_band(raw_emotion[key], *spec)
+        for key, spec in emotion_specs.items() if key in raw_emotion
+    }
+    needs = {
+        key: _semantic_band(raw_needs[key], (25, 45, 70),
+                            ("urgent", "strained", "steady", "comfortable"))
+        for key in PUBLIC_NEED_KEYS if key in raw_needs
+    }
+    return {"emotion": emotion, "needs": needs}
+
+
+def project_public_agent(bundle: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the ordinary-player Agent DTO without authoritative internals."""
+    result = {
+        key: json.loads(json.dumps(bundle[key]))
+        for key in _PUBLIC_AGENT_FIELDS if key in bundle
+    }
+    result["runtime_state"] = observable_runtime_state(
+        bundle.get("runtime_state") if isinstance(bundle.get("runtime_state"), Mapping) else None,
+    )
+    return result
+
+
+def project_dialogue_agent(bundle: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the disclosure-safe subset that an external dialogue model may see."""
+    result = project_public_agent(bundle)
+    relationship = bundle.get("relationship")
+    if isinstance(relationship, Mapping):
+        result["relationship"] = {"stage": str(relationship.get("stage") or "acquaintance")}
+    else:
+        result.pop("relationship", None)
+    return result
 
 
 def relationship_stage(value: int) -> str:
@@ -205,7 +278,9 @@ def dialogue_objective(active_event: Mapping[str, Any] | None, runtime: Mapping[
                        goal: Mapping[str, Any], relationship: Mapping[str, Any]) -> str:
     if active_event:
         return str(active_event.get("stage", {}).get("objective") or "Continue the current situation naturally")
-    needs = runtime.get("needs", {})
+    raw_needs = runtime.get("needs", {})
+    needs = ({key: value for key, value in raw_needs.items() if key in PUBLIC_NEED_KEYS}
+             if isinstance(raw_needs, Mapping) else {})
     if needs and min(needs.values()) < 35:
         urgent = min(needs, key=needs.get)
         return f"Seek a natural form of {urgent} support without directly asking the player to fix everything"

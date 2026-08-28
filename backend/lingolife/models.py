@@ -121,6 +121,13 @@ class NpcProfile(BaseModel):
     interests: list[str] = Field(max_length=5)
     occupation: str = Field(max_length=48)
     longTermGoal: str = Field(default="", max_length=180)
+    romanceEnabled: bool = True
+    relationshipBoundaries: list[str] = Field(default_factory=list, max_length=8)
+    # Player-authored objective social facts.  Psychological relationship
+    # dimensions remain rule-owned; these ids only describe family and a
+    # requested shared household with residents owned by the same player.
+    familyIds: list[str] = Field(default_factory=list, max_length=4)
+    householdWithIds: list[str] = Field(default_factory=list, max_length=1)
     avatar: AvatarConfig
 
 
@@ -156,3 +163,12 @@ class InviteCreateRequest(BaseModel):
 
 class SocialInterventionRequest(BaseModel):
     action: Literal["mediate", "encourage", "give_space", "let_them_handle_it"]
+
+
+class LifeInterventionRequest(BaseModel):
+    action: Literal[
+        "ask", "comfort", "advise", "mediate", "encourage", "give_space", "offer_help", "invite_talk",
+        "set_boundary", "support_confession", "let_them_handle_it",
+        "start_dating", "become_partners", "separate",
+    ]
+    idempotency_key: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]+$")

@@ -1,0 +1,191 @@
+{
+  "version": 1,
+  "rules_version": "story-rules-v1",
+  "scenarios": [
+    {
+      "id": "kitchen_capacity_collision",
+      "kind": "person_resource",
+      "triggers": ["resource_capacity", "kitchen_busy"],
+      "resource_kinds": ["kitchen"],
+      "topic": "shared_kitchen",
+      "base_severity": 34,
+      "responses": [
+        {"id": "wait", "style": "patient", "weight": 8, "relationship_deltas": {"comfort": 1, "tension": -1}},
+        {"id": "negotiate", "style": "cooperative", "weight": 10, "relationship_deltas": {"trust": 1, "comfort": 2}},
+        {"id": "cook_together", "style": "warm", "weight": 7, "relationship_deltas": {"familiarity": 2, "affinity": 2, "comfort": 2}},
+        {"id": "argue", "style": "confrontational", "weight": 3, "relationship_deltas": {"trust": -2, "tension": 6, "resentment": 3}}
+      ],
+      "thread_hook": "shared_resource_boundary"
+    },
+    {
+      "id": "bathroom_wait_collision",
+      "kind": "person_resource",
+      "triggers": ["resource_capacity", "bathroom_wait"],
+      "resource_kinds": ["bathroom"],
+      "topic": "bathroom_access",
+      "base_severity": 42,
+      "responses": [
+        {"id": "wait", "style": "patient", "weight": 8, "relationship_deltas": {"comfort": -1, "tension": 1}},
+        {"id": "knock_and_ask", "style": "assertive", "weight": 9, "relationship_deltas": {"familiarity": 1}},
+        {"id": "offer_quick_turn", "style": "cooperative", "weight": 7, "relationship_deltas": {"trust": 2, "comfort": 2, "tension": -1}},
+        {"id": "snap_at_other", "style": "confrontational", "weight": 2, "relationship_deltas": {"trust": -2, "tension": 7, "resentment": 4}}
+      ],
+      "thread_hook": "bathroom_boundary"
+    },
+    {
+      "id": "television_preference_collision",
+      "kind": "person_resource",
+      "triggers": ["program_preference", "resource_capacity"],
+      "resource_kinds": ["television"],
+      "topic": "shared_entertainment",
+      "base_severity": 24,
+      "responses": [
+        {"id": "choose_together", "style": "cooperative", "weight": 10, "relationship_deltas": {"affinity": 2, "comfort": 2}},
+        {"id": "take_turns", "style": "fair", "weight": 9, "relationship_deltas": {"trust": 1, "tension": -1}},
+        {"id": "yield_remote", "style": "warm", "weight": 6, "relationship_deltas": {"affinity": 1, "comfort": 1}},
+        {"id": "grab_remote", "style": "confrontational", "weight": 2, "relationship_deltas": {"trust": -2, "tension": 5, "resentment": 3}}
+      ],
+      "thread_hook": "shared_resource_boundary"
+    },
+    {
+      "id": "friendly_company",
+      "kind": "person_person",
+      "triggers": ["quiet_company", "shared_interest", "social_acceptance"],
+      "topic": "companionship",
+      "base_severity": 18,
+      "responses": [
+        {"id": "welcome_company", "style": "warm", "weight": 10, "relationship_deltas": {"familiarity": 2, "affinity": 2, "comfort": 3}},
+        {"id": "share_activity", "style": "cooperative", "weight": 9, "relationship_deltas": {"trust": 1, "affinity": 2, "comfort": 2}},
+        {"id": "enjoy_silence", "style": "quiet", "weight": 8, "relationship_deltas": {"comfort": 3, "tension": -1}},
+        {"id": "decline_kindly", "style": "boundaried", "weight": 4, "relationship_deltas": {"trust": 1}}
+      ],
+      "thread_hook": "companionship_pattern"
+    },
+    {
+      "id": "resident_unavailable",
+      "kind": "person_person",
+      "triggers": ["person_availability", "target_busy"],
+      "topic": "missed_connection",
+      "base_severity": 28,
+      "responses": [
+        {"id": "try_later", "style": "patient", "weight": 9, "relationship_deltas": {}},
+        {"id": "leave_a_note", "style": "warm", "weight": 7, "relationship_deltas": {"affinity": 1}},
+        {"id": "feel_rejected", "style": "sensitive", "weight": 4, "relationship_deltas": {"comfort": -2, "resentment": 2}},
+        {"id": "interrupt_anyway", "style": "confrontational", "weight": 2, "relationship_deltas": {"trust": -1, "tension": 3}}
+      ],
+      "thread_hook": "missed_connection"
+    },
+    {
+      "id": "dirty_dishes_responsibility",
+      "kind": "person_responsibility",
+      "triggers": ["chore_created", "dishwashing_thread", "responsibility_overdue"],
+      "topic": "dishwashing",
+      "base_severity": 46,
+      "responses": [
+        {"id": "clean_without_comment", "style": "caretaking", "weight": 6, "relationship_deltas": {"resentment": 2, "comfort": -1}},
+        {"id": "remind_calmly", "style": "assertive", "weight": 9, "relationship_deltas": {"trust": 1, "tension": 1}},
+        {"id": "offer_to_share", "style": "cooperative", "weight": 8, "relationship_deltas": {"trust": 2, "comfort": 2, "resentment": -2}},
+        {"id": "send_angry_message", "style": "confrontational", "weight": 3, "relationship_deltas": {"trust": -3, "tension": 8, "resentment": 5}}
+      ],
+      "thread_hook": "dishwashing"
+    },
+    {
+      "id": "unequal_care_responsibility",
+      "kind": "person_responsibility",
+      "triggers": ["care_imbalance", "repeated_uncredited_work"],
+      "topic": "unequal_care",
+      "base_severity": 58,
+      "responses": [
+        {"id": "ask_for_recognition", "style": "assertive", "weight": 8, "relationship_deltas": {"trust": 1, "tension": 2}},
+        {"id": "renegotiate_roles", "style": "cooperative", "weight": 10, "relationship_deltas": {"trust": 3, "comfort": 2, "resentment": -4}},
+        {"id": "keep_overfunctioning", "style": "caretaking", "weight": 4, "relationship_deltas": {"dependency": 2, "resentment": 4}},
+        {"id": "stop_helping", "style": "avoidant", "weight": 3, "relationship_deltas": {"comfort": -3, "tension": 4, "resentment": 3}}
+      ],
+      "thread_hook": "unequal_care"
+    },
+    {
+      "id": "privacy_interruption",
+      "kind": "person_boundary",
+      "triggers": ["privacy_boundary", "private_space_entered"],
+      "topic": "privacy",
+      "base_severity": 49,
+      "responses": [
+        {"id": "apologize_and_leave", "style": "cooperative", "weight": 10, "relationship_deltas": {"trust": 1, "tension": -2, "resentment": -1}},
+        {"id": "explain_urgency", "style": "assertive", "weight": 6, "relationship_deltas": {"tension": 1}},
+        {"id": "set_clear_boundary", "style": "boundaried", "weight": 9, "relationship_deltas": {"trust": 1, "comfort": -1}},
+        {"id": "dismiss_concern", "style": "confrontational", "weight": 2, "relationship_deltas": {"trust": -4, "tension": 6, "resentment": 6}}
+      ],
+      "thread_hook": "privacy_boundary"
+    },
+    {
+      "id": "borrowed_item_boundary",
+      "kind": "person_boundary",
+      "triggers": ["borrowed_without_permission", "relationship_boundary"],
+      "topic": "borrowed_property",
+      "base_severity": 52,
+      "responses": [
+        {"id": "return_and_apologize", "style": "cooperative", "weight": 9, "relationship_deltas": {"trust": 1, "tension": -2, "resentment": -2}},
+        {"id": "ask_retroactively", "style": "warm", "weight": 5, "relationship_deltas": {"trust": -1, "tension": 1}},
+        {"id": "state_borrowing_rule", "style": "boundaried", "weight": 8, "relationship_deltas": {"comfort": -1, "tension": 1}},
+        {"id": "deny_responsibility", "style": "confrontational", "weight": 2, "relationship_deltas": {"trust": -5, "tension": 6, "resentment": 6}}
+      ],
+      "thread_hook": "property_boundary"
+    },
+    {
+      "id": "facility_unavailable",
+      "kind": "person_environment",
+      "triggers": ["location_closed", "resource_unavailable"],
+      "topic": "blocked_plan",
+      "base_severity": 26,
+      "responses": [
+        {"id": "choose_alternative", "style": "flexible", "weight": 10, "relationship_deltas": {}},
+        {"id": "wait_for_opening", "style": "patient", "weight": 6, "relationship_deltas": {}},
+        {"id": "ask_for_help", "style": "warm", "weight": 5, "relationship_deltas": {"trust": 1}},
+        {"id": "abandon_plan", "style": "avoidant", "weight": 4, "relationship_deltas": {}}
+      ],
+      "thread_hook": "blocked_goal"
+    },
+    {
+      "id": "food_stock_shortage",
+      "kind": "person_environment",
+      "triggers": ["food_stock", "inventory_empty"],
+      "topic": "food_shortage",
+      "base_severity": 36,
+      "responses": [
+        {"id": "shop_for_ingredients", "style": "practical", "weight": 9, "relationship_deltas": {}},
+        {"id": "share_remaining_food", "style": "warm", "weight": 7, "relationship_deltas": {"trust": 2, "affinity": 2}},
+        {"id": "order_simple_meal", "style": "flexible", "weight": 8, "relationship_deltas": {}},
+        {"id": "blame_household", "style": "confrontational", "weight": 2, "relationship_deltas": {"tension": 4, "resentment": 3}}
+      ],
+      "thread_hook": "shared_inventory"
+    },
+    {
+      "id": "noise_disruption",
+      "kind": "person_environment",
+      "triggers": ["noise_boundary", "environment_noise"],
+      "topic": "noise",
+      "base_severity": 43,
+      "responses": [
+        {"id": "move_to_quiet_place", "style": "avoidant", "weight": 7, "relationship_deltas": {"comfort": -1}},
+        {"id": "ask_to_lower_volume", "style": "assertive", "weight": 9, "relationship_deltas": {"trust": 1, "tension": 1}},
+        {"id": "use_headphones", "style": "practical", "weight": 8, "relationship_deltas": {}},
+        {"id": "start_argument", "style": "confrontational", "weight": 2, "relationship_deltas": {"trust": -2, "tension": 7, "resentment": 4}}
+      ],
+      "thread_hook": "noise_boundary"
+    },
+    {
+      "id": "friendly_hobby_competition",
+      "kind": "person_person",
+      "triggers": ["shared_hobby", "competition"],
+      "topic": "friendly_competition",
+      "base_severity": 30,
+      "responses": [
+        {"id": "cheer_each_other_on", "style": "warm", "weight": 8, "relationship_deltas": {"affinity": 2, "respect": 2, "comfort": 1}},
+        {"id": "compete_fairly", "style": "fair", "weight": 10, "relationship_deltas": {"respect": 3, "familiarity": 1, "tension": 1}},
+        {"id": "focus_on_improving", "style": "practical", "weight": 7, "relationship_deltas": {"respect": 1}},
+        {"id": "turn_it_personal", "style": "confrontational", "weight": 3, "relationship_deltas": {"respect": -3, "trust": -2, "tension": 5, "resentment": 2}}
+      ],
+      "thread_hook": "shared_hobby_rivalry"
+    }
+  ]
+}

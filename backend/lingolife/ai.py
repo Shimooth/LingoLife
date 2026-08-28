@@ -8,7 +8,7 @@ from typing import Any, Callable, Protocol
 
 import httpx
 
-from .agent import compile_persona
+from .agent import compile_persona, observable_runtime_state
 from .config import Settings
 from .models import (AIResult, EnglishFeedback, LearningEvidence, MemoryCandidate,
                      Stats, TurnAnalysis)
@@ -68,12 +68,18 @@ def _persona_prompt(context: dict[str, Any]) -> str:
         "friend": "Show trust, continuity, and moderate vulnerability.",
         "close_friend": "Speak with earned familiarity and allow meaningful vulnerability.",
     }.get(stage, "Let the established relationship control intimacy.")
+    raw_relationship = context.get("relationship")
+    public_relationship = ({"stage": raw_relationship.get("stage", "acquaintance")}
+                           if isinstance(raw_relationship, dict) else {"stage": "acquaintance"})
     reference = {
         "persona": persona,
-        "current_state": context.get("runtime_state"),
-        "relationship": context.get("relationship"),
+        # Defence in depth: callers cannot accidentally place authoritative
+        # desires, commitments or exact need values in a third-party prompt.
+        "current_state": observable_runtime_state(context.get("runtime_state")),
+        "relationship": public_relationship,
         "goal": context.get("goal"),
         "daily_plan": context.get("daily_plan"),
+        "current_life": context.get("current_life"),
         "current_event": context.get("current_event"),
         "dialogue_objective": context.get("dialogue_objective"),
         "relevant_memories": [item.get("content", item) if isinstance(item, dict) else item

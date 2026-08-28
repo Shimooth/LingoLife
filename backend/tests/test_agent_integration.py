@@ -58,6 +58,12 @@ def test_profile_event_and_learning_are_one_persisted_loop(tmp_path):
     assert data["learning_summary"]["targets"]
     assert provider.context["npc_profile"]["name"] == "Maya"
     assert provider.context["current_event"]["id"] == room["active_event"]["id"]
+    assert set(provider.context["relationship"]) == {"stage"}
+    assert set(provider.context["runtime_state"]["needs"]) <= {
+        "food", "rest", "social", "achievement", "fun",
+    }
+    assert all(isinstance(value, str)
+               for value in provider.context["runtime_state"]["needs"].values())
     learning = client.get("/api/v1/learning/profile", headers=auth).json()
     empathy = next(item for item in learning["targets"] if item["id"] == "intent.empathy")
     assert empathy["successes"] == 1
@@ -114,13 +120,22 @@ def test_agent_endpoint_exposes_persistent_life_without_other_players_data(tmp_p
                                                         "password": "pass"}).json()["session_token"]
     auth = {"Authorization": "Bearer " + token}
     room = client.get("/api/v1/room", headers=auth).json()
+    endpoint_agent = client.get("/api/v1/npcs/emma/agent", headers=auth).json()
     assert room["agent"]["persona"]["voice"]
     assert room["agent"]["runtime_state"]["needs"]
+    assert set(room["agent"]["runtime_state"]["needs"]) <= {
+        "food", "rest", "social", "achievement", "fun",
+    }
+    assert all(isinstance(value, str)
+               for value in room["agent"]["runtime_state"]["needs"].values())
+    assert endpoint_agent["runtime_state"] == room["agent"]["runtime_state"]
+    assert set(endpoint_agent["runtime_state"]) == {"emotion", "needs"}
     assert room["agent"]["relationship"]["stage"] == "acquaintance"
     assert len(room["agent"]["goal"]["milestones"]) == 4
     response = client.post("/api/v1/chat", headers={**auth, "Idempotency-Key": "memory-turn-001"},
                            json={"message": "I really love jazz music."})
     assert response.status_code == 200 and response.json()["agent"]["goal"]
+    assert "love" not in response.json()["agent"]["runtime_state"]["needs"]
     memories = client.get("/api/v1/npcs/emma/memories", headers=auth).json()["memories"]
     remembered = next(item for item in memories if "jazz music" in item["content"])
     assert client.delete(f"/api/v1/npcs/emma/memories/{remembered['id']}", headers=auth).status_code == 204

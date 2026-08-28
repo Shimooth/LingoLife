@@ -16,6 +16,10 @@ from .models import Stats
 from .social import social_animation_cues, social_status
 
 
+class LifeWorldRevisionConflict(RuntimeError):
+    """The authoritative life world changed after a caller read it."""
+
+
 class Database:
     def __init__(self, url: str, invite_secret: str | None = None):
         if not url.startswith("sqlite:///"):
@@ -132,7 +136,99 @@ class Database:
             CREATE TABLE IF NOT EXISTS conversation_summaries (
               player_id TEXT NOT NULL,npc_id TEXT NOT NULL,game_date TEXT NOT NULL,summary TEXT NOT NULL,
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(player_id,npc_id,game_date));
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+              version INTEGER PRIMARY KEY,description TEXT NOT NULL,
+              applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+            CREATE TABLE IF NOT EXISTS life_world_states (
+              player_id TEXT PRIMARY KEY,revision INTEGER NOT NULL DEFAULT 0,
+              rules_version TEXT NOT NULL,state_json TEXT NOT NULL,
+              last_advanced_at TEXT NOT NULL,next_transition_at TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+            CREATE TABLE IF NOT EXISTS residences (
+              id TEXT PRIMARY KEY,player_id TEXT NOT NULL,location_id TEXT NOT NULL,
+              name TEXT NOT NULL,state_json TEXT NOT NULL DEFAULT '{}',
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(player_id,location_id));
+            CREATE TABLE IF NOT EXISTS households (
+              id TEXT PRIMARY KEY,player_id TEXT NOT NULL,residence_id TEXT,
+              name TEXT NOT NULL,state_json TEXT NOT NULL DEFAULT '{}',
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+            CREATE INDEX IF NOT EXISTS idx_households_owner ON households(player_id,id);
+            CREATE TABLE IF NOT EXISTS household_members (
+              household_id TEXT NOT NULL,player_id TEXT NOT NULL,npc_id TEXT NOT NULL,
+              private_room_id TEXT,role_json TEXT NOT NULL DEFAULT '{}',
+              joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(household_id,npc_id),UNIQUE(player_id,npc_id));
+            CREATE INDEX IF NOT EXISTS idx_household_members_owner ON household_members(player_id,npc_id);
+            CREATE TABLE IF NOT EXISTS household_resources (
+              id TEXT PRIMARY KEY,player_id TEXT NOT NULL,household_id TEXT NOT NULL,
+              kind TEXT NOT NULL,room_id TEXT NOT NULL,capacity INTEGER NOT NULL DEFAULT 1,
+              state_json TEXT NOT NULL DEFAULT '{}',updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(player_id,household_id,kind,room_id));
+            CREATE INDEX IF NOT EXISTS idx_household_resources_owner
+              ON household_resources(player_id,household_id,kind);
+            CREATE TABLE IF NOT EXISTS npc_desires (
+              id TEXT PRIMARY KEY,player_id TEXT NOT NULL,npc_id TEXT NOT NULL,
+              desire_json TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,
+              expires_at TEXT,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+            CREATE INDEX IF NOT EXISTS idx_npc_desires_current ON npc_desires(player_id,npc_id,status);
+            CREATE TABLE IF NOT EXISTS npc_life_actions (
+              id TEXT PRIMARY KEY,player_id TEXT NOT NULL,npc_id TEXT NOT NULL,
+              action_type TEXT NOT NULL,action_json TEXT NOT NULL,status TEXT NOT NULL,
+              started_at TEXT,ends_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+            CREATE INDEX IF NOT EXISTS idx_life_actions_current
+              ON npc_life_actions(player_id,npc_id,status,ends_at);
+            CREATE TABLE IF NOT EXISTS life_stories (
+              id TEXT PRIMARY KEY,player_id TEXT NOT NULL,level TEXT NOT NULL,
+              story_key TEXT NOT NULL,story_json TEXT NOT NULL,status TEXT NOT NULL,
+              intervention_expires_at TEXT,resolution_action TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(player_id,story_key));
+            CREATE INDEX IF NOT EXISTS idx_life_stories_open
+              ON life_stories(player_id,status,updated_at);
+            CREATE TABLE IF NOT EXISTS life_story_observations (
+              player_id TEXT NOT NULL,story_id TEXT NOT NULL,
+              observed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(player_id,story_id));
+            CREATE TABLE IF NOT EXISTS life_interventions (
+              player_id TEXT NOT NULL,story_id TEXT NOT NULL,idempotency_key TEXT NOT NULL,
+              action TEXT NOT NULL,response_json TEXT NOT NULL,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(player_id,story_id,idempotency_key));
+            CREATE TABLE IF NOT EXISTS unresolved_threads (
+              id TEXT PRIMARY KEY,player_id TEXT NOT NULL,kind TEXT NOT NULL,topic TEXT NOT NULL,
+              participant_ids_json TEXT NOT NULL,thread_json TEXT NOT NULL,status TEXT NOT NULL,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+            CREATE INDEX IF NOT EXISTS idx_unresolved_threads_open
+              ON unresolved_threads(player_id,status,topic);
+            CREATE TABLE IF NOT EXISTS npc_relationship_bonds (
+              id TEXT PRIMARY KEY,player_id TEXT NOT NULL,pair_key TEXT NOT NULL,
+              channel TEXT NOT NULL,kind TEXT NOT NULL,state TEXT NOT NULL,
+              roles_json TEXT NOT NULL DEFAULT '{}',scope_id TEXT,context_json TEXT NOT NULL DEFAULT '{}',
+              started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,ended_at TEXT,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(player_id,pair_key,channel,kind));
+            CREATE INDEX IF NOT EXISTS idx_relationship_bonds_pair
+              ON npc_relationship_bonds(player_id,pair_key,channel,state);
+            CREATE TABLE IF NOT EXISTS relationship_evidence (
+              id TEXT PRIMARY KEY,player_id TEXT NOT NULL,fact_id TEXT NOT NULL,
+              source_npc_id TEXT NOT NULL,target_npc_id TEXT NOT NULL,kind TEXT NOT NULL,
+              magnitude REAL NOT NULL,appraisal_json TEXT NOT NULL,deltas_json TEXT NOT NULL,
+              context_json TEXT NOT NULL DEFAULT '{}',rules_version TEXT NOT NULL,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(player_id,fact_id,source_npc_id,target_npc_id,kind));
+            CREATE INDEX IF NOT EXISTS idx_relationship_evidence_edge
+              ON relationship_evidence(player_id,source_npc_id,target_npc_id,created_at);
             """)
+            self._connection.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version,description) VALUES (2,'life simulation v2 additive schema')"
+            )
             columns = {row[1] for row in self._connection.execute("PRAGMA table_info(messages)")}
             if "npc_id" not in columns:
                 self._connection.execute("ALTER TABLE messages ADD COLUMN npc_id TEXT NOT NULL DEFAULT 'emma'")
@@ -167,6 +263,9 @@ class Database:
                 ("expires_at", "TEXT"),
                 ("last_accessed_at", "TEXT"),
                 ("access_stage", "TEXT NOT NULL DEFAULT 'stranger'"),
+                ("appraisal_json", "TEXT NOT NULL DEFAULT '{}'"),
+                ("fact_id", "TEXT"),
+                ("corrects_memory_id", "INTEGER"),
             ):
                 if column not in memory_columns:
                     self._connection.execute(f"ALTER TABLE npc_memories ADD COLUMN {column} {definition}")
@@ -175,6 +274,15 @@ class Database:
                 ("familiarity", "INTEGER NOT NULL DEFAULT 15"),
                 ("trust", "INTEGER NOT NULL DEFAULT 50"),
                 ("tension", "INTEGER NOT NULL DEFAULT 5"),
+                ("respect", "INTEGER NOT NULL DEFAULT 50"),
+                ("comfort", "INTEGER NOT NULL DEFAULT 50"),
+                ("resentment", "INTEGER NOT NULL DEFAULT 0"),
+                ("attraction", "INTEGER NOT NULL DEFAULT 0"),
+                ("dependency", "INTEGER NOT NULL DEFAULT 0"),
+                ("fear", "INTEGER NOT NULL DEFAULT 0"),
+                ("friendship_status", "TEXT NOT NULL DEFAULT 'stranger'"),
+                ("conflict_status", "TEXT NOT NULL DEFAULT 'none'"),
+                ("relationship_version", "INTEGER NOT NULL DEFAULT 2"),
             ):
                 if column not in edge_columns:
                     self._connection.execute(f"ALTER TABLE npc_social_edges ADD COLUMN {column} {definition}")
@@ -184,6 +292,15 @@ class Database:
                    WHEN trust>=72 AND affinity>=72 AND familiarity>=70 THEN 'close_friend'
                    WHEN trust>=58 AND affinity>=58 AND familiarity>=45 THEN 'friend'
                    WHEN familiarity>=25 THEN 'acquaintance' ELSE 'stranger' END"""
+            )
+            self._connection.execute(
+                """UPDATE npc_social_edges SET
+                   friendship_status=CASE
+                     WHEN trust>=72 AND affinity>=72 AND familiarity>=70 THEN 'close_friend'
+                     WHEN trust>=58 AND affinity>=58 AND familiarity>=45 THEN 'mutual_friend'
+                     WHEN familiarity>=25 THEN 'acquaintance' ELSE 'stranger' END,
+                   conflict_status=CASE WHEN tension>=75 THEN 'open_conflict'
+                     WHEN tension>=50 THEN 'friction' ELSE 'none' END"""
             )
             try:
                 self._connection.execute(
@@ -654,6 +771,520 @@ class Database:
             )
         return value
 
+    # Life simulation v2 --------------------------------------------------
+
+    def _life_transaction(self, operation):
+        """Run a world/projection write under one cross-connection transaction.
+
+        ``sqlite3.Connection`` context managers start deferred transactions, so
+        a read-then-write optimistic check can race across worker processes. An
+        explicit ``BEGIN IMMEDIATE`` takes the write reservation before reading
+        the revision and also prevents projection helpers from committing a
+        partially written snapshot.
+        """
+        with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+            try:
+                result = operation()
+                self._connection.commit()
+            except BaseException:
+                self._connection.rollback()
+                raise
+            return result
+
+    def _write_life_world_state(self, player_id: str, state: dict, *, rules_version: str,
+                                last_advanced_at: str, next_transition_at: str | None,
+                                expected_revision: int | None) -> int:
+        """Write the authoritative row inside an already-open transaction."""
+        payload = dict(state)
+        for field in ("revision", "rules_version", "last_advanced_at", "next_transition_at", "updated_at"):
+            payload.pop(field, None)
+        row = self._connection.execute(
+            "SELECT revision FROM life_world_states WHERE player_id=?", (player_id,)
+        ).fetchone()
+        current_revision = int(row[0]) if row else 0
+        if expected_revision is not None and current_revision != int(expected_revision):
+            raise LifeWorldRevisionConflict("life world revision conflict")
+        revision = current_revision + 1
+        self._connection.execute(
+            """INSERT INTO life_world_states(
+                 player_id,revision,rules_version,state_json,last_advanced_at,next_transition_at)
+               VALUES (?,?,?,?,?,?)
+               ON CONFLICT(player_id) DO UPDATE SET
+                 revision=excluded.revision,rules_version=excluded.rules_version,
+                 state_json=excluded.state_json,last_advanced_at=excluded.last_advanced_at,
+                 next_transition_at=excluded.next_transition_at,updated_at=CURRENT_TIMESTAMP""",
+            (player_id, revision, rules_version, self._json(payload),
+             last_advanced_at, next_transition_at),
+        )
+        return revision
+
+    def get_life_world_state(self, player_id: str) -> dict | None:
+        row = self._connection.execute(
+            """SELECT revision,rules_version,state_json,last_advanced_at,next_transition_at,updated_at
+               FROM life_world_states WHERE player_id=?""", (player_id,)
+        ).fetchone()
+        if not row:
+            return None
+        value = json.loads(row["state_json"])
+        value.update({
+            "revision": row["revision"], "rules_version": row["rules_version"],
+            "last_advanced_at": row["last_advanced_at"],
+            "next_transition_at": row["next_transition_at"], "updated_at": row["updated_at"],
+        })
+        return value
+
+    def save_life_world_state(self, player_id: str, state: dict, *, rules_version: str,
+                              last_advanced_at: str, next_transition_at: str | None,
+                              expected_revision: int | None = None) -> dict:
+        """Persist one authoritative world snapshot with optimistic revision checking."""
+        def write():
+            self._write_life_world_state(
+                player_id, state, rules_version=rules_version,
+                last_advanced_at=last_advanced_at, next_transition_at=next_transition_at,
+                expected_revision=expected_revision,
+            )
+            return self.get_life_world_state(player_id)
+
+        return self._life_transaction(write)  # type: ignore[return-value]
+
+    def _upsert_household_projection(self, player_id: str, household: dict) -> None:
+        """Write a household projection inside the caller's transaction."""
+        household_id = str(household["id"])
+        residence = household.get("residence") or {}
+        residence_id = str(residence.get("id") or household.get("residence_id") or "") or None
+        if residence_id:
+            self._connection.execute(
+                """INSERT INTO residences(id,player_id,location_id,name,state_json) VALUES (?,?,?,?,?)
+                   ON CONFLICT(id) DO UPDATE SET location_id=excluded.location_id,name=excluded.name,
+                     state_json=excluded.state_json,updated_at=CURRENT_TIMESTAMP""",
+                (residence_id, player_id, str(residence.get("location_id") or residence_id),
+                 str(residence.get("name") or household.get("name") or "Home"), self._json(residence)),
+            )
+        self._connection.execute(
+            """INSERT INTO households(id,player_id,residence_id,name,state_json) VALUES (?,?,?,?,?)
+               ON CONFLICT(id) DO UPDATE SET residence_id=excluded.residence_id,name=excluded.name,
+                 state_json=excluded.state_json,updated_at=CURRENT_TIMESTAMP""",
+            (household_id, player_id, residence_id, str(household.get("name") or "Household"),
+             self._json({key: value for key, value in household.items()
+                         if key not in {"members", "resources", "residence"}})),
+        )
+        self._connection.execute(
+            "DELETE FROM household_members WHERE player_id=? AND household_id=?",
+            (player_id, household_id),
+        )
+        self._connection.execute(
+            "DELETE FROM household_resources WHERE player_id=? AND household_id=?",
+            (player_id, household_id),
+        )
+        for member in household.get("members", []):
+            npc_id = str(member.get("npc_id") or member.get("id") or "")
+            if not npc_id:
+                continue
+            self._connection.execute(
+                """INSERT OR REPLACE INTO household_members(
+                     household_id,player_id,npc_id,private_room_id,role_json)
+                   VALUES (?,?,?,?,?)""",
+                (household_id, player_id, npc_id, member.get("private_room_id"), self._json(member)),
+            )
+        for resource in household.get("resources", []):
+            resource_id = str(resource.get("id") or "")
+            if not resource_id:
+                continue
+            self._connection.execute(
+                """INSERT INTO household_resources(
+                     id,player_id,household_id,kind,room_id,capacity,state_json)
+                   VALUES (?,?,?,?,?,?,?)
+                   ON CONFLICT(id) DO UPDATE SET kind=excluded.kind,room_id=excluded.room_id,
+                     capacity=excluded.capacity,state_json=excluded.state_json,
+                     updated_at=CURRENT_TIMESTAMP""",
+                (resource_id, player_id, household_id, str(resource.get("kind") or "shared"),
+                 str(resource.get("room_id") or "shared-space"), int(resource.get("capacity") or 1),
+                 self._json(resource.get("state") or {})),
+            )
+
+    def _delete_stale_household_projections(
+        self, player_id: str, current_household_ids: set[str],
+    ) -> None:
+        """Remove household projections absent from one authoritative snapshot.
+
+        This helper intentionally leaves residences and all historical life
+        projections intact. It runs only inside the caller's life transaction,
+        before current households are upserted, so members and resources can
+        safely move out of a household that disappeared during reconciliation.
+        """
+        if current_household_ids:
+            placeholders = ",".join("?" for _ in current_household_ids)
+            parameters = (player_id, *sorted(current_household_ids))
+            self._connection.execute(
+                f"""DELETE FROM household_members WHERE player_id=?
+                    AND household_id NOT IN ({placeholders})""",
+                parameters,
+            )
+            self._connection.execute(
+                f"""DELETE FROM household_resources WHERE player_id=?
+                    AND household_id NOT IN ({placeholders})""",
+                parameters,
+            )
+            self._connection.execute(
+                f"""DELETE FROM households WHERE player_id=?
+                    AND id NOT IN ({placeholders})""",
+                parameters,
+            )
+            return
+        self._connection.execute(
+            "DELETE FROM household_members WHERE player_id=?", (player_id,),
+        )
+        self._connection.execute(
+            "DELETE FROM household_resources WHERE player_id=?", (player_id,),
+        )
+        self._connection.execute(
+            "DELETE FROM households WHERE player_id=?", (player_id,),
+        )
+
+    def upsert_household_projection(self, player_id: str, household: dict) -> dict:
+        """Keep the queryable Household projection aligned with the world snapshot."""
+        def write():
+            self._upsert_household_projection(player_id, household)
+
+        self._life_transaction(write)
+        return household
+
+    def list_households(self, player_id: str) -> list[dict]:
+        rows = self._connection.execute(
+            "SELECT * FROM households WHERE player_id=? ORDER BY created_at,id", (player_id,)
+        ).fetchall()
+        result: list[dict] = []
+        for row in rows:
+            household = json.loads(row["state_json"])
+            household.update({"id": row["id"], "name": row["name"],
+                              "residence_id": row["residence_id"], "updated_at": row["updated_at"]})
+            members = self._connection.execute(
+                """SELECT npc_id,private_room_id,role_json FROM household_members
+                   WHERE player_id=? AND household_id=? ORDER BY joined_at,npc_id""",
+                (player_id, row["id"]),
+            ).fetchall()
+            household["members"] = [{**json.loads(member["role_json"]), "npc_id": member["npc_id"],
+                                      "private_room_id": member["private_room_id"]} for member in members]
+            resources = self._connection.execute(
+                """SELECT id,kind,room_id,capacity,state_json FROM household_resources
+                   WHERE player_id=? AND household_id=? ORDER BY room_id,kind,id""",
+                (player_id, row["id"]),
+            ).fetchall()
+            household["resources"] = [{"id": resource["id"], "kind": resource["kind"],
+                                        "room_id": resource["room_id"], "capacity": resource["capacity"],
+                                        "state": json.loads(resource["state_json"])} for resource in resources]
+            result.append(household)
+        return result
+
+    def get_household(self, player_id: str, household_id: str) -> dict | None:
+        return next((item for item in self.list_households(player_id) if item["id"] == household_id), None)
+
+    def _upsert_life_action(self, player_id: str, action: dict) -> None:
+        self._connection.execute(
+            """INSERT INTO npc_life_actions(
+                 id,player_id,npc_id,action_type,action_json,status,started_at,ends_at)
+               VALUES (?,?,?,?,?,?,?,?)
+               ON CONFLICT(id) DO UPDATE SET action_json=excluded.action_json,status=excluded.status,
+                 started_at=excluded.started_at,ends_at=excluded.ends_at,updated_at=CURRENT_TIMESTAMP""",
+            (action["id"], player_id, action["npc_id"], action["type"], self._json(action),
+             action["status"], action.get("started_at"), action.get("ends_at")),
+        )
+
+    def upsert_life_action(self, player_id: str, action: dict) -> dict:
+        self._life_transaction(lambda: self._upsert_life_action(player_id, action))
+        return action
+
+    def _upsert_life_story(self, player_id: str, story: dict) -> None:
+        story_key = str(story.get("story_key") or story["id"])
+        self._connection.execute(
+            """INSERT INTO life_stories(
+                 id,player_id,level,story_key,story_json,status,intervention_expires_at,resolution_action)
+               VALUES (?,?,?,?,?,?,?,?)
+               ON CONFLICT(id) DO UPDATE SET story_json=excluded.story_json,status=excluded.status,
+                 intervention_expires_at=excluded.intervention_expires_at,
+                 resolution_action=excluded.resolution_action,updated_at=CURRENT_TIMESTAMP""",
+            (story["id"], player_id, story["level"], story_key, self._json(story), story["status"],
+             story.get("intervention_expires_at"), story.get("resolution_action")),
+        )
+
+    def upsert_life_story(self, player_id: str, story: dict) -> dict:
+        self._life_transaction(lambda: self._upsert_life_story(player_id, story))
+        return story
+
+    @staticmethod
+    def _decode_life_story(row) -> dict:
+        value = json.loads(row["story_json"])
+        value.update({"id": row["id"], "level": row["level"], "status": row["status"],
+                      "intervention_expires_at": row["intervention_expires_at"],
+                      "resolution_action": row["resolution_action"], "created_at": row["created_at"],
+                      "updated_at": row["updated_at"]})
+        return value
+
+    def list_life_stories(self, player_id: str, *, level: str | None = None,
+                          status: str | None = None, npc_id: str | None = None,
+                          household_id: str | None = None, game_date: str | None = None,
+                          limit: int = 100) -> list[dict]:
+        query = "SELECT * FROM life_stories WHERE player_id=?"
+        parameters: list[object] = [player_id]
+        if level:
+            query += " AND level=?"; parameters.append(level)
+        if status:
+            query += " AND status=?"; parameters.append(status)
+        if game_date:
+            query += " AND date(created_at)=?"; parameters.append(game_date)
+        query += " ORDER BY created_at DESC,id LIMIT ?"; parameters.append(max(1, min(500, limit)))
+        stories = [self._decode_life_story(row) for row in self._connection.execute(query, parameters).fetchall()]
+        if npc_id:
+            stories = [story for story in stories if npc_id in story.get("participant_ids", [])]
+        if household_id:
+            stories = [story for story in stories if story.get("household_id") == household_id]
+        observed = {row[0] for row in self._connection.execute(
+            "SELECT story_id FROM life_story_observations WHERE player_id=?", (player_id,)
+        ).fetchall()}
+        for story in stories:
+            story["observed"] = story["id"] in observed
+        return stories
+
+    def get_life_story(self, player_id: str, story_id: str) -> dict | None:
+        row = self._connection.execute(
+            "SELECT * FROM life_stories WHERE player_id=? AND id=?", (player_id, story_id)
+        ).fetchone()
+        if not row:
+            return None
+        story = self._decode_life_story(row)
+        story["observed"] = bool(self._connection.execute(
+            "SELECT 1 FROM life_story_observations WHERE player_id=? AND story_id=?",
+            (player_id, story_id),
+        ).fetchone())
+        return story
+
+    def observe_life_story(self, player_id: str, story_id: str) -> dict | None:
+        """Observation is deliberately read-only with respect to story settlement."""
+        if not self.get_life_story(player_id, story_id):
+            return None
+        with self._lock, self._connection:
+            self._connection.execute(
+                "INSERT OR IGNORE INTO life_story_observations(player_id,story_id) VALUES (?,?)",
+                (player_id, story_id),
+            )
+        return self.get_life_story(player_id, story_id)
+
+    def cached_life_intervention(self, player_id: str, story_id: str,
+                                 idempotency_key: str) -> dict | None:
+        row = self._connection.execute(
+            """SELECT response_json FROM life_interventions
+               WHERE player_id=? AND story_id=? AND idempotency_key=?""",
+            (player_id, story_id, idempotency_key),
+        ).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def life_intervention_action(self, player_id: str, story_id: str,
+                                 idempotency_key: str) -> str | None:
+        row = self._connection.execute(
+            """SELECT action FROM life_interventions
+               WHERE player_id=? AND story_id=? AND idempotency_key=?""",
+            (player_id, story_id, idempotency_key),
+        ).fetchone()
+        return str(row[0]) if row else None
+
+    def save_life_intervention(self, player_id: str, story_id: str, idempotency_key: str,
+                               action: str, response: dict) -> dict:
+        with self._lock, self._connection:
+            self._connection.execute(
+                """INSERT OR IGNORE INTO life_interventions(
+                     player_id,story_id,idempotency_key,action,response_json) VALUES (?,?,?,?,?)""",
+                (player_id, story_id, idempotency_key, action, self._json(response)),
+            )
+        return self.cached_life_intervention(player_id, story_id, idempotency_key) or response
+
+    def _append_relationship_evidence(self, player_id: str, evidence: dict) -> bool:
+        context = evidence.get("context") or {}
+        cursor = self._connection.execute(
+            """INSERT OR IGNORE INTO relationship_evidence(
+                 id,player_id,fact_id,source_npc_id,target_npc_id,kind,magnitude,
+                 appraisal_json,deltas_json,context_json,rules_version)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (evidence["id"], player_id, evidence["fact_id"], evidence["source_npc_id"],
+             evidence["target_npc_id"], evidence["kind"], float(evidence.get("magnitude", 1)),
+             self._json(evidence.get("appraisal") or {}), self._json(evidence.get("deltas") or {}),
+             self._json(context), str(evidence.get("rules_version") or "relationships-v2")),
+        )
+        return cursor.rowcount > 0
+
+    def append_relationship_evidence(self, player_id: str, evidence: dict) -> tuple[dict, bool]:
+        inserted = self._life_transaction(lambda: self._append_relationship_evidence(player_id, evidence))
+        return evidence, inserted
+
+    def list_relationship_evidence(self, player_id: str, source_npc_id: str | None = None,
+                                   target_npc_id: str | None = None, limit: int = 100) -> list[dict]:
+        query = "SELECT * FROM relationship_evidence WHERE player_id=?"
+        parameters: list[object] = [player_id]
+        if source_npc_id:
+            query += " AND source_npc_id=?"; parameters.append(source_npc_id)
+        if target_npc_id:
+            query += " AND target_npc_id=?"; parameters.append(target_npc_id)
+        query += " ORDER BY created_at DESC,id LIMIT ?"; parameters.append(max(1, min(500, limit)))
+        result = []
+        for row in self._connection.execute(query, parameters).fetchall():
+            result.append({"id": row["id"], "fact_id": row["fact_id"],
+                           "source_npc_id": row["source_npc_id"], "target_npc_id": row["target_npc_id"],
+                           "kind": row["kind"], "magnitude": row["magnitude"],
+                           "appraisal": json.loads(row["appraisal_json"]),
+                           "deltas": json.loads(row["deltas_json"]),
+                           "context": json.loads(row["context_json"]),
+                           "rules_version": row["rules_version"], "created_at": row["created_at"]})
+        return result
+
+    def _save_relationship_bond(self, player_id: str, bond: dict) -> dict:
+        participants = sorted(str(value) for value in bond.get("participant_ids", []) if value)
+        if len(participants) != 2 or participants[0] == participants[1]:
+            raise ValueError("relationship bond requires two different residents")
+        pair_key = ":".join(participants)
+        supplied_id = str(bond.get("id") or "")
+        bond_id = (f"bond-{hashlib.sha256((player_id + chr(0) + supplied_id).encode()).hexdigest()[:20]}"
+                   if supplied_id else
+                   f"bond-{hashlib.sha256((player_id + chr(0) + pair_key + chr(0) + str(bond['channel']) + chr(0) + str(bond['kind'])).encode()).hexdigest()[:20]}")
+        if bond.get("channel") != "structural" and bond.get("state", "active") == "active":
+            self._connection.execute(
+                """UPDATE npc_relationship_bonds SET state='ended',ended_at=CURRENT_TIMESTAMP,
+                   updated_at=CURRENT_TIMESTAMP WHERE player_id=? AND pair_key=? AND channel=?
+                   AND kind<>? AND state='active'""",
+                (player_id, pair_key, bond["channel"], bond["kind"]),
+            )
+        self._connection.execute(
+            """INSERT INTO npc_relationship_bonds(
+                 id,player_id,pair_key,channel,kind,state,roles_json,scope_id,context_json,ended_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(player_id,pair_key,channel,kind) DO UPDATE SET
+                 state=excluded.state,roles_json=excluded.roles_json,scope_id=excluded.scope_id,
+                 context_json=excluded.context_json,ended_at=excluded.ended_at,
+                 updated_at=CURRENT_TIMESTAMP""",
+            (bond_id, player_id, pair_key, bond["channel"], bond["kind"], bond.get("state", "active"),
+             self._json(bond.get("roles") or {}), bond.get("scope_id"),
+             self._json(bond.get("context") or {}), bond.get("ended_at")),
+        )
+        return {**bond, "id": bond_id, "pair_key": pair_key, "participant_ids": participants}
+
+    def save_relationship_bond(self, player_id: str, bond: dict) -> dict:
+        return self._life_transaction(lambda: self._save_relationship_bond(player_id, bond))
+
+    def list_relationship_bonds(self, player_id: str, npc_id: str | None = None) -> list[dict]:
+        rows = self._connection.execute(
+            "SELECT * FROM npc_relationship_bonds WHERE player_id=? ORDER BY started_at,id", (player_id,)
+        ).fetchall()
+        result = []
+        for row in rows:
+            participants = row["pair_key"].split(":", 1)
+            if npc_id and npc_id not in participants:
+                continue
+            result.append({"id": row["id"], "pair_key": row["pair_key"],
+                           "participant_ids": participants, "channel": row["channel"],
+                           "kind": row["kind"], "state": row["state"],
+                           "roles": json.loads(row["roles_json"]), "scope_id": row["scope_id"],
+                           "context": json.loads(row["context_json"]),
+                           "started_at": row["started_at"], "ended_at": row["ended_at"],
+                           "updated_at": row["updated_at"]})
+        return result
+
+    def _save_relationship_pair_projection(self, player_id: str, pair: dict) -> None:
+        """Project the v2 pair into legacy directional rows and queryable bonds."""
+        channels = pair.get("channels") or {}
+        friendship = str(channels.get("friendship") or "none")
+        conflict = str(channels.get("conflict") or "none")
+        legacy_status = (
+            "strained" if conflict in {"friction", "open_conflict", "feud"}
+            else "close_friend" if friendship == "close_friend"
+            else "friend" if friendship == "friend"
+            else "acquaintance" if friendship in {"emerging", "estranged"}
+            else "stranger"
+        )
+        directions = [pair.get("a_to_b") or {}, pair.get("b_to_a") or {}]
+        for edge in directions:
+            npc_a, npc_b = str(edge.get("owner_id") or ""), str(edge.get("target_id") or "")
+            if not npc_a or not npc_b or npc_a == npc_b:
+                continue
+            self._connection.execute(
+                """INSERT OR IGNORE INTO npc_social_edges(player_id,npc_a,npc_b,status)
+                   VALUES (?,?,?,'stranger')""", (player_id, npc_a, npc_b),
+            )
+            values = [max(0, min(100, int(edge.get(key, 0)))) for key in (
+                "familiarity", "trust", "affinity", "respect", "comfort", "tension",
+                "resentment", "attraction", "dependency", "fear",
+            )]
+            self._connection.execute(
+                """UPDATE npc_social_edges SET familiarity=?,trust=?,affinity=?,respect=?,comfort=?,
+                   tension=?,resentment=?,attraction=?,dependency=?,fear=?,friendship_status=?,
+                   conflict_status=?,status=?,relationship_version=2,updated_at=CURRENT_TIMESTAMP
+                   WHERE player_id=? AND npc_a=? AND npc_b=?""",
+                (*values, friendship, conflict, legacy_status, player_id, npc_a, npc_b),
+            )
+        for bond in pair.get("structural_bonds", []):
+            self._save_relationship_bond(player_id, {
+                "id": bond.get("bond_id"), "participant_ids": bond.get("participant_ids", []),
+                "channel": "structural", "kind": bond.get("kind"),
+                "state": "active" if bond.get("active", True) else "ended",
+                "roles": bond.get("roles") or {}, "scope_id": bond.get("scope_id"),
+            })
+        pair_key = ":".join(sorted((str(pair["resident_a_id"]), str(pair["resident_b_id"]))))
+        self._connection.execute(
+            """UPDATE npc_relationship_bonds SET state='ended',ended_at=CURRENT_TIMESTAMP,
+               updated_at=CURRENT_TIMESTAMP WHERE player_id=? AND pair_key=?
+               AND channel IN ('friendship','conflict','rivalry','romance') AND state='active'""",
+            (player_id, pair_key),
+        )
+        for channel in ("friendship", "conflict", "rivalry", "romance"):
+            state = str(channels.get(channel) or "none")
+            if state == "none":
+                continue
+            self._save_relationship_bond(player_id, {
+                "participant_ids": [pair["resident_a_id"], pair["resident_b_id"]],
+                "channel": channel, "kind": state, "state": "active",
+                "context": {"history": channels.get("history", [])},
+            })
+
+    def save_relationship_pair_projection(self, player_id: str, pair: dict) -> dict:
+        self._life_transaction(lambda: self._save_relationship_pair_projection(player_id, pair))
+        return pair
+
+    def save_life_world_state_and_projections(
+        self, player_id: str, state: dict, *, rules_version: str,
+        last_advanced_at: str, next_transition_at: str | None,
+        expected_revision: int | None = None,
+        households: list[dict] | None = None, actions: list[dict] | None = None,
+        stories: list[dict] | None = None, evidence: list[dict] | None = None,
+        relationship_pairs: list[dict] | None = None,
+    ) -> dict:
+        """Atomically persist the authoritative snapshot and every v2 projection.
+
+        The world JSON remains authoritative, but its query projections are
+        committed at the same SQLite boundary. A projection error therefore
+        rolls back the revision as well as every projection row, so a retry can
+        safely use the same ``expected_revision``.
+        """
+        def write():
+            self._write_life_world_state(
+                player_id, state, rules_version=rules_version,
+                last_advanced_at=last_advanced_at, next_transition_at=next_transition_at,
+                expected_revision=expected_revision,
+            )
+            if households is not None:
+                current_household_ids = {str(household["id"]) for household in households}
+                self._delete_stale_household_projections(player_id, current_household_ids)
+                for household in households:
+                    self._upsert_household_projection(player_id, household)
+            for action in actions or []:
+                self._upsert_life_action(player_id, action)
+            for story in stories or []:
+                self._upsert_life_story(player_id, story)
+            for item in evidence or []:
+                self._append_relationship_evidence(player_id, item)
+            for pair in relationship_pairs or []:
+                self._save_relationship_pair_projection(player_id, pair)
+            return self.get_life_world_state(player_id)
+
+        return self._life_transaction(write)  # type: ignore[return-value]
+
     def ensure_social_edges(self, player_id: str, npc_ids: list[str]) -> list[dict]:
         ordered = sorted(npc_ids)
         with self._lock, self._connection:
@@ -673,7 +1304,8 @@ class Database:
                         (player_id, npc_a, npc_b, familiarity, trust, affinity, tension),
                     )
         rows = self._connection.execute(
-            """SELECT npc_a,npc_b,familiarity,trust,affinity,tension,status
+            """SELECT npc_a,npc_b,familiarity,trust,affinity,respect,comfort,tension,
+                      resentment,attraction,dependency,fear,friendship_status,conflict_status,status
                FROM npc_social_edges WHERE player_id=? ORDER BY npc_a,npc_b""",
             (player_id,),
         ).fetchall()
@@ -683,8 +1315,12 @@ class Database:
         if npc_a == npc_b:
             raise ValueError("a social edge requires two different residents")
         self.ensure_social_edges(player_id, [npc_a, npc_b])
+        allowed_dimensions = {
+            "familiarity", "trust", "affinity", "respect", "comfort", "tension",
+            "resentment", "attraction", "dependency", "fear",
+        }
         allowed = {key: max(0, min(100, int(value))) for key, value in values.items()
-                   if key in {"familiarity", "trust", "affinity", "tension"}}
+                   if key in allowed_dimensions}
         with self._lock, self._connection:
             if allowed:
                 assignments = ",".join(f"{key}=?" for key in allowed)
@@ -693,7 +1329,8 @@ class Database:
                     (*allowed.values(), player_id, npc_a, npc_b),
                 )
             row = self._connection.execute(
-                """SELECT npc_a,npc_b,familiarity,trust,affinity,tension,status
+                """SELECT npc_a,npc_b,familiarity,trust,affinity,respect,comfort,tension,
+                          resentment,attraction,dependency,fear,friendship_status,conflict_status,status
                    FROM npc_social_edges WHERE player_id=? AND npc_a=? AND npc_b=?""",
                 (player_id, npc_a, npc_b),
             ).fetchone()
