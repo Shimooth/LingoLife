@@ -47,6 +47,7 @@ type SceneProps={
  onDecorationValidationApi?:(api:WorldDecorationValidationApi|null)=>void
  onCharacterClick:(id:string)=>void
  onCharacterEvent:(eventId:string)=>void
+ onCharacterTrouble?:(characterId:string)=>void
  onJourneyElapsed?:()=>void
  onLandmarkSelect:(landmark:CityLandmark)=>void
 }
@@ -548,7 +549,7 @@ const characterStandingPosition=(character:CityCharacter,lot?:BuildingLot):World
  ]
 }
 
-function CharacterMarker({character,lot,route,active,actors,serverTime,reducedMotion,language,onClick,onEvent,onJourneyElapsed}:{character:CityCharacter;lot?:BuildingLot;route?:PedestrianRoute;active:boolean;actors:ActorRegistry;serverTime?:string;reducedMotion:boolean;language:'zh'|'en';onClick:()=>void;onEvent:(eventId:string)=>void;onJourneyElapsed?:()=>void}){
+function CharacterMarker({character,lot,route,active,actors,serverTime,reducedMotion,language,onClick,onEvent,onTrouble,onJourneyElapsed}:{character:CityCharacter;lot?:BuildingLot;route?:PedestrianRoute;active:boolean;actors:ActorRegistry;serverTime?:string;reducedMotion:boolean;language:'zh'|'en';onClick:()=>void;onEvent:(eventId:string)=>void;onTrouble?:()=>void;onJourneyElapsed?:()=>void}){
  const [hovered,setHovered]=useState(false)
  useCursor(hovered)
  const actor=useRef<THREE.Group>(null)
@@ -612,8 +613,10 @@ function CharacterMarker({character,lot,route,active,actors,serverTime,reducedMo
  const journeyDurationSeconds=Number.isFinite(rawJourneyDuration)&&rawJourneyDuration>0?rawJourneyDuration:undefined
  const journeySpeed=route?.length&&journeyDurationSeconds?route.length/journeyDurationSeconds:1.18
  const playbackRate=moving?THREE.MathUtils.clamp(journeySpeed/1.18,.52,1.65):1
- const stateLabel=language==='zh'?({idle:'空闲',event_pending:'有待办',walking_to_event:'前往事件',waiting_at_event:'等待查看'} as const)[visualState]:({idle:'Idle',event_pending:'Pending',walking_to_event:'On the way',waiting_at_event:'Waiting'} as const)[visualState]
- const statusGlyph=moving?'➜':waiting?'!':visualState==='event_pending'?'✦':'·'
+ const stateLabel=language==='zh'?({idle:'空闲',living:'正在生活',event_pending:'有待办',walking_to_event:'前往事件',waiting_at_event:'等待查看'} as const)[visualState]:({idle:'Idle',living:'Living their day',event_pending:'Pending',walking_to_event:'On the way',waiting_at_event:'Waiting'} as const)[visualState]
+ const livingDetail=language==='zh'?character.visibleIntentZh?.trim()||character.visibleIntent?.trim():character.visibleIntent?.trim()||character.visibleIntentZh?.trim()
+ const troubleCopy=language==='zh'?character.troubleSignal?.summary_zh?.trim()||'似乎遇到了一点麻烦':character.troubleSignal?.summary?.trim()||'Something seems to be troubling them'
+ const statusGlyph=character.troubleSignal?'?':moving?'➜':waiting?'!':visualState==='event_pending'?'✦':visualState==='living'?'○':'·'
  return <group ref={actor} position={position} rotation-y={waitingRotation??lot?.rotation??0} onClick={event=>{event.stopPropagation();onClick()}} onPointerDown={event=>event.stopPropagation()} onPointerOver={event=>{event.stopPropagation();setHovered(true)}} onPointerOut={()=>setHovered(false)}>
   <DirectedCharacter3D avatar={avatar} animation={animation} performance={directedPerformance} performanceMode={performanceMode} performanceKey={`${action?.event_id??'daily'}:${visualState}:${animation}`} performanceVariant={action?.participant_index??characterHash%2} playbackRate={playbackRate} reducedMotion={reducedMotion} name={character.name} seed={character.id} scale={characterScale}/>
   <mesh position-y={.5}>
@@ -627,17 +630,17 @@ function CharacterMarker({character,lot,route,active,actors,serverTime,reducedMo
   </mesh>
   {!active&&<Html center position={[0,1.72,0]} zIndexRange={[40,10]}>
    <div className="world3d-character-ui" style={{'--character-color':color,'--character-ui-shift':action?.event_id?`${action.participant_index ? 12 : -12}px`:'0px'} as React.CSSProperties}>
-    <button type="button" className={`world3d-character-status is-${visualState}`} onPointerDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();if(action?.event_id&&visualState!=='event_pending')onEvent(action.event_id);else onClick()}} aria-label={stateLabel}>{statusGlyph}</button>
+    <button type="button" className={`world3d-character-status is-${visualState} ${character.troubleSignal?'has-trouble':''}`} onPointerDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();if(character.troubleSignal&&onTrouble)onTrouble();else if(action?.event_id&&visualState!=='event_pending')onEvent(action.event_id);else onClick()}} aria-label={character.troubleSignal?troubleCopy:stateLabel}>{statusGlyph}</button>
     <button type="button" className={`world3d-character world3d-character--model ${active?'is-active':''}`} onPointerDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();onClick()}} aria-label={`${language==='zh'?'跟随':'Follow '}${character.name}`}>
      <b>{character.name}</b>
-     {(hovered||active||moving||waiting)&&<small>{moving||waiting?stateLabel:character.location.place||(language==='zh'?'正在城市中':'Around town')}</small>}
+     {(hovered||active||moving||waiting||visualState==='living')&&<small>{moving||waiting?stateLabel:visualState==='living'?livingDetail||stateLabel:character.location.place||(language==='zh'?'正在城市中':'Around town')}</small>}
     </button>
    </div>
   </Html>}
  </group>
 }
 
-export function WorldScene({characters,landmarks,followedCharacterId,serverTime,language,timeSlot,reducedMotion,selectedLandmarkId,focus,focusVersion,viewMode,quality,decorationEditor,onDecorationValidationApi,onCharacterClick,onCharacterEvent,onJourneyElapsed,onLandmarkSelect}:SceneProps){
+export function WorldScene({characters,landmarks,followedCharacterId,serverTime,language,timeSlot,reducedMotion,selectedLandmarkId,focus,focusVersion,viewMode,quality,decorationEditor,onDecorationValidationApi,onCharacterClick,onCharacterEvent,onCharacterTrouble,onJourneyElapsed,onLandmarkSelect}:SceneProps){
  const night=timeSlot==='evening'
  const [hoveredLandmarkId,setHoveredLandmarkId]=useState<string>()
  const actors=useRef(new Map<string,THREE.Group>())
@@ -704,7 +707,7 @@ export function WorldScene({characters,landmarks,followedCharacterId,serverTime,
    onSelect={decorationEditor.onSelect}
   />}
   <LandmarkBuildings placements={layout.landmarkPlacements} selectedId={editing?undefined:selectedLandmarkId} hoveredId={editing?undefined:hoveredLandmarkId} language={language} night={night} quality={quality} onHover={editing?()=>undefined:setHoveredLandmarkId} onSelect={editing?()=>undefined:onLandmarkSelect}/>
-  {characterNavigation.map(({character,origin,route})=><CharacterMarker key={character.id} character={character} lot={origin} route={route} active={!editing&&character.id===followedCharacterId} actors={actors} serverTime={serverTime} reducedMotion={reducedMotion} language={language} onClick={editing?()=>undefined:()=>onCharacterClick(character.id)} onEvent={editing?()=>undefined:onCharacterEvent} onJourneyElapsed={onJourneyElapsed}/>)}
+  {characterNavigation.map(({character,origin,route})=><CharacterMarker key={character.id} character={character} lot={origin} route={route} active={!editing&&character.id===followedCharacterId} actors={actors} serverTime={serverTime} reducedMotion={reducedMotion} language={language} onClick={editing?()=>undefined:()=>onCharacterClick(character.id)} onEvent={editing?()=>undefined:onCharacterEvent} onTrouble={!editing&&onCharacterTrouble?()=>onCharacterTrouble(character.id):undefined} onJourneyElapsed={onJourneyElapsed}/>)}
   {decorationEditor&&editing&&<WorldDecorationPlacementSurface
    mode={decorationEditor.mode}
    selectedKind={decorationEditor.selectedKind}

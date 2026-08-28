@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { NpcProfile } from "../types";
+import {isAdultProfile,ROMANCE_ADULT_AGE,romanceIsEnabled,withProfileAge,withRomancePreference} from "../profilePolicy";
 import { CharacterCanvas3D } from "../three/characters";
 import {
   CHARACTER_PRESETS,
@@ -120,6 +121,8 @@ export function CharacterStudio({
   saving,
   error,
   language = "zh",
+  relationshipCandidates = [],
+  editingNpcId,
 }: {
   profile: NpcProfile;
   onChange: (p: NpcProfile) => void;
@@ -128,11 +131,19 @@ export function CharacterStudio({
   saving: boolean;
   error: string;
   language?: "zh" | "en";
+  relationshipCandidates?: { id: string; name: string }[];
+  editingNpcId?: string;
 }) {
   const reduce = useReducedMotion(),
-    [tab, setTab] = useState<"story" | "look">("story"),
+    [tab, setTab] = useState<"story" | "relationships" | "look">("story"),
     zh = language === "zh";
   const characterFamily = getCharacterFamily(profile.avatar);
+  const adult=isAdultProfile(profile),romanceEnabled=romanceIsEnabled(profile);
+  const relationshipOptions=Array.from(new Map(relationshipCandidates
+    .filter(candidate=>candidate.id!==editingNpcId)
+    .map(candidate=>[candidate.id,candidate])).values());
+  const householdWithId=(profile.householdWithIds??[]).find(id=>id&&id!==editingNpcId)??"";
+  const familyIds=Array.from(new Set((profile.familyIds??[]).filter(id=>id&&id!==editingNpcId))).slice(0,4);
   const set = <K extends keyof NpcProfile>(key: K, value: NpcProfile[K]) =>
     onChange({ ...profile, [key]: value });
   const avatar = (key: string, value: string) =>
@@ -170,19 +181,17 @@ export function CharacterStudio({
           </div>
           <div className="studio-editor">
             <nav>
-              {(["story", "look"] as const).map((x) => (
+              {(["story", "relationships", "look"] as const).map((x) => (
                 <button
                   className={tab === x ? "active" : ""}
                   onClick={() => setTab(x)}
                   key={x}
                 >
                   {x === "story"
-                    ? zh
-                      ? "身份设定"
-                      : "Identity"
-                    : zh
-                      ? "外观"
-                      : "Appearance"}
+                    ? zh ? "身份设定" : "Identity"
+                    : x === "relationships"
+                      ? zh ? "关系与居住" : "Relationships"
+                      : zh ? "外观" : "Appearance"}
                 </button>
               ))}
             </nav>
@@ -216,7 +225,7 @@ export function CharacterStudio({
                           min={16}
                           max={100}
                           value={profile.age??''}
-                          onChange={(e) => set("age", e.target.value ? Math.max(16,Math.min(100,Number(e.target.value))) : null)}
+                          onChange={(e) => onChange(withProfileAge(profile,e.target.value ? Math.max(16,Math.min(100,Number(e.target.value))) : null))}
                         />
                       </label>
                       <label>
@@ -267,6 +276,67 @@ export function CharacterStudio({
                         onChange={(e) => set("longTermGoal", e.target.value)}
                       />
                     </label>
+                  </>
+                ) : tab === "relationships" ? (
+                  <>
+                    <section className="studio-relationship-card" aria-labelledby="studio-household-title">
+                      <div className="studio-relationship-card__heading">
+                        <div>
+                          <b id="studio-household-title">{zh?'居住安排':'Living arrangement'}</b>
+                          <small>{zh?'选择独居，或与一位现有居民同住。':'Live alone or share a home with one existing resident.'}</small>
+                        </div>
+                        <span>{householdWithId?(zh?'共同生活':'Shared home'):(zh?'独居':'Lives alone')}</span>
+                      </div>
+                      <label className="studio-resident-select">
+                        {zh?'室友':'Housemate'}
+                        <select value={householdWithId} onChange={event=>set("householdWithIds",event.target.value?[event.target.value]:[])}>
+                          <option value="">{zh?'独居':'Live alone'}</option>
+                          {relationshipOptions.map(candidate=><option value={candidate.id} key={candidate.id}>{candidate.name}</option>)}
+                        </select>
+                      </label>
+                      <p className="studio-relationship-note">{zh?'同住角色会共享住宅、厨房与家务，也会因此产生更多日常互动。':'Housemates share a residence, kitchen, and chores, creating more everyday interactions.'}</p>
+                    </section>
+
+                    <section className="studio-relationship-card" aria-labelledby="studio-family-title">
+                      <div className="studio-relationship-card__heading">
+                        <div>
+                          <b id="studio-family-title">{zh?'家庭成员':'Family members'}</b>
+                          <small>{zh?'从现有居民中选择，最多 4 人。':'Choose up to 4 existing residents.'}</small>
+                        </div>
+                        <span>{familyIds.length} / 4</span>
+                      </div>
+                      {relationshipOptions.length?<div className="studio-resident-options" role="group" aria-labelledby="studio-family-title">
+                        {relationshipOptions.map(candidate=>{
+                          const selected=familyIds.includes(candidate.id),disabled=!selected&&familyIds.length>=4;
+                          return <button type="button" className={selected?'is-selected':''} aria-pressed={selected} disabled={disabled} onClick={()=>set("familyIds",selected?familyIds.filter(id=>id!==candidate.id):[...familyIds,candidate.id])} key={candidate.id}><span aria-hidden>{selected?'✓':'+'}</span>{candidate.name}</button>
+                        })}
+                      </div>:<p className="studio-empty-options">{zh?'创建更多居民后，可以在这里建立家庭关系。':'Create more residents to define family relationships here.'}</p>}
+                      <p className="studio-relationship-note">{zh?'家庭关系会阻止角色彼此发展恋爱关系，但友情、竞争与冲突仍会自然发生。':'Family ties prevent romance between those characters, while friendship, rivalry, and conflict can still develop.'}</p>
+                    </section>
+
+                    <section className={`studio-romance-policy ${adult?'':'is-disabled'}`} aria-labelledby="studio-romance-title">
+                      <div className="studio-romance-policy__control">
+                        <div>
+                          <b id="studio-romance-title">{zh?'自主恋爱关系':'Autonomous romantic relationships'}</b>
+                          <small>{adult
+                            ?(zh?'允许该角色在生活中自然发展恋爱关系。':'Allow this character to develop romantic relationships naturally.')
+                            :(zh?`仅对年满 ${ROMANCE_ADULT_AGE} 岁的角色开放；当前已自动禁用。`:`Only available to characters aged ${ROMANCE_ADULT_AGE} or older; currently disabled.`)}</small>
+                        </div>
+                        <label className="studio-switch">
+                          <input type="checkbox" checked={romanceEnabled} disabled={!adult} onChange={event=>onChange(withRomancePreference(profile,event.target.checked))}/>
+                          <span aria-hidden/>
+                          <em>{romanceEnabled?(zh?'已允许':'Allowed'):(zh?'未允许':'Not allowed')}</em>
+                        </label>
+                      </div>
+                      <div className="studio-romance-policy__boundaries">
+                        <b>{zh?'关系边界':'Relationship boundaries'}</b>
+                        <ul>
+                          <li>{zh?'只会与另一位已成年、也明确允许恋爱的非亲属角色发展。':'Romance can only develop with another adult, opted-in, non-family character.'}</li>
+                          <li>{zh?'约会或伴侣关系需要双方都明确愿意；单方好感不会自动升级。':'Dating or partnership requires mutual willingness; one-sided attraction never upgrades automatically.'}</li>
+                          <li>{zh?'关闭后只阻止新的恋爱发展，友情、竞争和冲突仍会正常发生。':'Turning this off only blocks new romance; friendship, rivalry, and conflict still develop.'}</li>
+                        </ul>
+                      </div>
+                    </section>
                   </>
                 ) : (
                   <>

@@ -43,4 +43,12 @@ if(rigSource.includes('nearestDistance')||rigSource.includes('for(const road of 
 }
 if(!rigSource.includes('smoothedFollowOffset.current.lerp(staticFollowOffset'))fail('follow offset is no longer smoothly stabilized')
 
-console.log('World camera guard passed (top view, damping, manual takeover, stable follow).')
+const observerSource=await readFile(new URL('../src/three/world/WorldObserver3D.tsx',import.meta.url),'utf8')
+if(!observerSource.includes("frameloop={paused||reducedMotion?'demand':'always'}")){
+ fail('story overlays no longer pause the continuous city frame loop')
+}
+if(!observerSource.includes('useEffect(()=>{if(!paused)invalidate()}')){
+ fail('closing a paused overlay no longer invalidates a reliable resume frame')
+}
+
+console.log('World camera guard passed (top view, damping, manual takeover, stable follow, overlay pause/resume).')
