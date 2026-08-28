@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from itertools import combinations
 from typing import Any, Iterable, Mapping, MutableMapping, Sequence, cast
 
-from .agent import compile_persona
+from .agent import compile_persona, observable_runtime_state
 from .collisions import (
     COLLISION_RULES_VERSION,
     Collision,
@@ -32,7 +32,6 @@ from .life import (
     NpcLifeContext,
     ResourceState,
     WorldClock,
-    action_visible_intent,
     advance_life_action,
     apply_resource_deltas,
     clamp,
@@ -48,6 +47,7 @@ from .life import (
     stable_id,
     stable_number,
 )
+from .life_observable import life_action_phase, project_observable_action
 from .relationships import (
     Appraisal,
     DIMENSIONS,
@@ -584,23 +584,29 @@ class LifeWorldEngine:
         residents = []
         for npc_id, raw in sorted(source["residents"].items()):
             action = LifeAction.from_dict(raw["current_action"])
+            observable = project_observable_action(
+                action, {}, runtime=raw.get("runtime") or {},
+            )
             residents.append({
                 "npc_id": npc_id, "household_id": raw["household_id"],
                 "home_location_id": raw["home_location_id"],
                 "current_location_id": raw["current_location_id"],
-                "runtime": {"emotion": dict(raw["runtime"].get("emotion") or {}),
-                            "needs": {key: value for key, value in dict(raw["runtime"].get("needs") or {}).items()
-                                      if key in {"food", "rest", "social", "achievement", "fun"}}},
+                "runtime": observable_runtime_state(raw.get("runtime")),
                 "current_action": {
                     "id": action.id, "type": action.action_type, "status": action.status,
+                    "phase": life_action_phase(action.status),
                     "location_id": action.location_id, "target_npc_id": action.target_npc_id,
                     "target_resource_id": action.target_resource_id,
                     "arrives_at": action.arrives_at.isoformat() if action.arrives_at else None,
                     "ends_at": action.ends_at.isoformat() if action.ends_at else None,
                     "retry_at": action.retry_at.isoformat() if action.retry_at else None,
-                    "visible_intent": action_visible_intent(action),
+                    "visible_intent": observable["visible_intent"],
+                    "visible_intent_zh": observable["visible_intent_zh"],
+                    "visible_context": observable["visible_context"],
+                    "observable_state": observable["observable_state"],
                     "animation_cue": copy.deepcopy(action.animation_cue),
                 },
+                "observable_state": observable["observable_state"],
             })
         pairs = []
         for key, raw in sorted(source["relationships"].items()):

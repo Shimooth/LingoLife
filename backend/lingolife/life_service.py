@@ -16,25 +16,10 @@ from typing import Any, Mapping, Sequence
 from .animation import animation_cue, performance_to_dict, journey_performance, ambient_performance
 from .city import HOME_SLOTS, LOCATION_BY_ID, city_payload, home_slot
 from .db import Database, LifeWorldRevisionConflict
-from .life import LifeAction, action_visible_intent, stable_id
+from .life import LifeAction, stable_id
+from .life_observable import life_action_phase, project_observable_action
 from .life_world import LifeWorldEngine
 
-
-ACTION_COPY: dict[str, tuple[str, str]] = {
-    "prepare_food": ("Preparing food", "正在准备食物"),
-    "eat": ("Eating a meal", "正在吃饭"),
-    "sleep": ("Sleeping", "正在睡觉"),
-    "shower": ("Taking a shower", "正在洗澡"),
-    "use_television": ("Watching television", "正在看电视"),
-    "read": ("Reading", "正在阅读"),
-    "practice_hobby": ("Working on an interest or personal goal", "正在投入兴趣或个人目标"),
-    "borrow_household_item": ("Borrowing something from a friend", "正在向朋友借用物品"),
-    "clean_shared_space": ("Cleaning up", "正在收拾公共空间"),
-    "leave_dishes": ("Leaving the dishes for later", "把餐具留到稍后再收拾"),
-    "rest_alone": ("Taking some quiet time", "正在独处休息"),
-    "seek_company": ("Looking for company", "正在找人作伴"),
-    "talk_to_resident": ("Talking with someone", "正在和别人聊天"),
-}
 
 TOPIC_COPY: dict[str, tuple[str, str, str, str]] = {
     "shared_kitchen": ("A busy kitchen", "厨房里的小插曲", "They both needed the kitchen at the same time.", "两个人恰好同时需要使用厨房。"),
@@ -163,6 +148,59 @@ def _utc(value: datetime | None = None) -> datetime:
 
 def _profiles(entries: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
     return {str(entry["id"]): dict(entry.get("profile") or {}) for entry in entries}
+
+
+def _observable_location(action: LifeAction, public_location_id: str,
+                         home_location_id: str) -> tuple[str, str]:
+    """Name only the place a bystander could identify from the action."""
+    location = LOCATION_BY_ID.get(public_location_id)
+    if location:
+        return location.name, LOCATION_ZH_COPY.get(location.id, location.name)
+    internal = str(action.location_id or "").casefold()
+    room_copy = (
+        ("shared-kitchen", "Home kitchen", "家中厨房"),
+        ("kitchen", "Home kitchen", "家中厨房"),
+        ("shared-bathroom", "Shared bathroom", "共用浴室"),
+        ("bathroom", "Shared bathroom", "共用浴室"),
+        ("living-room", "Living room", "客厅"),
+        ("reading", "Reading room", "阅览室"),
+        ("practice", "Practice room", "练习室"),
+    )
+    for marker, label, label_zh in room_copy:
+        if marker in internal:
+            return label, label_zh
+    if public_location_id == home_location_id or public_location_id.startswith("home-"):
+        return {
+            "prepare_food": ("the home kitchen", "家中厨房"),
+            "eat": ("the dining area", "家中用餐区"),
+            "sleep": ("the bedroom", "卧室"),
+            "shower": ("the bathroom", "浴室"),
+            "use_television": ("the living room", "客厅"),
+            "read": ("a reading nook", "阅读角"),
+            "practice_hobby": ("a hobby corner", "兴趣角"),
+            "clean_shared_space": ("a shared room", "公共房间"),
+            "leave_dishes": ("the home kitchen", "家中厨房"),
+            "rest_alone": ("the living room", "客厅"),
+        }.get(action.action_type, ("home", "家中"))
+    return "Around the city", "城市中"
+
+
+def _observable_object(resource: Mapping[str, Any]) -> tuple[str | None, str | None]:
+    kind = str(resource.get("kind") or "")
+    identity = str(resource.get("id") or "").casefold()
+    if "music" in identity:
+        return "practice room", "音乐练习室"
+    if "gym" in identity:
+        return "training station", "训练区"
+    return {
+        "kitchen": ("kitchen", "厨房"), "television": ("television", "电视"),
+        "bathroom": ("shared bathroom", "共用浴室"),
+        "reading_space": ("reading space", "阅览区"),
+        "social_space": ("public lawn", "公共草坪"),
+        "dining_space": ("café table", "咖啡馆座位"),
+        "hobby_space": ("activity space", "活动区"),
+        "goal_space": ("project desk", "项目工作台"),
+    }.get(kind, (None, None))
 
 
 class LifeWorldService:
@@ -458,6 +496,10 @@ class LifeWorldService:
         base = city_payload(player_id, profile_entries, {}, self.engine.clock.game_date(moment))
         resident_base = {resident["id"]: resident for resident in base["npcs"]}
         story_views = self._story_views(state, profile_map, now=moment)
+        resource_by_id = {
+            str(resource.get("id")): resource for resource in state.get("resources", [])
+            if isinstance(resource, Mapping) and resource.get("id")
+        }
         trouble_by_npc: dict[str, dict[str, Any]] = {}
         for story in story_views:
             if story.get("trouble_signal") and story["status"] == "awaiting_management":
@@ -497,22 +539,57 @@ class LifeWorldService:
                 position = {"x": target["home"]["x"], "y": target["home"]["y"]}
             else:
                 position = dict(target["position"])
-            intent_en, intent_zh = ACTION_COPY.get(raw_action.action_type, (action_visible_intent(raw_action), action_visible_intent(raw_action)))
+            place_en, place_zh = _observable_location(
+                raw_action, action_location_id, authoritative_home_id,
+            )
+            resource = resource_by_id.get(str(raw_action.target_resource_id or ""), {})
+            object_en, object_zh = _observable_object(resource)
+            target_name = None
+            if raw_action.target_npc_id:
+                target_profile = profile_map.get(raw_action.target_npc_id, {})
+                target_name = str(target_profile.get("name") or raw_action.target_npc_id)
+            observable = project_observable_action(
+                raw_action, profile_map.get(npc_id, {}),
+                runtime=state["residents"][npc_id].get("runtime") or {},
+                target_name=target_name, location_label=place_en, location_label_zh=place_zh,
+                object_label=object_en, object_label_zh=object_zh,
+                location_id=str(raw_action.location_id or action_location_id),
+                resource_kind=str(resource.get("kind") or "") or None,
+            )
+            if observable["visible_context"].get("visibility") == "private":
+                action.update({"location_id": authoritative_home_id,
+                               "target_resource_id": None, "target_npc_id": None})
+            intent_en = str(observable["visible_intent"])
+            intent_zh = str(observable["visible_intent_zh"])
+            progress_start = (raw_action.planned_at if raw_action.status in {"planned", "traveling"}
+                              else raw_action.started_at)
+            progress_end = (raw_action.arrives_at if raw_action.status in {"planned", "traveling"}
+                            else raw_action.ends_at)
             action.update({
                 "type": raw_action.action_type, "planned_at": raw_action.planned_at.isoformat(),
                 "started_at": raw_action.started_at.isoformat() if raw_action.started_at else None,
-                "interruptibility": "contextual" if raw_action.interruptible else "locked",
+                "phase": life_action_phase(raw_action.status),
+                "interruptibility": ("private" if observable["visible_context"].get("visibility") == "private"
+                                     else "contextual" if raw_action.interruptible else "locked"),
                 "interruptible": raw_action.interruptible,
                 "visible_intent": intent_en, "visible_intent_zh": intent_zh,
+                "visible_context": observable["visible_context"],
                 "presentation": {"version": 2, "action_cue": raw_action.action_type,
                                  "scene": "household" if current_location_id.startswith("home-") else "city",
-                                 "fallback_animation_cue": raw_action.animation_cue},
+                                 "fallback_animation_cue": raw_action.animation_cue,
+                                 "progress": {
+                                     "kind": observable["visible_context"]["progress_kind"],
+                                     "started_at": progress_start.isoformat() if progress_start else None,
+                                     "ends_at": progress_end.isoformat() if progress_end else None,
+                                 },
+                                 "observable_state": observable["observable_state"]},
             })
             target.update({
                 "current_location_id": current_location_id, "position": position,
                 "is_home": is_internal_home_location or current_location_id == target["home"]["id"],
                 "household_id": resident.get("household_id"), "current_action": action,
                 "visible_intent": intent_en, "visible_intent_zh": intent_zh,
+                "observable_state": observable["observable_state"],
                 "trouble_signal": trouble_by_npc.get(npc_id),
                 "animation_cue": animation_cue(raw_action.animation_cue),
                 "current_activity": intent_en,
@@ -621,6 +698,26 @@ class LifeWorldService:
         resident = state["residents"][npc_id]
         action = LifeAction.from_dict(resident["current_action"])
         profile_map = _profiles(profile_entries)
+        resource = next((value for value in state.get("resources", [])
+                         if str(value.get("id")) == str(action.target_resource_id)), {})
+        object_en, object_zh = _observable_object(resource)
+        target_name = None
+        if action.target_npc_id:
+            target_profile = profile_map.get(action.target_npc_id, {})
+            target_name = str(target_profile.get("name") or action.target_npc_id)
+        public_location_id = str(action.location_id or resident["current_location_id"])
+        if public_location_id.startswith(f"{resident['household_id']}:"):
+            public_location_id = str(resident["home_location_id"])
+        place_en, place_zh = _observable_location(
+            action, public_location_id, str(resident["home_location_id"]),
+        )
+        observable = project_observable_action(
+            action, profile_map.get(npc_id, {}), runtime=resident.get("runtime") or {},
+            target_name=target_name, location_label=place_en, location_label_zh=place_zh,
+            object_label=object_en, object_label_zh=object_zh,
+            location_id=str(action.location_id or public_location_id),
+            resource_kind=str(resource.get("kind") or "") or None,
+        )
         stories = [story for story in self._story_views(state, profile_map, now=_utc(now))
                    if npc_id in story["participant_ids"]][:5]
         relationships = []
@@ -629,10 +726,15 @@ class LifeWorldService:
                 relationships.append(pair)
         return {
             "current_action": {"type": action.action_type, "status": action.status,
-                               "visible_intent": ACTION_COPY.get(action.action_type, (action_visible_intent(action), ""))[0],
+                               "phase": life_action_phase(action.status),
+                               "visible_intent": observable["visible_intent"],
+                               "visible_intent_zh": observable["visible_intent_zh"],
+                               "visible_context": observable["visible_context"],
+                               "observable_state": observable["observable_state"],
                                "location_id": action.location_id,
                                "target_npc_id": action.target_npc_id,
-                               "interruptibility": "contextual" if action.interruptible else "locked",
+                               "interruptibility": ("private" if observable["visible_context"].get("visibility") == "private"
+                                                    else "contextual" if action.interruptible else "locked"),
                                "animation_cue": action.animation_cue},
             "recent_life_stories": stories, "npc_relationships": relationships,
             "household_id": resident["household_id"],

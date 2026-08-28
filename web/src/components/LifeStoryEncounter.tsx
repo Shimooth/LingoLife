@@ -1,11 +1,13 @@
-import {useEffect,useMemo,useRef,useState} from 'react'
+import {Suspense,useEffect,useMemo,useRef,useState} from 'react'
 import {AnimatePresence,motion,useReducedMotion} from 'motion/react'
 import {Canvas} from '@react-three/fiber'
 import {ContactShadows,PerspectiveCamera} from '@react-three/drei'
 import {defaultAvatar} from '../avatar'
 import type {AvatarConfig,LifeInterventionOption,LifeStory} from '../types'
 import type {LifeLanguage} from '../life/lifeActionCatalog'
-import {DirectedCharacter3D,type CharacterMotion} from '../three/characters'
+import {deriveLifeStoryParticipantExpression} from '../life/characterExpression'
+import {CharacterEmote,DirectedCharacter3D,type CharacterMotion} from '../three/characters'
+import {IndoorEnvironment3D,INTERIOR_THEME_COPY,interiorThemeFor,type InteriorTheme} from '../three/interiors'
 import './LifeStoryEncounter.css'
 
 type Props={
@@ -74,26 +76,31 @@ const statusLabel=(story:LifeStory,observed:boolean,language:LifeLanguage)=>{
  return language==='zh'?'尚未观察':'Not witnessed yet'
 }
 
-function LifeStoryCast3D({story,participants,avatars,reducedMotion}:{story:LifeStory;participants:{id:string;name:string}[];avatars?:Record<string,AvatarConfig>;reducedMotion:boolean}){
+function LifeStoryCast3D({story,participants,avatars,reducedMotion,theme,language}:{story:LifeStory;participants:{id:string;name:string}[];avatars?:Record<string,AvatarConfig>;reducedMotion:boolean;theme:InteriorTheme;language:LifeLanguage}){
  const cast=participants.slice(0,3),count=cast.length
- const positions=count===1?[0]:count===2?[-1.25,1.25]:[-1.65,0,1.65]
- const terminal=TERMINAL.has(story.status)
+ // Keep the authored furniture readable and reserve the right side for the
+ // story card. The cast remains in a clear foreground lane instead of being
+ // hidden behind tables, shelves, or UI.
+ const positions=count===1?[-1.55]:count===2?[-2.45,-.55]:[-2.95,-1.5,-.05]
+ const expressions=cast.map((person,index)=>deriveLifeStoryParticipantExpression(story,person.id,index))
  return <div className="life-story-encounter__cast-3d" aria-hidden>
-  <Canvas dpr={[1,1.3]} gl={{antialias:true,alpha:true,powerPreference:'low-power'}}>
-   <PerspectiveCamera makeDefault position={[0,2.05,7.4]} fov={35} near={.1} far={22}/>
+  <Canvas dpr={[1,1.3]} shadows gl={{antialias:true,alpha:true,powerPreference:'low-power'}}>
+   <PerspectiveCamera makeDefault position={[0,2.42,8.9]} fov={37} near={.1} far={28}/>
    <ambientLight intensity={1.15}/><hemisphereLight args={['#fff6df','#627a72',1.45]}/>
-   <directionalLight position={[-4,6,5]} intensity={2.05} color="#fff0d8"/>
+   <directionalLight position={[-4,6,5]} intensity={2.05} color="#fff0d8" castShadow shadow-mapSize={[512,512]}/>
    <pointLight position={[3,2.4,2]} intensity={5.5} distance={8} color="#f1a67d"/>
+   <Suspense fallback={null}><IndoorEnvironment3D theme={theme}/></Suspense>
    {cast.map((person,index)=>{
     const authoredCue=story.presentation?.beats?.find(beat=>beat.speaker_id===person.id)?.animation_cue
-    const animation=(authoredCue??(terminal?'look_around':index?'listen':'talk')) as CharacterMotion
+    const animation=(authoredCue??expressions[index].motion) as CharacterMotion
     const x=positions[index]??0,rotation=x===0?0:x<0?.42:-.42
-    return <group key={person.id} position={[x,-.15,index===1&&count===3?.12:0]} rotation={[0,rotation,0]}>
+    return <group key={person.id} position={[x,-.15,.42+(index===1&&count===3?.12:0)]} rotation={[0,rotation,0]}>
      <DirectedCharacter3D avatar={avatars?.[person.id]??fallbackAvatar(person.id,index)} animation={animation} performance={story.presentation?.performance} performanceMode="encounter" performanceKey={`${story.id}:${story.status}:${animation}`} performanceVariant={index} reducedMotion={reducedMotion} name={person.name} seed={person.id} scale={count===3?.65:.78}/>
     </group>
    })}
-   <ContactShadows position={[0,-.24,0]} opacity={.27} scale={6.4} blur={2.5} far={4}/>
+   <ContactShadows position={[0,-.24,.15]} opacity={.29} scale={7.4} blur={2.5} far={4}/>
   </Canvas>
+  <div className="life-story-encounter__emotes">{cast.map((person,index)=><span key={`${person.id}:${expressions[index].key}`} title={expressions[index].label[language]}><CharacterEmote expression={expressions[index]} language={language} size={35} decorative/></span>)}</div>
  </div>
 }
 
@@ -114,6 +121,8 @@ export function LifeStoryEncounter({story,language='zh',locationName,locationIma
  const canObserve=current.level!=='thread'&&!observed
  const managementPrompt=localized(current.management?.prompt,current.management?.prompt_zh,language)
  const subject=language==='zh'?current.presentation?.subject_zh?.trim()||current.presentation?.subject:current.presentation?.subject?.trim()||current.presentation?.subject_zh
+ const interiorTheme=useMemo(()=>interiorThemeFor({locationId:current.location_id??current.presentation?.location?.id,hint:[current.title,current.title_zh,current.summary,current.summary_zh,current.presentation?.subject,current.presentation?.subject_zh].filter(Boolean).join(' ')}),[current.location_id,current.presentation?.location?.id,current.presentation?.subject,current.presentation?.subject_zh,current.summary,current.summary_zh,current.title,current.title_zh])
+ const interiorCopy=INTERIOR_THEME_COPY[interiorTheme][language]
  const reactions=current.participant_reactions??current.outcome?.participant_reactions??[]
  const consequences=current.consequences??current.outcome?.consequences??[]
 
@@ -139,9 +148,10 @@ export function LifeStoryEncounter({story,language='zh',locationName,locationIma
     <div><small>{levelLabel(current,language)}{locationName?` · ${locationName}`:''}</small><h2 id="life-story-title">{title.primary}</h2>{title.secondary&&<p lang={language==='zh'?'en':'zh-CN'}>{title.secondary}</p>}</div>
     <button ref={closeRef} type="button" onClick={onClose} disabled={Boolean(busy)} aria-label={language==='zh'?'关闭事件详情':'Close story details'}>×</button>
    </header>
-   <section className="life-story-encounter__scene" style={locationImage?{backgroundImage:`linear-gradient(180deg,rgba(229,240,233,.56),rgba(105,137,128,.76)),url("${locationImage}")`}:undefined}>
+   <section className="life-story-encounter__scene" data-interior-theme={interiorTheme} style={locationImage?{backgroundImage:`linear-gradient(180deg,rgba(229,240,233,.26),rgba(105,137,128,.5)),url("${locationImage}")`}:undefined}>
+    <span className="life-story-encounter__scene-kind">{interiorCopy}</span>
     <div className="life-story-encounter__cast" aria-label={language==='zh'?'参与者':'Participants'}>
-     <LifeStoryCast3D story={current} participants={participants} avatars={participantAvatars} reducedMotion={Boolean(reduce)}/>
+     <LifeStoryCast3D story={current} participants={participants} avatars={participantAvatars} reducedMotion={Boolean(reduce)} theme={interiorTheme} language={language}/>
      <div className="life-story-encounter__cast-names">{participants.slice(0,3).map((person,index)=><motion.b key={person.id} initial={reduce?false:{opacity:0,y:8}} animate={{opacity:1,y:0}} transition={{delay:reduce?0:index*.08}}>{person.name}</motion.b>)}</div>
      {participants.length>3&&<span className="life-story-encounter__more">+{participants.length-3}</span>}
     </div>

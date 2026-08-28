@@ -3,7 +3,8 @@ import {useCallback,useEffect,useMemo,useRef,useState} from 'react'
 import {DISTRICT_NAMES,getHomeLocationAsset,getLocationAsset,locationCopy,type LocationAsset} from '../locationAssets'
 import {LocationIcon} from './LocationIcon'
 import {AvatarStage} from './AvatarStage'
-import type {AnimationCue,AvatarConfig,ResidentWorldAction,TroubleSignal} from '../types'
+import type {AnimationCue,AvatarConfig,LifeStory,PublicRelationshipSummary,ResidentWorldAction,TroubleSignal} from '../types'
+import type {ObservableCharacterState} from '../life/characterExpression'
 import type {NormalizedResidentAction} from '../life/normalizeWorldSnapshot'
 import './CityMap.css'
 import './CityMapExpansion.css'
@@ -23,6 +24,9 @@ export type CityCharacter={
   visibleIntent?:string
   visibleIntentZh?:string
   troubleSignal?:TroubleSignal|null
+  observableState?:ObservableCharacterState|null
+  storyContext?:LifeStory|null
+  relationshipContext?:PublicRelationshipSummary|null
   householdId?:string
 }
 export type CityMapProps={

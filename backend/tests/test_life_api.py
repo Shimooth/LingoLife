@@ -184,7 +184,7 @@ def test_first_world_is_a_life_city_dto_and_repeated_read_keeps_revision(tmp_pat
         assert resident["current_action"]["status"] in {
             "planned", "traveling", "performing", "blocked", "retrying",
         }
-        assert resident["current_action"]["interruptibility"] in {"contextual", "locked"}
+        assert resident["current_action"]["interruptibility"] in {"contextual", "private", "locked"}
 
     second = client.get("/api/v1/world", headers=headers)
     assert second.status_code == 200, second.text
@@ -280,6 +280,42 @@ def test_city_projects_internal_household_rooms_to_home_without_losing_room_deta
     assert {resource["room_id"] for resource in household["resources"]} >= {
         "kitchen", "living_room", "bathroom",
     }
+
+
+def test_city_redacts_private_household_actions_from_observer_status(tmp_path):
+    client = _client(tmp_path)
+    headers, user = _auth(client, "private-room-projection")
+    initial = client.get("/api/v1/world", headers=headers).json()
+    home_id = next(value for value in initial["npcs"] if value["id"] == "emma")["home"]["id"]
+
+    db = client.app.state.db
+    state = deepcopy(db.get_life_world_state(user["player_id"]))
+    resident = state["residents"]["emma"]
+    resident["current_location_id"] = f"{resident['household_id']}:shared-bathroom"
+    resident["current_action"].update({
+        "action_type": "shower", "status": "performing",
+        "location_id": resident["current_location_id"],
+        "target_resource_id": "shared-bathroom", "interruptible": False,
+        "started_at": "2026-08-28T09:55:00+00:00",
+        "ends_at": "2099-01-01T00:00:00+00:00",
+    })
+    state["next_transition_at"] = "2099-01-01T00:00:00+00:00"
+    db.save_life_world_state(
+        user["player_id"], state, rules_version=state["rules_version"],
+        last_advanced_at=state["last_advanced_at"],
+        next_transition_at=state["next_transition_at"], expected_revision=state["revision"],
+    )
+
+    world = client.get("/api/v1/world", headers=headers).json()
+    visible = next(value for value in world["npcs"] if value["id"] == "emma")
+    encoded = json.dumps(visible, ensure_ascii=False).casefold()
+    assert visible["current_location_id"] == home_id
+    assert visible["current_action"]["interruptibility"] == "private"
+    assert visible["current_action"]["visible_context"]["visibility"] == "private"
+    assert visible["visible_intent_zh"] == "正在家中处理私人事务，暂时不便打扰"
+    assert "shower" not in visible["visible_intent"].casefold()
+    assert "浴室" not in visible["visible_intent_zh"]
+    assert "shared-bathroom" not in encoded
 
 
 def test_expired_observed_moment_stays_in_history_but_leaves_live_city_surface(tmp_path):

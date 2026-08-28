@@ -646,7 +646,13 @@ def rank_life_actions(context: NpcLifeContext, catalog: LifeCatalog | None = Non
                 reasons.append(f"low_{need}")
         trait_matches = traits & set(template.trait_affinities)
         interest_matches = interests & set(template.interest_affinities)
-        score += 8 * len(trait_matches) + 10 * len(interest_matches)
+        # ``practice_hobby`` is an umbrella action. A resident with three
+        # interests should receive one affinity signal, not triple credit over
+        # every more specific daily action.
+        if template.type == "practice_hobby":
+            score += 8 * min(1, len(trait_matches)) + 10 * min(1, len(interest_matches))
+        else:
+            score += 8 * len(trait_matches) + 10 * len(interest_matches)
         if trait_matches:
             reasons.append("personality_fit")
         if interest_matches:
@@ -655,7 +661,7 @@ def rank_life_actions(context: NpcLifeContext, catalog: LifeCatalog | None = Non
             score += 16
             reasons.append("habit")
         if template.type == "practice_hobby" and goal_tags & interests:
-            score += 14
+            score += 8
             reasons.append("goal_relevance")
         if context.current_location_kind in template.preferred_location_kinds:
             score += 8
@@ -679,14 +685,16 @@ def rank_life_actions(context: NpcLifeContext, catalog: LifeCatalog | None = Non
                 and "career" in goal_tags
             ) or (template.type == "read" and context.scheduled_kind == "study")
             if schedule_aligned:
-                score += 18
+                score += 12 if template.type == "practice_hobby" else 18
                 reasons.append("schedule_alignment")
             elif not urgent:
                 score -= 24
                 reasons.append("schedule_conflict")
         repetitions = context.recent_action_types.count(template.type)
         if repetitions:
-            score -= 20 * repetitions
+            score -= (28 if template.type == "practice_hobby" else 20) * repetitions
+            if template.type == "practice_hobby" and context.recent_action_types[0] == template.type:
+                score -= 10
             reasons.append("recent_repetition")
         target_resource_id = _resource_target(template, context)
         if template.required_resource_kinds and not target_resource_id:
@@ -697,8 +705,11 @@ def rank_life_actions(context: NpcLifeContext, catalog: LifeCatalog | None = Non
             ordered = sorted(context.nearby_resident_ids)
             target_npc_id = ordered[stable_number(context.npc_id, context.decision_key, template.type,
                                                   rules_version=context.rules_version) % len(ordered)]
+        # A bounded routine preference prevents equally healthy residents from
+        # marching into the same umbrella activity. Urgent needs still dwarf
+        # this range, while ordinary days gain visible, replayable variety.
         score += stable_fraction(context.player_id, context.npc_id, context.decision_key,
-                                 template.type, "variation", rules_version=context.rules_version) * 7
+                                 template.type, "variation", rules_version=context.rules_version) * 16
         candidates.append(ActionCandidate(template.type, round(score, 4), tuple(dict.fromkeys(reasons)),
                                           target_resource_id, target_npc_id))
     return tuple(sorted(candidates, key=lambda value: (-value.score, value.action_type)))

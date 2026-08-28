@@ -1,7 +1,9 @@
 import { useRef, useState, type ReactNode } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
-import { ContactShadows, PerspectiveCamera } from '@react-three/drei'
+import { ContactShadows, Html, PerspectiveCamera } from '@react-three/drei'
 import { MathUtils, Mesh, type Group, type Material } from 'three'
+import { deriveAnimationExpression } from '../../life/characterExpression'
+import { CharacterEmote } from './CharacterEmote'
 import { DirectedCharacter3D } from './DirectedCharacter3D'
 import type { ConversationAtmosphere, ConversationStage3DProps, SpeechLine } from './types'
 import './characters.css'
@@ -103,6 +105,8 @@ export function ConversationStage3D({ npcAvatar, playerAvatar, showPlayerAvatar 
       ? 'conversation_speak'
       : 'conversation_react'
   const lineKey = performanceKey ?? fallbackLine?.key ?? 'opening'
+  const npcExpression = deriveAnimationExpression(npcMotion, `conversation:${npcName}:${lineKey}:${npcMotion}`)
+  const showNpcExpression = speaker === 'npc' && !fallbackLine?.streaming && ['happy','sad','tired','jump','crouch','push'].includes(npcMotion)
   const you = playerName ?? (language === 'zh' ? '你' : 'You')
   const compactViewport = typeof window !== 'undefined' && window.matchMedia('(max-width: 779px)').matches
 
@@ -120,6 +124,7 @@ export function ConversationStage3D({ npcAvatar, playerAvatar, showPlayerAvatar 
           : <ObserverPresence accent={palette.accent} />}
         <group position={[compactViewport ? .72 : 1.48, .02, -.28]} rotation={[0, compactViewport ? -.08 : -.16, 0]}>
           <DirectedCharacter3D avatar={npcAvatar} animation={npcMotion} performance={speaker === 'npc' && !fallbackLine?.streaming ? performance : undefined} performanceMode={npcPerformanceMode} performanceKey={`npc:${lineKey}`} reducedMotion={reducedMotion} scale={1.02} name={npcName} seed={npcName} />
+          {showNpcExpression && !sceneryMode && <Html center position={[0,1.78,0]} zIndexRange={[6,4]}><CharacterEmote key={npcExpression.key} expression={npcExpression} language={language} size={34} className="conversation-stage-3d__emote" /></Html>}
         </group>
       </FadingCast>
       <ContactShadows position={[0, -.2, .15]} opacity={.34} scale={8} blur={2.6} far={4} />

@@ -1,4 +1,5 @@
 export * from './lifeActionCatalog'
+export * from './characterExpression'
 export * from './lifeStoryPresentation'
 export * from './normalizeWorldSnapshot'
 export * from './useWorldSimulation'

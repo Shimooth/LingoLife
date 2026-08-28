@@ -4,7 +4,8 @@ import {useEffect,useMemo,useRef,useState,type ComponentRef,type MutableRefObjec
 import * as THREE from 'three'
 import {defaultAvatar} from '../../avatar'
 import type {CityCharacter,CityLandmark} from '../../components/CityMap'
-import {DirectedCharacter3D,type CharacterMotion,type CharacterPerformance,type CharacterPerformanceMode} from '../characters'
+import {deriveResidentExpression} from '../../life/characterExpression'
+import {CharacterEmote,DirectedCharacter3D,type CharacterMotion,type CharacterPerformance,type CharacterPerformanceMode} from '../characters'
 import {
  BUILDING_LOTS,BUILDING_MODELS,CITY_PLATFORM_OUTLINE,DISTRICTS,KAYKIT_ASSET_BASE,KAYKIT_PROP_MODELS,KAYKIT_ROAD_MODELS,KIND_COLORS,ROAD_TILES,ROAD_TILE_SCALE,SKY_ROAD_EXITS,STREET_PROPS,TREES,WORLD_DEPTH,WORLD_WIDTH,
  buildingModelFor,hashString,worldPosition,
@@ -602,12 +603,17 @@ function CharacterMarker({character,lot,route,active,actors,serverTime,reducedMo
  const color=`hsl(${characterHash%360} 62% 63%)`
  const moving=visualState==='walking_to_event'
  const waiting=visualState==='waiting_at_event'
+ const expression=deriveResidentExpression({
+  npcId:character.id,action:character.lifeAction,animationCue:character.animationCue,
+  observableState:character.observableState,troubleSignal:character.troubleSignal,
+  story:character.storyContext,relationship:character.relationshipContext,
+ })
  const animation:CharacterMotion=moving
   ?(character.animationCue==='run'?'run':'walk')
   :waiting
-   ?(action?.state==='walking_to_event'?'look_around':character.animationCue??'listen')
-   :character.animationCue??'idle'
- const directedPerformance=waiting&&action?.state==='walking_to_event'?undefined:action?.performance
+   ?(action?.state==='walking_to_event'?'look_around':expression.motion)
+   :expression.motion
+ const directedPerformance=character.lifeAction?.source==='life'||waiting&&action?.state==='walking_to_event'?undefined:action?.performance
  const performanceMode:CharacterPerformanceMode=moving?'journey':waiting?'encounter':visualState==='event_pending'?'event_pending':'ambient'
  const rawJourneyDuration=(arrivesAt-startedAt)/1_000
  const journeyDurationSeconds=Number.isFinite(rawJourneyDuration)&&rawJourneyDuration>0?rawJourneyDuration:undefined
@@ -616,9 +622,8 @@ function CharacterMarker({character,lot,route,active,actors,serverTime,reducedMo
  const stateLabel=language==='zh'?({idle:'空闲',living:'正在生活',event_pending:'有待办',walking_to_event:'前往事件',waiting_at_event:'等待查看'} as const)[visualState]:({idle:'Idle',living:'Living their day',event_pending:'Pending',walking_to_event:'On the way',waiting_at_event:'Waiting'} as const)[visualState]
  const livingDetail=language==='zh'?character.visibleIntentZh?.trim()||character.visibleIntent?.trim():character.visibleIntent?.trim()||character.visibleIntentZh?.trim()
  const troubleCopy=language==='zh'?character.troubleSignal?.summary_zh?.trim()||'似乎遇到了一点麻烦':character.troubleSignal?.summary?.trim()||'Something seems to be troubling them'
- const statusGlyph=character.troubleSignal?'?':moving?'➜':waiting?'!':visualState==='event_pending'?'✦':visualState==='living'?'○':'·'
  return <group ref={actor} position={position} rotation-y={waitingRotation??lot?.rotation??0} onClick={event=>{event.stopPropagation();onClick()}} onPointerDown={event=>event.stopPropagation()} onPointerOver={event=>{event.stopPropagation();setHovered(true)}} onPointerOut={()=>setHovered(false)}>
-  <DirectedCharacter3D avatar={avatar} animation={animation} performance={directedPerformance} performanceMode={performanceMode} performanceKey={`${action?.event_id??'daily'}:${visualState}:${animation}`} performanceVariant={action?.participant_index??characterHash%2} playbackRate={playbackRate} reducedMotion={reducedMotion} name={character.name} seed={character.id} scale={characterScale}/>
+  <DirectedCharacter3D avatar={avatar} animation={animation} performance={directedPerformance} performanceMode={performanceMode} performanceKey={`${action?.event_id??'daily'}:${visualState}:${expression.key}:${animation}`} performanceVariant={action?.participant_index??characterHash%2} playbackRate={playbackRate} reducedMotion={reducedMotion} name={character.name} seed={character.id} scale={characterScale}/>
   <mesh position-y={.5}>
    <cylinderGeometry args={[.48,.48,1,12]}/><meshBasicMaterial transparent opacity={0} depthWrite={false}/>
   </mesh>
@@ -628,9 +633,10 @@ function CharacterMarker({character,lot,route,active,actors,serverTime,reducedMo
   <mesh position-y={.012} rotation-x={-Math.PI/2} scale={active?1.25:1}>
    <ringGeometry args={active?[.264,.376,36]:[.25,.34,32]}/><meshBasicMaterial color={active?'#ff8d5b':color} transparent opacity={active ? .94 : .62} depthWrite={false} side={THREE.DoubleSide}/>
   </mesh>
+  {active&&<Html center position={[0,1.72,0]} zIndexRange={[40,10]}><CharacterEmote key={expression.key} expression={expression} language={language} size={28} className="world3d-character-follow-emote"/></Html>}
   {!active&&<Html center position={[0,1.72,0]} zIndexRange={[40,10]}>
    <div className="world3d-character-ui" style={{'--character-color':color,'--character-ui-shift':action?.event_id?`${action.participant_index ? 12 : -12}px`:'0px'} as React.CSSProperties}>
-    <button type="button" className={`world3d-character-status is-${visualState} ${character.troubleSignal?'has-trouble':''}`} onPointerDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();if(character.troubleSignal&&onTrouble)onTrouble();else if(action?.event_id&&visualState!=='event_pending')onEvent(action.event_id);else onClick()}} aria-label={character.troubleSignal?troubleCopy:stateLabel}>{statusGlyph}</button>
+    <button type="button" className={`world3d-character-status has-expression is-${visualState} ${character.troubleSignal?'has-trouble':''}`} onPointerDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();if(character.troubleSignal&&onTrouble)onTrouble();else if(action?.event_id&&visualState!=='event_pending')onEvent(action.event_id);else onClick()}} aria-label={character.troubleSignal?troubleCopy:`${stateLabel} · ${expression.label[language]}`}><CharacterEmote key={expression.key} expression={expression} language={language} size={28} decorative/></button>
     <button type="button" className={`world3d-character world3d-character--model ${active?'is-active':''}`} onPointerDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();onClick()}} aria-label={`${language==='zh'?'跟随':'Follow '}${character.name}`}>
      <b>{character.name}</b>
      {(hovered||active||moving||waiting||visualState==='living')&&<small>{moving||waiting?stateLabel:visualState==='living'?livingDetail||stateLabel:character.location.place||(language==='zh'?'正在城市中':'Around town')}</small>}

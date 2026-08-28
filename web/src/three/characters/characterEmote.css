@@ -1,0 +1,11 @@
+.character-emote{position:relative;display:inline-grid;place-items:center;isolation:isolate;line-height:0;pointer-events:none;filter:drop-shadow(0 5px 8px rgba(38,50,48,.22));transform-origin:50% 85%;animation:character-emote-arrive .42s cubic-bezier(.18,.88,.25,1.24) both}
+.character-emote__sprite{position:relative;z-index:2;display:block;flex:none;background-repeat:no-repeat}
+.character-emote__vfx{position:absolute;z-index:1;top:50%;left:50%;width:210%;max-width:none;aspect-ratio:1;object-fit:contain;opacity:.38;mix-blend-mode:screen;transform:translate(-50%,-50%);animation:character-emote-vfx 2.2s ease-in-out infinite}
+.character-emote.is-tired{animation-name:character-emote-drift}.character-emote.is-tense,.character-emote.is-trouble{animation-name:character-emote-tense}.character-emote.is-positive,.character-emote.is-romantic{animation-name:character-emote-pop}
+.character-emote.is-intensity-3 .character-emote__vfx{width:245%;opacity:.52}.character-emote.is-intensity-1 .character-emote__vfx{width:175%;opacity:.25}
+@keyframes character-emote-arrive{from{opacity:0;transform:translateY(7px) scale(.65) rotate(-7deg)}to{opacity:1;transform:translateY(0) scale(1) rotate(0)}}
+@keyframes character-emote-pop{0%{opacity:0;transform:translateY(8px) scale(.55) rotate(-6deg)}70%{opacity:1;transform:translateY(-2px) scale(1.08) rotate(3deg)}100%{transform:translateY(0) scale(1)}}
+@keyframes character-emote-drift{0%{opacity:0;transform:translateY(3px) scale(.78)}100%{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes character-emote-tense{0%{opacity:0;transform:translateY(5px) scale(.75)}65%{transform:translateX(-1px) scale(1.06)}75%{transform:translateX(1px) scale(1.06)}100%{opacity:1;transform:translateX(0) scale(1)}}
+@keyframes character-emote-vfx{0%,100%{opacity:.18;transform:translate(-50%,-50%) scale(.78) rotate(-8deg)}50%{opacity:.5;transform:translate(-50%,-50%) scale(1.06) rotate(7deg)}}
+@media(prefers-reduced-motion:reduce){.character-emote,.character-emote__vfx{animation:none}}

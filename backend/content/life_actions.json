@@ -141,7 +141,7 @@
     {
       "type": "practice_hobby",
       "label": "Pursue an interest or personal goal",
-      "need_weights": {"fun": 0.9, "achievement": 0.85},
+      "need_weights": {"fun": 0.45, "achievement": 0.45},
       "trait_affinities": ["creative", "curious", "ambitious"],
       "interest_affinities": ["music", "art", "fitness", "photography", "gaming", "cooking"],
       "required_resource_kinds": [],
