@@ -84,26 +84,18 @@ export const LOCATION_ASSETS:Record<KnownLocationId,LocationAsset>=Object.fromEn
 
 export const HOME_LOCATION_ASSET:LocationAsset={
  id:'home',icon:'community',image:'/assets/homes/v3/bubble.jpg',accent:'#b66e4d',
- zh:{name:'角色的家',category:'私人住宅',description:'属于角色自己的生活空间。熟悉的物件和窗外的城市，让在这里发生的对话更私人也更放松。',hours:'私人空间',highlights:['城市窗景','生活收藏','安静客厅']},
- en:{name:'Character home',category:'Private residence',description:'A personal living space where familiar objects and the city outside make conversations quieter and more intimate.',hours:'Private',highlights:['City view','Personal collection','Quiet living room']},
+ zh:{name:'共享住宅',category:'共同生活空间',description:'所有居民共同生活的住宅。客厅、厨房和日常物品连接着每个人的生活，也让关系自然发生变化。',hours:'居民空间',highlights:['共享客厅','共同厨房','居民生活']},
+ en:{name:'Shared home',category:'Community residence',description:'The one home shared by every resident. Its living room, kitchen, and everyday objects connect their lives and let relationships evolve naturally.',hours:'Residents only',highlights:['Shared lounge','Common kitchen','Life together']},
 }
 
-const HOME_SCENES=['bubble','book','plant','retro','space','harbor'] as const
-
-export function getHomeLocationAsset(npcId?:string|null,selected?:string|null):LocationAsset{
- const key=npcId||'default'
- let hash=2166136261
- for(let index=0;index<key.length;index++)hash=Math.imul(hash^key.charCodeAt(index),16777619)
- const scene=HOME_SCENES.includes(selected as typeof HOME_SCENES[number])?selected as typeof HOME_SCENES[number]:HOME_SCENES[Math.abs(hash)%HOME_SCENES.length]
- return {...HOME_LOCATION_ASSET,image:`/assets/homes/v3/${scene}.jpg`}
-}
+export function getHomeLocationAsset():LocationAsset{return HOME_LOCATION_ASSET}
 
 export const DISTRICT_NAMES:Record<string,{zh:string;en:string}>={
  'North Gate':{zh:'北门区',en:'North Gate'},'Canal Quarter':{zh:'运河区',en:'Canal Quarter'},Eastside:{zh:'东区',en:'Eastside'},'West End':{zh:'西区',en:'West End'},Central:{zh:'市中心',en:'Central'},'Old Town':{zh:'老城区',en:'Old Town'},Harbor:{zh:'云际区',en:'Cloudline'},Southbank:{zh:'南部城区',en:'South Quarter'},Southwest:{zh:'西南区',en:'Southwest'},'University Quarter':{zh:'大学区',en:'University Quarter'},Greenway:{zh:'绿道区',en:'Greenway'},
 }
 
-export function getLocationAsset(id?:string|null,kind?:string,npcId?:string|null,homeBackground?:string|null):LocationAsset{
- if(id?.startsWith('home-')||id==='home')return getHomeLocationAsset(npcId||id,homeBackground)
+export function getLocationAsset(id?:string|null,kind?:string):LocationAsset{
+ if(id?.startsWith('home-')||id==='home')return getHomeLocationAsset()
  if(id&&id in LOCATION_ASSETS)return LOCATION_ASSETS[id as KnownLocationId]
  const fallbackId=KNOWN_LOCATION_IDS.find(candidate=>{
   const scene=seeds[candidate].scene

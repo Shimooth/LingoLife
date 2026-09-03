@@ -15,99 +15,6 @@ import {
   resolveChibiOutfit,
 } from "../three/characters/characterAssets";
 const skinTones=["#f7d7c4","#efb99b","#d99772","#b87352","#8b533b","#57372f"]
-const homeBackgrounds=["bubble","book","plant","retro","space","harbor"]
-const label = (s: string) => s[0].toUpperCase() + s.slice(1);
-const zhLabels: Record<string, string> = {
-  hair: "发型",
-  swoop:"俏皮侧分",sprout:"小芽短发",curls:"蓬松卷发",shaggy:"乱翘短发",
-  waves: "波浪长发",
-  bob: "波波头",
-  pixie: "精灵短发",
-  bun: "丸子头",
-  braids: "编发",
-  curly: "卷发",
-  ponytail: "马尾",
-  locs: "锁发",
-  straight: "直发",
-  mohawk: "莫西干",
-  face: "脸型",
-  oval: "椭圆脸",
-  round: "圆形",
-  heart: "心形脸",
-  square: "方形脸",
-  long: "长形脸",
-  eyes: "眼睛",
-  soft: "柔和",
-  wide: "大眼",
-  sleepy: "慵懒",
-  brows: "眉毛",
-  bold: "浓眉",
-  nose: "鼻子",
-  button: "小巧",
-  mouth: "嘴型",
-  open:"开心张嘴",cat:"猫猫嘴",pout:"嘟嘟嘴",tongue:"吐舌头",
-  smile: "微笑",
-  tiny: "小巧",
-  outfit: "穿着",
-  jumper:"软糯套头衫",playful:"搞怪上衣",
-  sweater: "毛衣",
-  hoodie: "连帽衫",
-  blazer: "西装",
-  dress: "连衣裙",
-  tee: "T恤",
-  overalls: "背带装",
-  cardigan: "开衫",
-  jacket: "夹克",
-  pants:"裤子",balloon:"灯笼裤",shorts:"短裤",cargo:"工装裤",pleated:"百褶短裤",
-  accessory: "配饰",
-  none: "无",
-  glasses: "眼镜",
-  earrings: "耳环",
-  headphones: "耳机",
-  hairclip: "发夹",
-  necklace: "项链",
-  scarf: "围巾",
-  beanie: "针织帽",
-  freckles: "雀斑",
-  frogclip:"青蛙发夹",
-  bean:"豆豆脸",dot:"小圆点",sparkle:"星星眼",curious:"好奇眼",wink:"眨眨眼",worried:"八字眉",triangle:"三角鼻",
-  homeBackground:"家的背景",bubble:"糖果阁楼",book:"书香小窝",plant:"奇趣植物屋",retro:"复古波普屋",space:"太空舱",harbor:"云端木屋",
-};
-const enLabels: Record<string, string> = {
-  hair: "Hair",
-  face: "Face shape",
-  eyes: "Eyes",
-  brows: "Eyebrows",
-  nose: "Nose",
-  mouth: "Mouth",
-  outfit: "Clothing",
-  accessory: "Accessories",
-  pants:"Pants",homeBackground:"Home background",swoop:"Swoop",sprout:"Sprout",curls:"Curls",shaggy:"Shaggy",bean:"Bean",dot:"Dot",sparkle:"Sparkle",curious:"Curious",wink:"Wink",tiny:"Tiny",worried:"Worried",triangle:"Triangle",open:"Open smile",cat:"Cat mouth",pout:"Pout",tongue:"Tongue",jumper:"Jumper",playful:"Playful top",balloon:"Balloon pants",straight:"Straight pants",shorts:"Shorts",cargo:"Cargo pants",pleated:"Pleated shorts",frogclip:"Frog clip",bubble:"Candy loft",book:"Book nest",plant:"Plant lab",retro:"Retro pop",space:"Space pod",harbor:"Cloud cabin",
-  hairclip: "Hair clip",
-  tee: "T-shirt",
-  locs: "Locs",
-};
-const zhContext: Record<string, string> = {
-  "face.round": "圆脸",
-  "face.long": "长形脸",
-  "eyes.round": "圆眼",
-  "eyes.oval": "椭圆眼",
-  "eyes.dot": "豆豆眼",
-  "eyes.soft": "柔和眼",
-  "eyes.wide": "大眼",
-  "brows.soft": "柔和眉",
-  "brows.bold": "浓眉",
-  "brows.tiny": "小弯眉",
-  "pants.straight": "直筒裤",
-  "nose.button": "小巧鼻",
-  "nose.long": "修长鼻",
-  "nose.wide": "宽鼻",
-  "nose.round": "圆圆鼻",
-  "nose.heart": "爱心鼻",
-  "mouth.soft": "自然嘴型",
-  "mouth.bold": "饱满嘴型",
-  "mouth.tiny": "小巧嘴型",
-};
 const split = (value: string, max: number) =>
   value
     .split(/[,，]/)
@@ -142,16 +49,11 @@ export function CharacterStudio({
   const relationshipOptions=Array.from(new Map(relationshipCandidates
     .filter(candidate=>candidate.id!==editingNpcId)
     .map(candidate=>[candidate.id,candidate])).values());
-  const householdWithId=(profile.householdWithIds??[]).find(id=>id&&id!==editingNpcId)??"";
   const familyIds=Array.from(new Set((profile.familyIds??[]).filter(id=>id&&id!==editingNpcId))).slice(0,4);
   const set = <K extends keyof NpcProfile>(key: K, value: NpcProfile[K]) =>
     onChange({ ...profile, [key]: value });
   const avatar = (key: string, value: string) =>
     set("avatar", { ...profile.avatar, [key]: value, strokes: [] });
-  const optionLabel = (value: string, group?: string) =>
-    zh
-      ? zhContext[`${group}.${value}`] || zhLabels[value] || value
-      : enLabels[value] || label(value);
   return (
     <motion.div
       className="studio-backdrop"
@@ -283,18 +185,11 @@ export function CharacterStudio({
                       <div className="studio-relationship-card__heading">
                         <div>
                           <b id="studio-household-title">{zh?'居住安排':'Living arrangement'}</b>
-                          <small>{zh?'选择独居，或与一位现有居民同住。':'Live alone or share a home with one existing resident.'}</small>
+                          <small>{zh?'这座城市的所有居民都住在同一套共享住宅。':'Everyone in your city lives together in one shared residence.'}</small>
                         </div>
-                        <span>{householdWithId?(zh?'共同生活':'Shared home'):(zh?'独居':'Lives alone')}</span>
+                        <span>{zh?'共享住宅':'Shared home'}</span>
                       </div>
-                      <label className="studio-resident-select">
-                        {zh?'室友':'Housemate'}
-                        <select value={householdWithId} onChange={event=>set("householdWithIds",event.target.value?[event.target.value]:[])}>
-                          <option value="">{zh?'独居':'Live alone'}</option>
-                          {relationshipOptions.map(candidate=><option value={candidate.id} key={candidate.id}>{candidate.name}</option>)}
-                        </select>
-                      </label>
-                      <p className="studio-relationship-note">{zh?'同住角色会共享住宅、厨房与家务，也会因此产生更多日常互动。':'Housemates share a residence, kitchen, and chores, creating more everyday interactions.'}</p>
+                      <p className="studio-relationship-note">{zh?'大家共住在这套住宅里，共享客厅、厨房、家务和生活资源，也可以在其中保有自己的个人空间；这些共同生活会自然产生更多日常互动。':'Everyone shares this residence, including its living room, kitchen, chores, and household resources, while keeping personal space within it—fertile ground for everyday interactions.'}</p>
                     </section>
 
                     <section className="studio-relationship-card" aria-labelledby="studio-family-title">
@@ -442,12 +337,6 @@ export function CharacterStudio({
                         </div>
                       </fieldset>
                     </>}
-                    <fieldset>
-                      <legend>{optionLabel('homeBackground')}</legend>
-                      <div className="home-option-grid">
-                        {homeBackgrounds.map(value=><button type="button" className={profile.avatar.homeBackground===value?'chosen':''} onClick={()=>avatar('homeBackground',value)} key={value}><img src={`/assets/homes/v3/${value}.jpg`} alt=""/><span>{optionLabel(value,'homeBackground')}</span></button>)}
-                      </div>
-                    </fieldset>
                   </>
                 )}
               </motion.div>

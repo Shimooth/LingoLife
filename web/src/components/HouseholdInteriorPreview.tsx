@@ -9,12 +9,14 @@ import {deriveResidentExpression} from '../life/characterExpression'
 import {IndoorEnvironment3D,INTERIOR_THEME_COPY,interiorThemeFor} from '../three/interiors'
 import {CharacterEmote,DirectedCharacter3D} from '../three/characters'
 import type {HouseholdResidentVisual} from './householdVisuals'
+import type {WorldLayoutRoom} from '../worldLayout'
 
 type Props={
  rooms:HouseholdRoom[]
  resources:HouseholdResource[]
  language:LifeLanguage
  residents?:HouseholdResidentVisual[]
+ layoutRooms?:readonly WorldLayoutRoom[]
 }
 
 const ROOM_COPY:Record<string,{zh:string;en:string}>={
@@ -58,7 +60,7 @@ const preferredRoom=(rooms:HouseholdRoom[],resources:HouseholdResource[],residen
  return (active&&residentRoom(active,rooms,resources))??rooms.find(room=>/living|shared/.test(room.kind))?.id??rooms[0]?.id??'living-room'
 }
 
-export function HouseholdInteriorPreview({rooms,resources,language,residents=[]}:Props){
+export function HouseholdInteriorPreview({rooms,resources,language,residents=[],layoutRooms=[]}:Props){
  const reduce=useReducedMotion()
  const [selectedId,setSelectedId]=useState(()=>preferredRoom(rooms,resources,residents))
  useEffect(()=>{
@@ -67,6 +69,7 @@ export function HouseholdInteriorPreview({rooms,resources,language,residents=[]}
  const selected=rooms.find(room=>room.id===selectedId)??rooms[0]
  const roomKind=selected?.kind||'living_room'
  const theme=interiorThemeFor({roomKind})
+ const authoredRoom=layoutRooms.find(room=>room.id===selected?.id)??layoutRooms.find(room=>room.kind===roomKind)
  const occupied=useMemo(()=>resources.filter(resource=>(resource.room_id===selected?.id||(selected?.resource_ids??[]).includes(resource.id))&&(resource.state.occupied_by?.length??0)>0).length,[resources,selected])
  const visibleResidents=useMemo(()=>residents.filter(resident=>resident.isHome!==false&&!privateAction(resident)&&residentRoom(resident,rooms,resources)===selected?.id).slice(0,3),[residents,resources,rooms,selected?.id])
  const privateResidents=useMemo(()=>residents.filter(resident=>resident.isHome!==false&&privateAction(resident)&&residentRoom(resident,rooms,resources)===selected?.id).length,[residents,resources,rooms,selected?.id])
@@ -82,7 +85,7 @@ export function HouseholdInteriorPreview({rooms,resources,language,residents=[]}
     <ambientLight intensity={1.05}/><hemisphereLight args={['#fff6df','#526d65',1.25]}/>
     <directionalLight position={[-4,7,5]} intensity={2.25} color="#fff1d8" castShadow shadow-mapSize={[512,512]}/>
     <pointLight position={[3.4,2.7,1.5]} intensity={4.2} distance={9} color="#f0aa7e"/>
-    <Suspense fallback={null}><IndoorEnvironment3D theme={theme} mode="preview"/></Suspense>
+    <Suspense fallback={null}><IndoorEnvironment3D theme={theme} mode="preview" placements={authoredRoom?.placements}/></Suspense>
     {visibleResidents.map((resident,index)=>{
      const positions=visibleResidents.length===1?[0]:visibleResidents.length===2?[-.85,.85]:[-1.35,0,1.35]
      const expression=deriveResidentExpression({npcId:resident.id,action:resident.currentAction,animationCue:resident.animationCue,observableState:resident.observableState})

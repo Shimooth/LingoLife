@@ -1,11 +1,12 @@
+/// <reference types="vite/client" />
 import { lazy,StrictMode,Suspense } from 'react'
 import { createRoot } from 'react-dom/client'
 import {LanguageProvider} from './i18n'
 import {RootErrorBoundary} from './RootErrorBoundary'
 import {BrandedStartupShell} from './components/BrandedStartupShell'
 import './styles.css'
-// Never expose the admin surface on the player hostname, even via a URL flag.
-const admin=window.location.hostname==='lingolife.admin.shimooth.me'
+// Production only trusts the dedicated hostname; the query switch exists solely for local Vite development.
+const admin=window.location.hostname==='lingolife.admin.shimooth.me'||(import.meta.env.DEV&&new URLSearchParams(window.location.search).get('admin')==='1')
 const AdminApp=lazy(()=>import('./AdminApp').then(module=>({default:module.AdminApp})))
 const AuthGate=lazy(()=>import('./AuthGate').then(module=>({default:module.AuthGate})))
 // Returning players download the 3D experience in parallel with session setup.

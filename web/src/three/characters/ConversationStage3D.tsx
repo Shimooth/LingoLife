@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react'
+import { Suspense, useRef, useState, type ReactNode } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { ContactShadows, Html, PerspectiveCamera } from '@react-three/drei'
 import { MathUtils, Mesh, type Group, type Material } from 'three'
@@ -7,6 +7,7 @@ import { CharacterEmote } from './CharacterEmote'
 import { DirectedCharacter3D } from './DirectedCharacter3D'
 import type { ConversationAtmosphere, ConversationStage3DProps, SpeechLine } from './types'
 import './characters.css'
+import {IndoorEnvironment3D} from '../interiors'
 
 type Palette = { sky: string; horizon: string; floor: string; accent: string; light: string }
 
@@ -79,7 +80,7 @@ function SpeechBubble({ line, name, side, language, translationVisible, onToggle
   </article>
 }
 
-export function ConversationStage3D({ npcAvatar, playerAvatar, showPlayerAvatar = false, npcName, playerName, place, locationKind, atmosphere: requestedAtmosphere, npcAnimation, playerAnimation, performance, performanceKey, liveSpeech, messages = [], language = 'zh', showTranslation, onTranslationChange, className = '', reducedMotion = false, sceneryMode = false }: ConversationStage3DProps) {
+export function ConversationStage3D({ npcAvatar, playerAvatar, showPlayerAvatar = false, npcName, playerName, place, locationKind, atmosphere: requestedAtmosphere, npcAnimation, playerAnimation, performance, performanceKey, liveSpeech, messages = [], language = 'zh', showTranslation, onTranslationChange, className = '', reducedMotion = false, sceneryMode = false, interiorPlacements }: ConversationStage3DProps) {
   const [internalTranslation, setInternalTranslation] = useState(false)
   const atmosphere = requestedAtmosphere ?? inferAtmosphere(locationKind)
   const palette = atmospheres[atmosphere]
@@ -118,6 +119,7 @@ export function ConversationStage3D({ npcAvatar, playerAvatar, showPlayerAvatar 
       <hemisphereLight args={[palette.light, palette.floor, 1.7]} />
       <directionalLight position={[-4, 7, 6]} intensity={2.4} color={palette.light} castShadow />
       <pointLight position={[4, 3, 2]} intensity={10} distance={9} color={palette.accent} />
+      {atmosphere==='home'&&<Suspense fallback={null}><IndoorEnvironment3D theme="home_lounge" placements={interiorPlacements}/></Suspense>}
       <FadingCast hidden={sceneryMode} immediate={reducedMotion}>
         {showPlayerAvatar && playerAvatar
           ? <group position={[-1.92, -.05, 1.28]} rotation={[0, .2, 0]}><DirectedCharacter3D avatar={playerAvatar} animation={playerMotion} performanceMode={speaker === 'player' ? 'conversation_speak' : 'conversation_listen'} performanceKey={`player:${lineKey}`} reducedMotion={reducedMotion} detail="portrait" scale={1.18} name={you} seed={you} /></group>

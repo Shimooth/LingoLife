@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import copy
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping, Sequence
 
 from .animation import animation_cue, performance_to_dict, journey_performance, ambient_performance
@@ -223,111 +223,64 @@ class LifeWorldService:
 
     def _home_mapping(self, player_id: str, profile_entries: Sequence[Mapping[str, Any]],
                       stored: Mapping[str, Any] | None = None) -> dict[str, dict[str, str]]:
+        """Map every resident owned by a player into one authoritative home.
+
+        Before the shared-home invariant, profiles could form arbitrary
+        cohabitation components.  Migration keeps the largest existing
+        household as the anchor (stable id tie-break), preserving the greatest
+        amount of accumulated home state.  Residents, relationship pairs and
+        city positions are never discarded.
+        """
         residents = dict((stored or {}).get("residents") or {})
         profile_map = _profiles(profile_entries)
         resident_ids = set(profile_map)
+        if not resident_ids:
+            return {}
         stored_household_sizes: dict[str, int] = {}
-        for value in residents.values():
+        for npc_id, value in residents.items():
+            if npc_id not in resident_ids:
+                continue
             household_id = str(value.get("household_id") or "")
             if household_id:
                 stored_household_sizes[household_id] = stored_household_sizes.get(household_id, 0) + 1
-        occupied = {slot for value in residents.values()
-                    if (slot := self._slot_for_home(str(value.get("home_location_id") or ""))) is not None}
+        canonical_household = (
+            sorted(stored_household_sizes, key=lambda value: (-stored_household_sizes[value], value))[0]
+            if stored_household_sizes else stable_id("household", player_id, "shared")
+        )
+        canonical_household_state = dict((stored or {}).get("households") or {}).get(canonical_household) or {}
+        residence = canonical_household_state.get("residence") or {}
+        anchor_candidates = sorted(
+            (npc_id for npc_id in resident_ids
+             if str((residents.get(npc_id) or {}).get("household_id") or "") == canonical_household),
+        )
+        anchor_old = residents.get(anchor_candidates[0], {}) if anchor_candidates else {}
+        home_id = str(
+            residence.get("location_id") or anchor_old.get("home_location_id") or ""
+        )
+        if not home_id:
+            slot = home_slot(player_id, "shared-home", set())
+            home_id = f"home-{slot + 1}"
+        residence_id = str(
+            canonical_household_state.get("residence_id") or residence.get("id")
+            or anchor_old.get("residence_id") or stable_id("residence", player_id, home_id)
+        )
+
         result: dict[str, dict[str, str]] = {}
         for npc_id in sorted(resident_ids):
-            old = residents.get(npc_id)
-            home_id = str(old.get("home_location_id")) if old and old.get("home_location_id") else ""
-            old_household_id = str(old.get("household_id") or "") if old else ""
-            old_home_id = home_id
-            arrangement = profile_map[npc_id].get("householdWithIds")
-            explicitly_independent = (isinstance(arrangement, Sequence)
-                                      and not isinstance(arrangement, (str, bytes))
-                                      and not arrangement)
-            moved_to_individual = bool(
-                explicitly_independent and stored_household_sizes.get(old_household_id, 0) > 1
+            old = residents.get(npc_id) or {}
+            old_home = str(old.get("home_location_id") or "")
+            old_household = str(old.get("household_id") or "")
+            old_current = str(old.get("current_location_id") or "")
+            was_at_old_home = (
+                not old_current or old_current == old_home
+                or bool(old_household and old_current.startswith(f"{old_household}:"))
             )
-            if moved_to_individual:
-                # Clearing a previously shared arrangement is an intentional
-                # move back to an individual residence, not a request to keep
-                # the stale shared household from the authoritative snapshot.
-                slot = home_slot(player_id, npc_id, occupied)
-                home_id = f"home-{slot + 1}"
-                old_household_id = ""
-            if not home_id:
-                slot = home_slot(player_id, npc_id, occupied)
-                home_id = f"home-{slot + 1}"
             result[npc_id] = {
-                "household_id": (old_household_id or
-                                 stable_id("household", player_id, npc_id)),
+                "household_id": canonical_household,
                 "home_location_id": home_id,
-                "current_location_id": (home_id if moved_to_individual and (
-                                            not old or not old.get("current_location_id")
-                                            or str(old.get("current_location_id")) == old_home_id
-                                            or str(old.get("current_location_id")).startswith(
-                                                f"{old.get('household_id')}:"
-                                            )
-                                        ) else str(old.get("current_location_id"))
-                                        if old and old.get("current_location_id") else home_id),
-                "residence_id": (str(old.get("residence_id"))
-                                 if old and old.get("residence_id") and not moved_to_individual else
-                                 stable_id("residence", player_id, home_id)),
+                "current_location_id": home_id if was_at_old_home else old_current,
+                "residence_id": residence_id,
             }
-
-        # ``householdWithIds`` is an objective, player-authored living
-        # arrangement rather than a psychological relationship.  Treat the
-        # selected links as small connected components so A moving in with B
-        # and C moving in with A reliably produce one household.  The most
-        # referenced existing resident supplies the residence anchor.
-        parent = {npc_id: npc_id for npc_id in resident_ids}
-
-        def find(npc_id: str) -> str:
-            while parent[npc_id] != npc_id:
-                parent[npc_id] = parent[parent[npc_id]]
-                npc_id = parent[npc_id]
-            return npc_id
-
-        def union(first: str, second: str) -> None:
-            left, right = find(first), find(second)
-            if left != right:
-                parent[max(left, right)] = min(left, right)
-
-        incoming = {npc_id: 0 for npc_id in resident_ids}
-        for npc_id, profile in profile_map.items():
-            requested = profile.get("householdWithIds") or profile.get("household_with_ids") or []
-            if not isinstance(requested, Sequence) or isinstance(requested, (str, bytes)):
-                continue
-            target_id = next((str(value) for value in requested
-                              if str(value) in resident_ids and str(value) != npc_id), None)
-            if target_id:
-                incoming[target_id] += 1
-                union(npc_id, target_id)
-
-        groups: dict[str, list[str]] = {}
-        for npc_id in sorted(resident_ids):
-            groups.setdefault(find(npc_id), []).append(npc_id)
-        for members in groups.values():
-            if len(members) < 2:
-                continue
-            anchor_id = sorted(
-                members,
-                key=lambda value: (-incoming[value], -(1 if value in residents else 0), value),
-            )[0]
-            anchor = result[anchor_id]
-            for npc_id in members:
-                old = residents.get(npc_id) or {}
-                old_home = str(old.get("home_location_id") or "")
-                old_current = str(old.get("current_location_id") or "")
-                was_at_old_home = not old_current or old_current == old_home or (
-                    old.get("household_id")
-                    and old_current.startswith(f"{old.get('household_id')}:")
-                )
-                result[npc_id].update({
-                    "household_id": anchor["household_id"],
-                    "home_location_id": anchor["home_location_id"],
-                    "residence_id": anchor["residence_id"],
-                    "current_location_id": (anchor["home_location_id"]
-                                            if was_at_old_home else old_current),
-                })
         return result
 
     def load(self, player_id: str, profile_entries: Sequence[Mapping[str, Any]],
@@ -353,6 +306,29 @@ class LifeWorldService:
                 else:
                     resident_ids = set(stored.get("residents") or {})
                     profile_changed = resident_ids != set(profile_map)
+                    household_ids = {
+                        str(value.get("household_id") or "")
+                        for npc_id, value in (stored.get("residents") or {}).items()
+                        if npc_id in profile_map
+                    }
+                    home_ids = {
+                        str(value.get("home_location_id") or "")
+                        for npc_id, value in (stored.get("residents") or {}).items()
+                        if npc_id in profile_map
+                    }
+                    projected_household_ids = {
+                        str(value) for value in (stored.get("households") or {})
+                    }
+                    shared_home_migration_due = (
+                        len(household_ids) != 1 or "" in household_ids
+                        or len(home_ids) != 1 or "" in home_ids
+                        # A prior interrupted/partial projection can leave an
+                        # unoccupied legacy household in the authoritative JSON.
+                        # Reconcile it even when resident assignments already
+                        # happen to look shared, otherwise the stale household
+                        # remains visible until an unrelated timed transition.
+                        or projected_household_ids != household_ids
+                    )
                     transition = stored.get("next_transition_at")
                     transition_due = True
                     if transition:
@@ -360,10 +336,22 @@ class LifeWorldService:
                             transition_due = datetime.fromisoformat(str(transition).replace("Z", "+00:00")) <= moment
                         except ValueError:
                             transition_due = True
-                    if not (force_advance or profile_changed or transition_due):
+                    if not (force_advance or profile_changed or shared_home_migration_due or transition_due):
                         return stored
                     home_mapping = self._home_mapping(player_id, profile_entries, stored)
-                    candidate = self.engine.advance(stored, profile_map, now=moment,
+                    advance_at = moment
+                    if profile_changed or shared_home_migration_due:
+                        try:
+                            stored_at = datetime.fromisoformat(
+                                str(stored.get("last_advanced_at") or "").replace("Z", "+00:00")
+                            )
+                            if stored_at.tzinfo is None or stored_at.utcoffset() is None:
+                                stored_at = stored_at.replace(tzinfo=timezone.utc)
+                            if advance_at <= stored_at:
+                                advance_at = stored_at + timedelta(microseconds=1)
+                        except ValueError:
+                            pass
+                    candidate = self.engine.advance(stored, profile_map, now=advance_at,
                                                     home_location_mapping=home_mapping)
                     if candidate == stored:
                         return stored
@@ -405,6 +393,27 @@ class LifeWorldService:
                 semantic_signals=semantic_signals, now=now,
             ),
         )
+
+    def rename_shared_household(self, player_id: str,
+                                profile_entries: Sequence[Mapping[str, Any]],
+                                name: str) -> dict[str, Any]:
+        """Rename the player's single shared home without altering simulation facts."""
+        normalized = " ".join(name.split())[:64] or "Our Home"
+
+        def rename(state: Mapping[str, Any]) -> dict[str, Any]:
+            result = copy.deepcopy(state)
+            households = result.get("households") or {}
+            if len(households) != 1:
+                raise ValueError("shared household invariant is not established")
+            household = next(iter(households.values()))
+            household["name"] = normalized
+            residence = household.get("residence")
+            if isinstance(residence, dict):
+                residence["name"] = normalized
+            result["revision"] = int(result.get("revision", 0)) + 1
+            return result
+
+        return self._mutate(player_id, profile_entries, rename)
 
     def _mutate(self, player_id: str, profile_entries: Sequence[Mapping[str, Any]], operation) -> dict[str, Any]:
         with self._lock:

@@ -1,6 +1,6 @@
 import {Html,Instances,Instance,OrbitControls,useCursor,useGLTF} from '@react-three/drei'
 import {useFrame,useThree,type ThreeEvent} from '@react-three/fiber'
-import {useEffect,useMemo,useRef,useState,type ComponentRef,type MutableRefObject} from 'react'
+import {Component,Suspense,useEffect,useMemo,useRef,useState,type ComponentRef,type MutableRefObject,type ReactNode} from 'react'
 import * as THREE from 'three'
 import {defaultAvatar} from '../../avatar'
 import type {CityCharacter,CityLandmark} from '../../components/CityMap'
@@ -9,27 +9,15 @@ import {CharacterEmote,DirectedCharacter3D,type CharacterMotion,type CharacterPe
 import {
  BUILDING_LOTS,BUILDING_MODELS,CITY_PLATFORM_OUTLINE,DISTRICTS,KAYKIT_ASSET_BASE,KAYKIT_PROP_MODELS,KAYKIT_ROAD_MODELS,KIND_COLORS,ROAD_TILES,ROAD_TILE_SCALE,SKY_ROAD_EXITS,STREET_PROPS,TREES,WORLD_DEPTH,WORLD_WIDTH,
  buildingModelFor,hashString,worldPosition,
- type BuildingLot,type CityBuildingPlacement,type KayKitBuildingModel,type KayKitPropModel,type KayKitRoadModel,type TimeSlot,type WorldPoint,
+ type BuildingLot,type CityBuildingPlacement,type KayKitBuildingModel,type KayKitPropModel,type KayKitRoadModel,type RoadTilePlacement,type TimeSlot,type WorldPoint,
 } from './worldData'
 import {cameraDampingAlpha,cameraPoseSettled,topViewOffset} from './worldCamera'
-import {WorldDecorationPlacementSurface} from './WorldDecorationPlacementSurface'
-import {WorldDecorations3D} from './WorldDecorations3D'
-import type {WorldDecorationEditorMode} from './useWorldDecorationEditor'
-import {createWorldDecorationValidationApi,type WorldDecoration,type WorldDecorationKind,type WorldDecorationValidationApi} from './worldDecorations'
-import {buildPedestrianRoute,samplePedestrianRoute,type PedestrianRoute} from './worldNavigation'
+import {buildPedestrianRoute,buildPedestrianRouteForRoads,samplePedestrianRoute,type PedestrianRoute} from './worldNavigation'
+import type {WorldLayoutBuilding,WorldLayoutDocument,WorldLayoutPlacement} from '../../worldLayout'
 
 type Quality='low'|'high'
 export type WorldQuality='auto'|Quality
 export type WorldViewMode='isometric'|'top'
-export type WorldDecorationSceneEditor={
- active:boolean
- mode:WorldDecorationEditorMode
- selectedKind:WorldDecorationKind
- selectedId?:string
- decorations:readonly WorldDecoration[]
- onSelect:(id?:string)=>void
- onPlace:(position:[number,number])=>void
-}
 
 type SceneProps={
  characters:readonly CityCharacter[]
@@ -44,11 +32,11 @@ type SceneProps={
  focusVersion:number
  viewMode:WorldViewMode
  quality:Quality
- decorationEditor?:WorldDecorationSceneEditor
- onDecorationValidationApi?:(api:WorldDecorationValidationApi|null)=>void
+ layout?:WorldLayoutDocument
  onCharacterClick:(id:string)=>void
  onCharacterEvent:(eventId:string)=>void
  onCharacterTrouble?:(characterId:string)=>void
+ onHouseholdOpen?:(householdId:string)=>void
  onJourneyElapsed?:()=>void
  onLandmarkSelect:(landmark:CityLandmark)=>void
 }
@@ -56,6 +44,11 @@ type SceneProps={
 type KayKitModel=KayKitBuildingModel|KayKitRoadModel|KayKitPropModel
 type InstancePlacement={id:string;position:[number,number,number];rotation:number;scale:number}
 type DirectedWorldAction=NonNullable<CityCharacter['worldAction']>&{performance?:CharacterPerformance;animation_cue?:CharacterMotion}
+
+const modelFromAsset=<T extends string>(asset:string,allowed:readonly T[]):T|undefined=>{
+ const model=asset.split('/').pop()?.replace(/\.gltf$/,'')
+ return allowed.find(value=>value===model)
+}
 
 const BUILDING_HEIGHT:Record<KayKitBuildingModel,number>={
  building_A:1.65,building_B:1.65,building_C:2.98,building_D:2.97,
@@ -125,6 +118,27 @@ function AssetObject({model,item,castShadow=false,receiveShadow=false}:{model:Ka
   return clone
  },[anisotropy,castShadow,receiveShadow,scene])
  return <primitive object={object} position={item.position} rotation={[0,item.rotation,0]} scale={item.scale}/>
+}
+
+function AuthoredAsset({placement,quality}:{placement:WorldLayoutPlacement;quality:Quality}){
+ const {scene}=useGLTF(placement.asset)
+ const object=useMemo(()=>{
+  const clone=scene.clone(true)
+  clone.traverse(child=>{if(child instanceof THREE.Mesh){child.castShadow=quality==='high';child.receiveShadow=true}})
+  return clone
+ },[quality,scene])
+ return <primitive object={object} position={[placement.position.x,placement.position.y,placement.position.z]} rotation={[placement.rotation.x,placement.rotation.y,placement.rotation.z]} scale={[placement.scale.x,placement.scale.y,placement.scale.z]}/>
+}
+
+class AuthoredAssetBoundary extends Component<{placement:WorldLayoutPlacement;children:ReactNode},{failed:boolean}>{
+ state={failed:false}
+ static getDerivedStateFromError(){return {failed:true}}
+ render(){return this.state.failed?null:this.props.children}
+}
+
+function AuthoredAssets({placements,quality}:{placements:readonly WorldLayoutPlacement[];quality:Quality}){
+ const visible=quality==='high'?placements:placements.filter((_,index)=>index%2===0)
+ return <group>{visible.map(placement=><AuthoredAssetBoundary key={placement.id} placement={placement}><Suspense fallback={null}><AuthoredAsset placement={placement} quality={quality}/></Suspense></AuthoredAssetBoundary>)}</group>
 }
 
 type ActorRegistry=MutableRefObject<Map<string,THREE.Group>>
@@ -279,9 +293,13 @@ function DistrictGround({language}:{language:'zh'|'en'}){
  </group>
 }
 
-function RoadNetwork(){
+function RoadNetwork({placements}:{placements?:readonly WorldLayoutPlacement[]}){
+ const authored=placements?.map(item=>{
+  const model=modelFromAsset(item.asset,KAYKIT_ROAD_MODELS)
+  return model?{model,item:{id:item.id,position:[item.position.x,item.position.y,item.position.z] as [number,number,number],rotation:item.rotation.y,scale:item.scale.x}}:null
+ }).filter((item):item is {model:KayKitRoadModel;item:InstancePlacement}=>Boolean(item))
  return <group>
-  {KAYKIT_ROAD_MODELS.map(model=><AssetInstances key={model} model={model} receiveShadow items={ROAD_TILES.filter(tile=>tile.model===model).map(tile=>({id:tile.id,position:[tile.position[0],.245,tile.position[1]],rotation:tile.rotation,scale:ROAD_TILE_SCALE}))}/>) }
+  {KAYKIT_ROAD_MODELS.map(model=><AssetInstances key={model} model={model} receiveShadow items={authored?.length?authored.filter(entry=>entry.model===model).map(entry=>entry.item):ROAD_TILES.filter(tile=>tile.model===model).map(tile=>({id:tile.id,position:[tile.position[0],.245,tile.position[1]],rotation:tile.rotation,scale:ROAD_TILE_SCALE}))}/>) }
  </group>
 }
 
@@ -336,12 +354,13 @@ function SkyRoadDecks({quality}:{quality:Quality}){
 
 const pointDistanceSquared=(a:[number,number],b:[number,number])=>(a[0]-b[0])**2+(a[1]-b[1])**2
 
-type HomePlacement={character:CityCharacter;model:KayKitBuildingModel;position:WorldPoint;rotation:number;scale:number;lot:BuildingLot}
+type HomePlacement={character:CityCharacter;residents:readonly CityCharacter[];model:KayKitBuildingModel;position:WorldPoint;rotation:number;scale:number;lot:BuildingLot}
 type LandmarkPlacement={landmark:CityLandmark;model:KayKitBuildingModel;position:WorldPoint;rotation:number;scale:number;lot:BuildingLot}
+type FabricBuildingPlacement=CityBuildingPlacement&{y?:number}
 type ResolvedCityLayout={
  landmarkPlacements:LandmarkPlacement[]
  homePlacements:HomePlacement[]
- fillerBuildings:CityBuildingPlacement[]
+ fillerBuildings:FabricBuildingPlacement[]
  landmarkLots:Map<string,BuildingLot>
  homeLots:Map<string,BuildingLot>
  occupiedPositions:[number,number][]
@@ -374,7 +393,38 @@ const claimNearestLot=(available:BuildingLot[],target:[number,number],key:string
 const layoutGridKey=([x,z]:[number,number])=>`${Math.max(0,Math.min(3,Math.floor((x+28)/14)))}:${Math.max(0,Math.min(2,Math.floor((z+19)/12.67)))}`
 const isScenicLot=(lot:BuildingLot)=>SCENIC_RESERVES.some(reserve=>pointDistanceSquared(lot.position,reserve.position)<reserve.radius**2)
 
-function resolveCityLayout(landmarks:readonly CityLandmark[],characters:readonly CityCharacter[]):ResolvedCityLayout{
+const buildingFamilyForModel=(model:KayKitBuildingModel):BuildingLot['family']=>BUILDING_MODELS.residential.includes(model as never)?'residential':BUILDING_MODELS.commercial.includes(model as never)?'commercial':'public'
+const authoredBuildingLot=(placement:WorldLayoutBuilding,model:KayKitBuildingModel):BuildingLot=>{
+ const nearest=BUILDING_LOTS.reduce((best,lot)=>pointDistanceSquared(lot.position,[placement.position.x,placement.position.z])<pointDistanceSquared(best.position,[placement.position.x,placement.position.z])?lot:best,BUILDING_LOTS[0])
+ return {id:`authored-${placement.id}`,position:[placement.position.x,placement.position.z],rotation:placement.rotation.y,family:buildingFamilyForModel(model),district:nearest?.district??'central'}
+}
+
+function resolveCityLayout(landmarks:readonly CityLandmark[],characters:readonly CityCharacter[],authoredBuildings:readonly WorldLayoutBuilding[]=[]):ResolvedCityLayout{
+ if(authoredBuildings.length){
+  const valid=authoredBuildings.map(placement=>{const model=modelFromAsset(placement.asset,[...BUILDING_MODELS.residential,...BUILDING_MODELS.commercial,...BUILDING_MODELS.public] as const);return model?{placement,model,lot:authoredBuildingLot(placement,model)}:null}).filter((item):item is {placement:WorldLayoutBuilding;model:KayKitBuildingModel;lot:BuildingLot}=>Boolean(item))
+  const byLocation=new Map(valid.filter(item=>item.placement.location_id).map(item=>[item.placement.location_id!,item]))
+  const shared=valid.find(item=>item.placement.id==='shared-home')??valid.find(item=>!item.placement.location_id&&item.model.startsWith('building_A'))
+  const available=[...BUILDING_LOTS]
+  const landmarkLots=new Map<string,BuildingLot>(),homeLots=new Map<string,BuildingLot>()
+  const landmarkPlacements=landmarks.map(landmark=>{
+   const entry=byLocation.get(landmark.id)
+   if(entry){landmarkLots.set(landmark.id,entry.lot);return {landmark,lot:entry.lot,model:entry.model,position:[entry.placement.position.x,entry.placement.position.y,entry.placement.position.z] as WorldPoint,rotation:entry.placement.rotation.y,scale:entry.placement.scale.x}}
+   const fallbackModel=buildingModelFor(landmark.kind,landmark.id),lot=claimNearestLot(available,targetPosition(landmark),`landmark:${landmark.id}`)
+   landmarkLots.set(landmark.id,lot);return {landmark,lot,model:fallbackModel,position:[lot.position[0],.369,lot.position[1]] as WorldPoint,rotation:lot.rotation,scale:1.16}
+  })
+  let homePlacements:HomePlacement[]=[]
+  if(characters.length){
+   const primary=characters[0],entry=shared
+   const lot=entry?.lot??claimNearestLot(available,targetPosition(primary.home),'shared-home','residential')
+   characters.forEach(character=>homeLots.set(character.id,lot))
+   const model=entry?.model??'building_A',position=entry?[entry.placement.position.x,entry.placement.position.y,entry.placement.position.z] as WorldPoint:[lot.position[0],.369,lot.position[1]] as WorldPoint
+   homePlacements=[{character:primary,residents:characters,lot,model,position,rotation:entry?.placement.rotation.y??lot.rotation,scale:entry?.placement.scale.x??1.14}]
+  }
+  const usedIds=new Set([...byLocation.values()].map(item=>item.placement.id));if(shared)usedIds.add(shared.placement.id)
+  const fillerBuildings=valid.filter(item=>!usedIds.has(item.placement.id)).map(item=>({id:item.placement.id,family:buildingFamilyForModel(item.model),model:item.model,position:[item.placement.position.x,item.placement.position.z] as [number,number],rotation:item.placement.rotation.y,scale:item.placement.scale.x,y:item.placement.position.y}))
+  const occupiedPositions=[...landmarkPlacements.map(item=>item.lot.position),...homePlacements.map(item=>item.lot.position),...fillerBuildings.map(item=>item.position)] as [number,number][]
+  return {landmarkPlacements,homePlacements,fillerBuildings,landmarkLots,homeLots,occupiedPositions}
+ }
  const available=[...BUILDING_LOTS]
  const landmarkLots=new Map<string,BuildingLot>()
  const homeLots=new Map<string,BuildingLot>()
@@ -384,20 +434,15 @@ function resolveCityLayout(landmarks:readonly CityLandmark[],characters:readonly
   const preferredFamily=Object.entries(BUILDING_MODELS).find(([,models])=>models.includes(family))?.[0] as BuildingLot['family']|undefined
   landmarkLots.set(landmark.id,claimNearestLot(available,targetPosition(landmark),`landmark:${landmark.id}`,preferredFamily))
  })
- ;[...characters].slice(0,5).sort((a,b)=>a.id.localeCompare(b.id)).forEach(character=>{
-  homeLots.set(character.id,claimNearestLot(available,targetPosition(character.home),`home:${character.id}`,'residential'))
- })
+ const sortedResidents=[...characters].sort((a,b)=>a.id.localeCompare(b.id))
+ if(sortedResidents.length){const sharedLot=claimNearestLot(available,targetPosition(sortedResidents[0].home),'shared-home','residential');sortedResidents.forEach(character=>homeLots.set(character.id,sharedLot))}
 
  const landmarkPlacements=landmarks.map(landmark=>{
   const lot=landmarkLots.get(landmark.id)!
   const hash=hashString(`landmark:${landmark.id}`)
   return {landmark,lot,model:buildingModelFor(landmark.kind,landmark.id),position:[lot.position[0],.369,lot.position[1]] as WorldPoint,rotation:lot.rotation,scale:1.16+(hash%4)*.018}
  })
- const homePlacements=characters.slice(0,5).map(character=>{
-  const lot=homeLots.get(character.id)!
-  const hash=hashString(`home:${character.id}`)
-  return {character,lot,model:BUILDING_MODELS.residential[hash%BUILDING_MODELS.residential.length],position:[lot.position[0],.369,lot.position[1]] as WorldPoint,rotation:lot.rotation,scale:1.12+(hash%3)*.025}
- })
+ const homePlacements=sortedResidents.length?(()=>{const character=sortedResidents[0],lot=homeLots.get(character.id)!,hash=hashString('shared-home');return [{character,residents:sortedResidents,lot,model:BUILDING_MODELS.residential[hash%BUILDING_MODELS.residential.length],position:[lot.position[0],.369,lot.position[1]] as WorldPoint,rotation:lot.rotation,scale:1.12+(hash%3)*.025}]})():[]
 
  const occupiedLots=[...landmarkLots.values(),...homeLots.values()]
  const districtCounts=new Map<string,number>()
@@ -407,7 +452,7 @@ function resolveCityLayout(landmarks:readonly CityLandmark[],characters:readonly
   const grid=layoutGridKey(lot.position)
   gridCounts.set(grid,(gridCounts.get(grid)??0)+1)
  })
- const fillerBuildings:CityBuildingPlacement[]=[]
+ const fillerBuildings:FabricBuildingPlacement[]=[]
  const fillerCount=Math.max(0,Math.min(available.length,CITY_BUILDING_TARGET-occupiedLots.length))
  for(let index=0;index<fillerCount;index+=1){
   let chosenIndex=0,chosenScore=Number.POSITIVE_INFINITY
@@ -436,27 +481,29 @@ function resolveCityLayout(landmarks:readonly CityLandmark[],characters:readonly
  }
 }
 
-function CityFabric({buildings,quality}:{buildings:readonly CityBuildingPlacement[];quality:Quality}){
+function CityFabric({buildings,quality}:{buildings:readonly FabricBuildingPlacement[];quality:Quality}){
  return <group>
   <AssetInstances model="base" receiveShadow items={buildings.map(building=>({id:`lot-${building.id}`,position:[building.position[0],.238,building.position[1]],rotation:building.rotation,scale:ROAD_TILE_SCALE}))}/>
-  {([...BUILDING_MODELS.residential,...BUILDING_MODELS.commercial,...BUILDING_MODELS.public] as KayKitBuildingModel[]).map(model=><AssetInstances key={model} model={model} castShadow={quality==='high'} receiveShadow items={buildings.filter(building=>building.model===model).map(building=>({id:building.id,position:[building.position[0],.369,building.position[1]],rotation:building.rotation,scale:building.scale}))}/>) }
+  {([...BUILDING_MODELS.residential,...BUILDING_MODELS.commercial,...BUILDING_MODELS.public] as KayKitBuildingModel[]).map(model=><AssetInstances key={model} model={model} castShadow={quality==='high'} receiveShadow items={buildings.filter(building=>building.model===model).map(building=>({id:building.id,position:[building.position[0],building.y??.369,building.position[1]],rotation:building.rotation,scale:building.scale}))}/>) }
  </group>
 }
 
-function ResidentialHomes({homes,quality,language,onSelect}:{homes:readonly HomePlacement[];quality:Quality;language:'zh'|'en';onSelect:(id:string)=>void}){
+function ResidentialHomes({homes,quality,language,onSelect}:{homes:readonly HomePlacement[];quality:Quality;language:'zh'|'en';onSelect:(home:HomePlacement)=>void}){
  return <group>
   <AssetInstances model="base" receiveShadow items={homes.map(home=>({id:`home-lot-${home.character.id}`,position:[home.position[0],.238,home.position[2]],rotation:home.rotation,scale:ROAD_TILE_SCALE}))}/>
   {BUILDING_MODELS.residential.map(model=><AssetInstances key={model} model={model} castShadow={quality==='high'} receiveShadow items={homes.filter(home=>home.model===model).map(home=>({id:`home-${home.character.id}`,position:home.position,rotation:home.rotation,scale:home.scale}))}/>) }
   {homes.map(home=><Html key={`home-label-${home.character.id}`} center position={[home.position[0],home.position[1]+BUILDING_HEIGHT[home.model]*home.scale+.58,home.position[2]]} zIndexRange={[24,2]}>
-   <button type="button" className="world3d-home" onClick={event=>{event.stopPropagation();onSelect(home.character.id)}} aria-label={language==='zh'?`${home.character.name}的家`:`${home.character.name}'s home`}><span aria-hidden>⌂</span>{home.character.name}</button>
+   <button type="button" className="world3d-home" onClick={event=>{event.stopPropagation();onSelect(home)}} aria-label={language==='zh'?'共享住宅':'Shared home'}><span aria-hidden>⌂</span>{language==='zh'?'共享住宅':'Shared home'}<small>{language==='zh'?`${home.residents.length} 位居民`:`${home.residents.length} residents`}</small></button>
   </Html>)}
  </group>
 }
 
 const ROAD_PROPS=new Set<KayKitPropModel>(['streetlight','trafficlight_A','trafficlight_B','trafficlight_C','firehydrant','car_sedan','car_taxi','car_police','car_hatchback','car_stationwagon'])
 
-function StreetLife({quality,occupiedPositions}:{quality:Quality;occupiedPositions:readonly [number,number][]}){
- const qualityPlacements=quality==='high'?STREET_PROPS:STREET_PROPS.filter((_,index)=>index%2===0)
+function StreetLife({quality,occupiedPositions,authored}:{quality:Quality;occupiedPositions:readonly [number,number][];authored?:readonly WorldLayoutPlacement[]}){
+ const authoredPlacements=authored?.map(item=>{const model=modelFromAsset(item.asset,KAYKIT_PROP_MODELS);return model?{id:item.id,model,position:[item.position.x,item.position.z] as [number,number],rotation:item.rotation.y,scale:item.scale.x,detail:true,y:item.position.y}:null}).filter((item):item is {id:string;model:KayKitPropModel;position:[number,number];rotation:number;scale:number;detail:boolean;y:number}=>Boolean(item))
+ const source=authoredPlacements?.length?authoredPlacements:STREET_PROPS
+ const qualityPlacements=quality==='high'?source:source.filter((_,index)=>index%2===0)
  const placements=qualityPlacements.filter(item=>ROAD_PROPS.has(item.model)||occupiedPositions.every(position=>pointDistanceSquared(position,item.position)>4.4))
  const staticPlacements=placements.filter(item=>!item.model.startsWith('car_'))
  const models=Array.from(new Set(staticPlacements.map(item=>item.model)))
@@ -464,15 +511,16 @@ function StreetLife({quality,occupiedPositions}:{quality:Quality;occupiedPositio
  return <group>
   {models.map(model=><AssetInstances key={model} model={model} castShadow={quality==='high'} receiveShadow items={staticPlacements.filter(item=>item.model===model).map(item=>({
    id:item.id,
-   position:[item.position[0],.37,item.position[1]],
+   position:[item.position[0],(item as {y?:number}).y??.37,item.position[1]],
    rotation:item.rotation,
    scale:item.scale,
   }))}/>) }
-  {cars.map(item=><AssetObject key={item.id} model={item.model} item={{id:item.id,position:[item.position[0],.47,item.position[1]],rotation:item.rotation,scale:item.scale}} castShadow={quality==='high'} receiveShadow/>)}
+  {cars.map(item=><AssetObject key={item.id} model={item.model} item={{id:item.id,position:[item.position[0],(item as {y?:number}).y??.47,item.position[1]],rotation:item.rotation,scale:item.scale}} castShadow={quality==='high'} receiveShadow/>)}
  </group>
 }
 
-function Trees({quality,occupiedPositions}:{quality:Quality;occupiedPositions:readonly [number,number][]}){
+function Trees({quality,occupiedPositions,authored}:{quality:Quality;occupiedPositions:readonly [number,number][];authored?:readonly WorldLayoutPlacement[]}){
+ if(authored?.length)return <AuthoredAssets placements={authored} quality={quality}/>
  const qualityTrees=quality==='high'?TREES:TREES.filter((_,index)=>index%2===0)
  const trees=qualityTrees.filter(tree=>occupiedPositions.every(position=>pointDistanceSquared(position,tree)>4.2))
  return <group>
@@ -646,28 +694,20 @@ function CharacterMarker({character,lot,route,active,actors,serverTime,reducedMo
  </group>
 }
 
-export function WorldScene({characters,landmarks,followedCharacterId,serverTime,language,timeSlot,reducedMotion,selectedLandmarkId,focus,focusVersion,viewMode,quality,decorationEditor,onDecorationValidationApi,onCharacterClick,onCharacterEvent,onCharacterTrouble,onJourneyElapsed,onLandmarkSelect}:SceneProps){
+export function WorldScene({characters,landmarks,followedCharacterId,serverTime,language,timeSlot,reducedMotion,selectedLandmarkId,focus,focusVersion,viewMode,quality,layout:worldLayout,onCharacterClick,onCharacterEvent,onCharacterTrouble,onHouseholdOpen,onJourneyElapsed,onLandmarkSelect}:SceneProps){
  const night=timeSlot==='evening'
  const [hoveredLandmarkId,setHoveredLandmarkId]=useState<string>()
  const actors=useRef(new Map<string,THREE.Group>())
- const layout=useMemo(()=>resolveCityLayout(landmarks,characters),[characters,landmarks])
+ const layout=useMemo(()=>resolveCityLayout(landmarks,characters,worldLayout?.city.buildings),[characters,landmarks,worldLayout?.city.buildings])
+ const authoredRoads=useMemo<RoadTilePlacement[]>(()=>worldLayout?.city.roads.flatMap(item=>{const model=modelFromAsset(item.asset,KAYKIT_ROAD_MODELS);return model?[{id:item.id,model,position:[item.position.x,item.position.z],rotation:item.rotation.y,surface:'city'}]:[]})??[],[worldLayout?.city.roads])
  const characterLot=(character:CityCharacter)=>character.locationId?layout.landmarkLots.get(character.locationId):layout.homeLots.get(character.id)
  const characterNavigation=useMemo(()=>characters.slice(0,24).map(character=>{
   const origin=character.locationId?layout.landmarkLots.get(character.locationId):layout.homeLots.get(character.id)
   const target=character.worldAction?.target_location_id?layout.landmarkLots.get(character.worldAction.target_location_id):undefined
   const participantIndex=character.worldAction?.participant_index??0
-  const route=character.worldAction?.state==='walking_to_event'&&origin&&target?buildPedestrianRoute(origin,target,{seed:`${character.worldAction.event_id}:${character.id}`,startLateralOffset:participantIndex ? .28 : -.28,endLateralOffset:participantIndex ? .7 : -.7}):undefined
+  const route=character.worldAction?.state==='walking_to_event'&&origin&&target?(authoredRoads.length?buildPedestrianRouteForRoads(origin,target,authoredRoads,{seed:`${character.worldAction.event_id}:${character.id}`,startLateralOffset:participantIndex ? .28 : -.28,endLateralOffset:participantIndex ? .7 : -.7}):buildPedestrianRoute(origin,target,{seed:`${character.worldAction.event_id}:${character.id}`,startLateralOffset:participantIndex ? .28 : -.28,endLateralOffset:participantIndex ? .7 : -.7})):undefined
   return {character,origin,route}
- }),[characters,layout.homeLots,layout.landmarkLots])
- const decorationValidationApi=useMemo(()=>createWorldDecorationValidationApi({
-  buildings:layout.occupiedPositions,
-  characterRoutes:characterNavigation.flatMap(item=>item.route?[item.route]:[]),
-  characterPositions:characterNavigation.map(item=>{const [x,,z]=characterStandingPosition(item.character,item.origin);return [x,z] as [number,number]}),
- }),[characterNavigation,layout.occupiedPositions])
- useEffect(()=>{
-  onDecorationValidationApi?.(decorationValidationApi)
-  return()=>onDecorationValidationApi?.(null)
- },[decorationValidationApi,onDecorationValidationApi])
+ }),[authoredRoads,characters,layout.homeLots,layout.landmarkLots])
  const followedCharacter=characters.find(character=>character.id===followedCharacterId)
  const followedLot=followedCharacter?characterLot(followedCharacter):undefined
  const followedLotRotation=followedLot?.rotation
@@ -692,36 +732,19 @@ export function WorldScene({characters,landmarks,followedCharacterId,serverTime,
   const nearest=candidates.reduce<{raw:[number,number];lot:BuildingLot}|undefined>((best,item)=>!best||pointDistanceSquared(item.raw,rawFocus)<pointDistanceSquared(best.raw,rawFocus)?item:best,undefined)
   return nearest?[nearest.lot.position[0],.5,nearest.lot.position[1]] as WorldPoint:focus
  },[characters,focus,landmarks,layout.homeLots,layout.landmarkLots,selectedLandmarkId])
- const editing=decorationEditor?.active===true
- const selectedDecoration=decorationEditor?.decorations.find(item=>item.id===decorationEditor.selectedId)
- useCursor(!editing&&Boolean(hoveredLandmarkId))
+ useCursor(Boolean(hoveredLandmarkId))
  return <>
   <FloatingCityBase quality={quality}/>
   <SkyRoadDecks quality={quality}/>
   <DistrictGround language={language}/>
-  <RoadNetwork/>
+  <RoadNetwork placements={worldLayout?.city.roads}/>
   <CourtyardFeatures quality={quality}/>
   <CityFabric buildings={layout.fillerBuildings} quality={quality}/>
-  <ResidentialHomes homes={layout.homePlacements} quality={quality} language={language} onSelect={editing?()=>undefined:onCharacterClick}/>
-  <StreetLife quality={quality} occupiedPositions={layout.occupiedPositions}/>
-  <Trees quality={quality} occupiedPositions={layout.occupiedPositions}/>
-  {decorationEditor&&<WorldDecorations3D
-   decorations={decorationEditor.decorations}
-   editing={editing}
-   selectedId={decorationEditor.selectedId}
-   quality={quality}
-   onSelect={decorationEditor.onSelect}
-  />}
-  <LandmarkBuildings placements={layout.landmarkPlacements} selectedId={editing?undefined:selectedLandmarkId} hoveredId={editing?undefined:hoveredLandmarkId} language={language} night={night} quality={quality} onHover={editing?()=>undefined:setHoveredLandmarkId} onSelect={editing?()=>undefined:onLandmarkSelect}/>
-  {characterNavigation.map(({character,origin,route})=><CharacterMarker key={character.id} character={character} lot={origin} route={route} active={!editing&&character.id===followedCharacterId} actors={actors} serverTime={serverTime} reducedMotion={reducedMotion} language={language} onClick={editing?()=>undefined:()=>onCharacterClick(character.id)} onEvent={editing?()=>undefined:onCharacterEvent} onTrouble={!editing&&onCharacterTrouble?()=>onCharacterTrouble(character.id):undefined} onJourneyElapsed={onJourneyElapsed}/>)}
-  {decorationEditor&&editing&&<WorldDecorationPlacementSurface
-   mode={decorationEditor.mode}
-   selectedKind={decorationEditor.selectedKind}
-   selectedDecoration={selectedDecoration}
-   decorations={decorationEditor.decorations}
-   validationApi={decorationValidationApi}
-   onPlace={decorationEditor.onPlace}
-  />}
+  <ResidentialHomes homes={layout.homePlacements} quality={quality} language={language} onSelect={home=>{const householdId=home.character.householdId;if(householdId&&onHouseholdOpen)onHouseholdOpen(householdId);else onCharacterClick(home.character.id)}}/>
+  <StreetLife quality={quality} occupiedPositions={layout.occupiedPositions} authored={worldLayout?.city.props}/>
+  <Trees quality={quality} occupiedPositions={layout.occupiedPositions} authored={worldLayout?.city.decorations}/>
+  <LandmarkBuildings placements={layout.landmarkPlacements} selectedId={selectedLandmarkId} hoveredId={hoveredLandmarkId} language={language} night={night} quality={quality} onHover={setHoveredLandmarkId} onSelect={onLandmarkSelect}/>
+  {characterNavigation.map(({character,origin,route})=><CharacterMarker key={character.id} character={character} lot={origin} route={route} active={character.id===followedCharacterId} actors={actors} serverTime={serverTime} reducedMotion={reducedMotion} language={language} onClick={()=>onCharacterClick(character.id)} onEvent={onCharacterEvent} onTrouble={onCharacterTrouble?()=>onCharacterTrouble(character.id):undefined} onJourneyElapsed={onJourneyElapsed}/>)}
   <CameraRig focus={resolvedFocus} focusVersion={focusVersion} followedCharacterId={followedCharacterId} followCameraOffset={followCameraOffset} followWalking={followedCharacter?.worldAction?.state==='walking_to_event'} actors={actors} reducedMotion={reducedMotion} viewMode={viewMode}/>
  </>
 }

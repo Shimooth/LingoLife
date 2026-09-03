@@ -525,7 +525,7 @@ def test_chat_receives_current_life_and_cached_replay_does_not_repeat_life_effec
     assert client.app.state.db.get_life_world_state(user["player_id"]) == after_first
 
 
-def test_new_npc_keeps_one_authoritative_home_across_world_and_household(tmp_path):
+def test_new_npc_automatically_joins_the_one_authoritative_shared_home(tmp_path):
     client = _client(tmp_path)
     headers, user = _auth(client, "home-checker")
     initial = client.get("/api/v1/world", headers=headers).json()
@@ -542,7 +542,7 @@ def test_new_npc_keeps_one_authoritative_home_across_world_and_household(tmp_pat
     residents = {value["id"]: value for value in world["npcs"]}
     assert residents["emma"]["home"]["id"] == emma_home
     assert npc_id in residents
-    assert residents[npc_id]["home"]["id"] != emma_home
+    assert residents[npc_id]["home"]["id"] == emma_home
 
     resident = residents[npc_id]
     household = next(value for value in world["households"] if value["id"] == resident["household_id"])
@@ -555,7 +555,7 @@ def test_new_npc_keeps_one_authoritative_home_across_world_and_household(tmp_pat
     assert authoritative["residents"][npc_id]["household_id"] == household["id"]
 
 
-def test_profile_household_and_family_choices_reconcile_the_authoritative_world(tmp_path):
+def test_profile_household_field_cannot_split_shared_home_and_family_is_preserved(tmp_path):
     client = _client(tmp_path)
     headers, user = _auth(client, "household-editor")
     assert client.get("/api/v1/world", headers=headers).status_code == 200
@@ -586,9 +586,8 @@ def test_profile_household_and_family_choices_reconcile_the_authoritative_world(
         "family", "household",
     }
 
-    # Simulate the projection left by an older topology reconciliation. The
-    # next authoritative save must remove it in the same transaction as the
-    # split, even though it has no resident in the current world snapshot.
+    # Simulate a projection left by an older multi-household world. The next
+    # authoritative save removes it while retaining the one shared home.
     stale_household_id = f"ghost-household-{npc_id}"
     client.app.state.db.upsert_household_projection(user["player_id"], {
         "id": stale_household_id, "name": "Former shared home", "members": [],
@@ -604,9 +603,9 @@ def test_profile_household_and_family_choices_reconcile_the_authoritative_world(
     assert update_response.status_code == 200, update_response.text
     split = client.get("/api/v1/world", headers=headers).json()
     residents = {value["id"]: value for value in split["npcs"]}
-    assert residents[npc_id]["household_id"] != residents["emma"]["household_id"]
-    assert residents[npc_id]["home"]["id"] != residents["emma"]["home"]["id"]
-    assert len(split["households"]) == 2
+    assert residents[npc_id]["household_id"] == residents["emma"]["household_id"]
+    assert residents[npc_id]["home"]["id"] == residents["emma"]["home"]["id"]
+    assert len(split["households"]) == 1
     assert all(value["members"] for value in split["households"])
     assert {value["id"] for value in client.app.state.db.list_households(user["player_id"])} == {
         value["id"] for value in split["households"]
@@ -625,4 +624,6 @@ def test_profile_household_and_family_choices_reconcile_the_authoritative_world(
         value for value in split["relationships"]
         if set(value["participant_ids"]) == {"emma", npc_id}
     )
-    assert {value["kind"] for value in relationship["structural_bonds"]} == {"family"}
+    assert {value["kind"] for value in relationship["structural_bonds"]} == {
+        "family", "household",
+    }

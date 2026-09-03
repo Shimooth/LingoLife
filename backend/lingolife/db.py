@@ -7,6 +7,7 @@ import hashlib
 import secrets
 import uuid
 import base64
+import unicodedata
 from pathlib import Path
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -21,6 +22,46 @@ class LifeWorldRevisionConflict(RuntimeError):
 
 
 class Database:
+    # Every row in these tables belongs to the player's resettable game save.
+    # Account/security/quota/audit records (users, sessions, invitations,
+    # usage_events and agent_turn_traces), the durable players identity and
+    # global layout are intentionally absent.  ``reset_user_game_progress``
+    # audits this list against the live schema before deleting so future
+    # player-scoped tables cannot silently survive a reset.
+    _GAME_PROGRESS_TABLES = (
+        "npc_memory_fts",
+        "npc_states",
+        "messages",
+        "chat_requests",
+        "npc_profiles",
+        "npc_memories",
+        "active_events",
+        "event_history",
+        "learning_states",
+        "npc_personas",
+        "npc_runtime_states",
+        "npc_relationships",
+        "npc_goals",
+        "npc_daily_plans",
+        "npc_social_edges",
+        "npc_social_events",
+        "conversation_summaries",
+        "life_world_states",
+        "residences",
+        "households",
+        "household_members",
+        "household_resources",
+        "npc_desires",
+        "npc_life_actions",
+        "life_stories",
+        "life_story_observations",
+        "life_interventions",
+        "unresolved_threads",
+        "npc_relationship_bonds",
+        "relationship_evidence",
+        "player_onboarding",
+    )
+
     def __init__(self, url: str, invite_secret: str | None = None):
         if not url.startswith("sqlite:///"):
             raise ValueError("Demo supports sqlite:/// URLs only")
@@ -225,10 +266,34 @@ class Database:
               UNIQUE(player_id,fact_id,source_npc_id,target_npc_id,kind));
             CREATE INDEX IF NOT EXISTS idx_relationship_evidence_edge
               ON relationship_evidence(player_id,source_npc_id,target_npc_id,created_at);
+            CREATE TABLE IF NOT EXISTS player_onboarding (
+              player_id TEXT PRIMARY KEY,state_json TEXT NOT NULL DEFAULT '{}',
+              completed_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+            CREATE TABLE IF NOT EXISTS world_layout_configs (
+              scope TEXT PRIMARY KEY,layout_json TEXT NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
             """)
             self._connection.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version,description) VALUES (2,'life simulation v2 additive schema')"
             )
+            # Grandfather accounts that already had a resident when v3 first
+            # reached their database. New registrations happen after this
+            # one-time boundary and therefore still receive the onboarding flow.
+            if not self._connection.execute(
+                "SELECT 1 FROM schema_migrations WHERE version=3"
+            ).fetchone():
+                self._connection.execute(
+                    """INSERT OR IGNORE INTO player_onboarding(
+                         player_id,state_json,completed_at)
+                       SELECT DISTINCT player_id,
+                         '{"version":1,"completed":true,"household_name":"Our Home"}',
+                         CURRENT_TIMESTAMP FROM npc_profiles"""
+                )
+                self._connection.execute(
+                    "INSERT OR IGNORE INTO schema_migrations(version,description) "
+                    "VALUES (3,'shared household onboarding and published world layout')"
+                )
             columns = {row[1] for row in self._connection.execute("PRAGMA table_info(messages)")}
             if "npc_id" not in columns:
                 self._connection.execute("ALTER TABLE messages ADD COLUMN npc_id TEXT NOT NULL DEFAULT 'emma'")
@@ -495,6 +560,84 @@ class Database:
                 return None
         return {**self.user_by_id(user_id), "quota": self.quota(user_id)}
 
+    @staticmethod
+    def _username_confirmation_key(value: object) -> str:
+        return unicodedata.normalize("NFKC", str(value or "").strip()).casefold()
+
+    @classmethod
+    def _is_onboarding_test_account(cls, username: object) -> bool:
+        key = cls._username_confirmation_key(username)
+        return key == "onboarding-test" or key.startswith("onboarding-test-")
+
+    def reset_user_game_progress(self, user_id: str, confirm_username: str) -> dict:
+        """Atomically erase one player's game save while retaining the account.
+
+        This is limited to ``onboarding-test`` and ``onboarding-test-*``, and
+        deliberately keyed by the immutable internal user id *and* a typed
+        username confirmation. The existing session remains usable, so the
+        tester can immediately reload onboarding without another invitation.
+        """
+        def write():
+            user_row = self._connection.execute(
+                "SELECT id,username,player_id FROM users WHERE id=?", (user_id,),
+            ).fetchone()
+            if not user_row:
+                raise ValueError("USER_NOT_FOUND")
+            if not self._is_onboarding_test_account(user_row["username"]):
+                raise ValueError("TEST_ACCOUNT_REQUIRED")
+            if self._username_confirmation_key(confirm_username) != self._username_confirmation_key(
+                user_row["username"]
+            ):
+                raise ValueError("USERNAME_CONFIRMATION_MISMATCH")
+
+            # Fail closed if a future migration introduces player-owned data
+            # without classifying it as resettable or explicitly retained.
+            player_scoped: set[str] = set()
+            tables = self._connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+            for table_row in tables:
+                table = str(table_row["name"])
+                escaped = table.replace('"', '""')
+                columns = self._connection.execute(
+                    f'PRAGMA table_info("{escaped}")'
+                ).fetchall()
+                if any(str(column["name"]) == "player_id" for column in columns):
+                    player_scoped.add(table)
+            unclassified = player_scoped - set(self._GAME_PROGRESS_TABLES) - {
+                "users", "agent_turn_traces",
+            }
+            if unclassified:
+                raise RuntimeError(
+                    "Unclassified player-scoped tables: " + ", ".join(sorted(unclassified))
+                )
+
+            player_id = str(user_row["player_id"])
+            existing_tables = {str(row["name"]) for row in tables}
+            deleted: dict[str, int] = {}
+            for table in self._GAME_PROGRESS_TABLES:
+                if table not in existing_tables:
+                    deleted[table] = 0
+                    continue
+                # Names are selected exclusively from the static allowlist.
+                deleted[table] = int(self._connection.execute(
+                    f"SELECT count(*) FROM {table} WHERE player_id=?", (player_id,),
+                ).fetchone()[0])
+                self._connection.execute(
+                    f"DELETE FROM {table} WHERE player_id=?", (player_id,),
+                )
+
+            return {
+                "reset": True,
+                "user": {"id": str(user_row["id"]), "username": str(user_row["username"])},
+                "deleted": deleted,
+            }
+
+        result = self._life_transaction(write)
+        player_id = str(self.user_by_id(user_id)["player_id"])
+        result["onboarding"] = self.onboarding_state(player_id)
+        return result
+
     def ensure_player(self, player_id: str):
         with self._lock, self._connection:
             self._connection.execute("INSERT OR IGNORE INTO players(id) VALUES (?)", (player_id,))
@@ -578,6 +721,26 @@ class Database:
     def _json(value: dict) -> str:
         return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
+    @staticmethod
+    def _npc_name_key(value: object) -> str:
+        """Canonical comparison key for a player-visible resident name."""
+        return unicodedata.normalize("NFKC", " ".join(str(value or "").split())).casefold()
+
+    def _assert_npc_name_available(self, player_id: str, profile: dict,
+                                   *, exclude_npc_id: str | None = None) -> None:
+        candidate = self._npc_name_key(profile.get("name"))
+        if not candidate:
+            raise ValueError("INVALID_NPC_NAME")
+        rows = self._connection.execute(
+            "SELECT npc_id,profile_json FROM npc_profiles WHERE player_id=?", (player_id,),
+        ).fetchall()
+        for row in rows:
+            if exclude_npc_id is not None and str(row["npc_id"]) == exclude_npc_id:
+                continue
+            existing = json.loads(row["profile_json"])
+            if self._npc_name_key(existing.get("name")) == candidate:
+                raise ValueError("NPC_NAME_TAKEN")
+
     def get_npc_profile(self, player_id: str, npc_id: str) -> dict | None:
         with self._lock:
             row = self._connection.execute(
@@ -603,15 +766,206 @@ class Database:
             return self.get_npc_profile(player_id, npc_id)  # type: ignore[return-value]
 
     def save_npc_profile(self, player_id: str, npc_id: str, profile: dict) -> dict:
-        with self._lock, self._connection:
-            self.ensure_player(player_id)
+        self.ensure_player(player_id)
+
+        def write():
+            self._assert_npc_name_available(player_id, profile, exclude_npc_id=npc_id)
             self._connection.execute(
                 """INSERT INTO npc_profiles(player_id,npc_id,profile_json) VALUES (?,?,?)
                    ON CONFLICT(player_id,npc_id) DO UPDATE SET
                      profile_json=excluded.profile_json,updated_at=CURRENT_TIMESTAMP""",
                 (player_id, npc_id, self._json(profile)),
             )
+        self._life_transaction(write)
         return profile
+
+    def create_npc_profile(self, player_id: str, npc_id: str, profile: dict,
+                           greeting: str, greeting_translation: str,
+                           *, maximum: int = 8) -> dict:
+        """Create one resident under the same cross-worker limit/name lock."""
+        self.ensure_player(player_id)
+
+        def write():
+            count = int(self._connection.execute(
+                "SELECT count(*) FROM npc_profiles WHERE player_id=?", (player_id,),
+            ).fetchone()[0])
+            if count >= maximum:
+                raise ValueError("NPC_LIMIT_REACHED")
+            self._assert_npc_name_available(player_id, profile)
+            self._connection.execute(
+                "INSERT INTO npc_states(player_id,npc_id,relationship,mood,english_xp) "
+                "VALUES (?,?,35,50,0)", (player_id, npc_id),
+            )
+            self._connection.execute(
+                "INSERT INTO messages(player_id,speaker,text,npc_id,translation) "
+                "VALUES (?,'npc',?,?,?)",
+                (player_id, greeting, npc_id, greeting_translation),
+            )
+            self._connection.execute(
+                "INSERT INTO npc_profiles(player_id,npc_id,profile_json) VALUES (?,?,?)",
+                (player_id, npc_id, self._json(profile)),
+            )
+
+        self._life_transaction(write)
+        return profile
+
+    def onboarding_state(self, player_id: str, *, minimum: int = 2,
+                         maximum: int = 8) -> dict:
+        """Return durable onboarding progress without materializing legacy Emma.
+
+        Emma is a compatibility resident created by older entry points and is
+        deliberately excluded from ``user_created_count``.  Existing accounts
+        with two genuinely created residents migrate to completed naturally;
+        a lone default Emma can never complete the guide by itself.
+        """
+        with self._lock:
+            profile_rows = self._connection.execute(
+                "SELECT npc_id FROM npc_profiles WHERE player_id=? ORDER BY created_at,npc_id",
+                (player_id,),
+            ).fetchall()
+            row = self._connection.execute(
+                "SELECT state_json,completed_at,updated_at FROM player_onboarding WHERE player_id=?",
+                (player_id,),
+            ).fetchone()
+        resident_ids = [str(value["npc_id"]) for value in profile_rows]
+        user_created = sum(npc_id != "emma" for npc_id in resident_ids)
+        stored = json.loads(row["state_json"]) if row else {}
+        completed = bool(stored.get("completed")) or user_created >= minimum
+        return {
+            "version": 1,
+            "completed": completed,
+            "min_residents": minimum,
+            "max_residents": maximum,
+            "resident_count": len(resident_ids),
+            "user_created_count": user_created,
+            "remaining_slots": max(0, maximum - len(resident_ids)),
+            "household_name": str(stored.get("household_name") or "Our Home"),
+            "completed_at": row["completed_at"] if row else None,
+            "updated_at": row["updated_at"] if row else None,
+        }
+
+    def refresh_onboarding(self, player_id: str, *, household_name: str | None = None,
+                           force_complete: bool = False, minimum: int = 2,
+                           maximum: int = 8) -> dict:
+        """Persist completion once enough non-legacy residents exist."""
+        def write():
+            profile_rows = self._connection.execute(
+                "SELECT npc_id FROM npc_profiles WHERE player_id=?", (player_id,),
+            ).fetchall()
+            user_created = sum(str(row["npc_id"]) != "emma" for row in profile_rows)
+            row = self._connection.execute(
+                "SELECT state_json FROM player_onboarding WHERE player_id=?", (player_id,),
+            ).fetchone()
+            stored = json.loads(row["state_json"]) if row else {}
+            completed = force_complete or bool(stored.get("completed")) or user_created >= minimum
+            current_name = str(stored.get("household_name") or "Our Home")
+            name = " ".join((household_name or current_name).split())[:64] or "Our Home"
+            value = {"version": 1, "completed": completed, "household_name": name}
+            self._connection.execute(
+                """INSERT INTO player_onboarding(player_id,state_json,completed_at)
+                   VALUES (?,?,CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END)
+                   ON CONFLICT(player_id) DO UPDATE SET
+                     state_json=excluded.state_json,
+                     completed_at=CASE
+                       WHEN player_onboarding.completed_at IS NOT NULL THEN player_onboarding.completed_at
+                       WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END,
+                     updated_at=CURRENT_TIMESTAMP""",
+                (player_id, self._json(value), int(completed), int(completed)),
+            )
+        self._life_transaction(write)
+        return self.onboarding_state(player_id, minimum=minimum, maximum=maximum)
+
+    def create_onboarding_residents(self, player_id: str, residents: list[dict],
+                                    household_name: str, *, maximum: int = 8) -> list[dict]:
+        """Atomically create a validated onboarding cast and mark it complete."""
+        self.ensure_player(player_id)
+        name = " ".join(household_name.split())[:64] or "Our Home"
+
+        def write():
+            if not 2 <= len(residents) <= maximum:
+                raise ValueError("INVALID_ONBOARDING_RESIDENT_COUNT")
+            stored_row = self._connection.execute(
+                "SELECT state_json FROM player_onboarding WHERE player_id=?", (player_id,),
+            ).fetchone()
+            stored = json.loads(stored_row["state_json"]) if stored_row else {}
+            existing_rows = self._connection.execute(
+                "SELECT npc_id,profile_json FROM npc_profiles WHERE player_id=?", (player_id,),
+            ).fetchall()
+            existing_user_created = sum(str(row["npc_id"]) != "emma" for row in existing_rows)
+            if bool(stored.get("completed")) or existing_user_created >= 2:
+                raise ValueError("ONBOARDING_ALREADY_COMPLETED")
+            existing_count = int(self._connection.execute(
+                "SELECT count(*) FROM npc_profiles WHERE player_id=?", (player_id,),
+            ).fetchone()[0])
+            if existing_count + len(residents) > maximum:
+                raise ValueError("NPC_LIMIT_REACHED")
+            incoming_ids = [str(entry["id"]) for entry in residents]
+            if len(incoming_ids) != len(set(incoming_ids)):
+                raise ValueError("DUPLICATE_NPC_ID")
+            existing_names = {
+                self._npc_name_key(json.loads(row["profile_json"]).get("name"))
+                for row in existing_rows
+            }
+            incoming_names = [self._npc_name_key(entry["profile"].get("name")) for entry in residents]
+            if any(not value for value in incoming_names):
+                raise ValueError("INVALID_NPC_NAME")
+            if (len(incoming_names) != len(set(incoming_names))
+                    or bool(existing_names & set(incoming_names))):
+                raise ValueError("NPC_NAME_TAKEN")
+            created: list[dict] = []
+            for entry in residents:
+                npc_id = str(entry["id"])
+                profile = dict(entry["profile"])
+                if npc_id == "emma":
+                    raise ValueError("RESERVED_NPC_ID")
+                self._connection.execute(
+                    "INSERT INTO npc_states(player_id,npc_id,relationship,mood,english_xp) VALUES (?,?,35,50,0)",
+                    (player_id, npc_id),
+                )
+                self._connection.execute(
+                    "INSERT INTO messages(player_id,speaker,text,npc_id,translation) VALUES (?,'npc',?,?,?)",
+                    (player_id, f"Hi, I'm {profile['name']}. What would you like to talk about?",
+                     npc_id, f"嗨，我是{profile['name']}。你想聊些什么？"),
+                )
+                self._connection.execute(
+                    "INSERT INTO npc_profiles(player_id,npc_id,profile_json) VALUES (?,?,?)",
+                    (player_id, npc_id, self._json(profile)),
+                )
+                created.append({"id": npc_id, "profile": profile})
+            state = {"version": 1, "completed": True, "household_name": name}
+            self._connection.execute(
+                """INSERT INTO player_onboarding(player_id,state_json,completed_at)
+                   VALUES (?,?,CURRENT_TIMESTAMP)
+                   ON CONFLICT(player_id) DO UPDATE SET state_json=excluded.state_json,
+                     completed_at=COALESCE(player_onboarding.completed_at,CURRENT_TIMESTAMP),
+                     updated_at=CURRENT_TIMESTAMP""",
+                (player_id, self._json(state)),
+            )
+            return created
+
+        return self._life_transaction(write)
+
+    def get_world_layout(self) -> dict | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT layout_json,updated_at FROM world_layout_configs WHERE scope='published'"
+            ).fetchone()
+        return ({"layout": json.loads(row["layout_json"]), "updated_at": row["updated_at"]}
+                if row else None)
+
+    def save_world_layout(self, layout: dict) -> dict:
+        with self._lock, self._connection:
+            self._connection.execute(
+                """INSERT INTO world_layout_configs(scope,layout_json) VALUES ('published',?)
+                   ON CONFLICT(scope) DO UPDATE SET layout_json=excluded.layout_json,
+                     updated_at=CURRENT_TIMESTAMP""",
+                (self._json(layout),),
+            )
+        return self.get_world_layout()  # type: ignore[return-value]
+
+    def reset_world_layout(self) -> None:
+        with self._lock, self._connection:
+            self._connection.execute("DELETE FROM world_layout_configs WHERE scope='published'")
 
     def add_npc_memory(self, player_id: str, npc_id: str, kind: str, content: str,
                        source_event_id: str | None = None, importance: int = 1,

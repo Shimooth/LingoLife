@@ -54,12 +54,15 @@ def test_life_v2_schema_incrementally_migrates_legacy_rows_without_data_loss(tmp
         "household_members", "household_resources", "npc_desires",
         "npc_life_actions", "life_stories", "life_story_observations",
         "life_interventions", "unresolved_threads", "npc_relationship_bonds",
-        "relationship_evidence",
+        "relationship_evidence", "player_onboarding", "world_layout_configs",
     }
     assert expected_tables <= table_names(db)
     assert db._connection.execute(
         "SELECT description FROM schema_migrations WHERE version=2"
     ).fetchone()[0] == "life simulation v2 additive schema"
+    assert db._connection.execute(
+        "SELECT description FROM schema_migrations WHERE version=3"
+    ).fetchone()[0] == "shared household onboarding and published world layout"
 
     edge = db._connection.execute(
         "SELECT * FROM npc_social_edges WHERE player_id='legacy-player'"

@@ -4,14 +4,12 @@ import * as THREE from 'three'
 import type {CityCharacter,CityLandmark} from '../../components/CityMap'
 import {WorldErrorBoundary,supportsWebGL} from './WorldErrorBoundary'
 import {WorldEffects} from './WorldEffects'
-import {WorldDecorationEditor} from './WorldDecorationEditor'
 import {WorldScene,type WorldQuality,type WorldViewMode} from './WorldScene'
-import {useWorldDecorationEditor} from './useWorldDecorationEditor'
-import type {WorldDecorationValidationApi} from './worldDecorations'
 import {DEFAULT_WORLD_LANDMARKS,hashString,worldPosition,type TimeSlot,type WorldPoint} from './worldData'
 import {ResidentActionLabel} from '../../components/ResidentActionLabel'
 import {TroubleBubble} from '../../components/TroubleBubble'
 import './world.css'
+import type {WorldLayoutDocument} from '../../worldLayout'
 
 export type WorldObserver3DProps={
  characters:readonly CityCharacter[]
@@ -22,6 +20,7 @@ export type WorldObserver3DProps={
  language?:'zh'|'en'
  timeSlot?:TimeSlot
  quality?:WorldQuality
+ layout?:WorldLayoutDocument
  paused?:boolean
  showPlaceCard?:boolean
  onCharacterFollow:(id?:string)=>void
@@ -110,7 +109,7 @@ function WorldIntro({phase,variant,copy,reducedMotion,onRetry,onFallback}:{phase
  </div>
 }
 
-export function WorldObserver3D({characters,landmarks=DEFAULT_WORLD_LANDMARKS,followedCharacterId,activeLandmarkId,serverTime,language='zh',timeSlot='afternoon',quality:qualityMode='auto',paused=false,showPlaceCard=true,onCharacterFollow,onCharacterInteract,onEventOpen,onTroubleOpen,onHouseholdOpen,onJourneyElapsed,onLandmarkClick,className=''}:WorldObserver3DProps){
+export function WorldObserver3D({characters,landmarks=DEFAULT_WORLD_LANDMARKS,followedCharacterId,activeLandmarkId,serverTime,language='zh',timeSlot='afternoon',quality:qualityMode='auto',layout,paused=false,showPlaceCard=true,onCharacterFollow,onCharacterInteract,onEventOpen,onTroubleOpen,onHouseholdOpen,onJourneyElapsed,onLandmarkClick,className=''}:WorldObserver3DProps){
  const copy=COPY[language]
  const reducedMotion=useMemo(()=>typeof window!=='undefined'&&window.matchMedia('(prefers-reduced-motion: reduce)').matches,[])
  const [webglAvailable,setWebglAvailable]=useState(supportsWebGL)
@@ -130,9 +129,6 @@ export function WorldObserver3D({characters,landmarks=DEFAULT_WORLD_LANDMARKS,fo
  const [focus,setFocus]=useState<WorldPoint|null>(null)
  const [focusVersion,setFocusVersion]=useState(0)
  const [viewMode,setViewMode]=useState<WorldViewMode>('isometric')
- const mapEditorAvailable=useMemo(()=>typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('mapEditor')==='1',[])
- const [decorationValidationApi,setDecorationValidationApi]=useState<WorldDecorationValidationApi|null>(null)
- const decorationEditor=useWorldDecorationEditor(language,decorationValidationApi)
  const sceneLandmarks=useMemo(()=>landmarks.slice(0,40),[landmarks])
  const activeLandmark=useMemo(()=>landmarks.find(landmark=>landmark.id===activeLandmarkId)??null,[activeLandmarkId,landmarks])
  const activeLandmarkX=activeLandmark?.x,activeLandmarkY=activeLandmark?.y
@@ -170,25 +166,20 @@ export function WorldObserver3D({characters,landmarks=DEFAULT_WORLD_LANDMARKS,fo
  if(!webglAvailable)return <section className={`world3d-shell is-fallback ${className}`} aria-label={copy.title}><WorldFallback characters={characters} landmarks={landmarks} language={language} onCharacterInteract={onCharacterInteract} onLandmarkClick={onLandmarkClick}/></section>
 
  return <WorldErrorBoundary fallback={()=> <section className={`world3d-shell is-fallback ${className}`} aria-label={copy.title}><WorldFallback characters={characters} landmarks={landmarks} language={language} onCharacterInteract={onCharacterInteract} onLandmarkClick={onLandmarkClick}/></section>}>
-  <section className={`world3d-shell world3d-shell--${timeSlot} ${decorationEditor.enabled?'is-decoration-editing':''} ${className}`} aria-label={copy.title} data-quality={quality}>
+  <section className={`world3d-shell world3d-shell--${timeSlot} ${className}`} aria-label={copy.title} data-quality={quality}>
    <span className="world3d-time world3d-time--floating"><i aria-hidden>{timeSlot==='morning'?'☀':timeSlot==='afternoon'?'◐':'☾'}</i>{copy.time[timeSlot]}</span>
    <div className="world3d-stage">
     <WorldIntro phase={introPhase} variant={introVariant} copy={copy} reducedMotion={reducedMotion} onRetry={()=>window.location.reload()} onFallback={()=>setWebglAvailable(false)}/>
     <Canvas orthographic camera={{position:[38,36,44],zoom:25,near:.1,far:180}} dpr={quality==='high'?HIGH_DPR:LOW_DPR} shadows={quality==='high'} frameloop={paused||reducedMotion?'demand':'always'} gl={WEBGL_OPTIONS}
      onCreated={({gl})=>{gl.setClearColor(timeSlot==='evening'?'#21384f':timeSlot==='morning'?'#579bb9':'#3f86aa',1);gl.outputColorSpace='srgb';gl.toneMapping=THREE.ACESFilmicToneMapping;gl.toneMappingExposure=.88;gl.domElement.addEventListener('webglcontextlost',event=>{event.preventDefault();setWebglAvailable(false)},{once:true})}}
-     onPointerMissed={()=>{if(mapEditorAvailable&&decorationEditor.enabled)decorationEditor.select();else setSelectedLandmark(null)}} fallback={<WorldFallback characters={characters} landmarks={landmarks} language={language} onCharacterInteract={onCharacterInteract} onLandmarkClick={onLandmarkClick}/>}>
+     onPointerMissed={()=>setSelectedLandmark(null)} fallback={<WorldFallback characters={characters} landmarks={landmarks} language={language} onCharacterInteract={onCharacterInteract} onLandmarkClick={onLandmarkClick}/>}>
      <WorldFrameLoopControl paused={paused}/>
      <Suspense fallback={null}>
       <WorldEffects timeSlot={timeSlot} quality={quality} reducedMotion={reducedMotion} postProcessing={postProcessing}/>
-      <WorldScene characters={characters} landmarks={sceneLandmarks} followedCharacterId={followedCharacterId} serverTime={serverTime} language={language} timeSlot={timeSlot} reducedMotion={reducedMotion} selectedLandmarkId={activeLandmarkId!==dismissedActiveLandmarkId?activeLandmarkId:selectedLandmark?.id} focus={externalFocus??focus} focusVersion={focusVersion+(activeLandmarkId!==dismissedActiveLandmarkId&&activeLandmarkId?hashString(activeLandmarkId):0)} viewMode={viewMode} quality={quality} decorationEditor={{active:mapEditorAvailable&&decorationEditor.enabled,mode:decorationEditor.mode,selectedKind:decorationEditor.selectedKind,selectedId:decorationEditor.selectedId,decorations:decorationEditor.visibleDocument.decorations,onSelect:decorationEditor.select,onPlace:decorationEditor.place}} onDecorationValidationApi={setDecorationValidationApi} onCharacterClick={selectCharacter} onCharacterEvent={eventId=>onEventOpen?.(eventId)} onCharacterTrouble={onTroubleOpen} onJourneyElapsed={onJourneyElapsed} onLandmarkSelect={selectLandmark}/>
+      <WorldScene characters={characters} landmarks={sceneLandmarks} followedCharacterId={followedCharacterId} serverTime={serverTime} language={language} timeSlot={timeSlot} reducedMotion={reducedMotion} selectedLandmarkId={activeLandmarkId!==dismissedActiveLandmarkId?activeLandmarkId:selectedLandmark?.id} focus={externalFocus??focus} focusVersion={focusVersion+(activeLandmarkId!==dismissedActiveLandmarkId&&activeLandmarkId?hashString(activeLandmarkId):0)} viewMode={viewMode} quality={quality} layout={layout} onCharacterClick={selectCharacter} onCharacterEvent={eventId=>onEventOpen?.(eventId)} onCharacterTrouble={onTroubleOpen} onHouseholdOpen={onHouseholdOpen} onJourneyElapsed={onJourneyElapsed} onLandmarkSelect={selectLandmark}/>
       <SceneFrameGate onReady={revealScene}/>
      </Suspense>
     </Canvas>
-    {mapEditorAvailable&&<WorldDecorationEditor
-     controller={decorationEditor}
-     language={language}
-     onActivate={showOverview}
-    />}
     <nav className="world3d-resident-dock" aria-label={copy.residents}>
      <button type="button" className={'world3d-resident-button is-overview '+(!followedCharacterId?'is-active':'')} onClick={showOverview}><span aria-hidden>⌂</span><b>{copy.overview}</b></button>
      {characters.map(character=><div className={character.troubleSignal?'world3d-resident-entry has-trouble':'world3d-resident-entry'} key={character.id}><button type="button" className={'world3d-resident-button '+(character.id===followedCharacterId?'is-active':'')} onClick={()=>selectCharacter(character.id)}><span aria-hidden>{character.name.slice(0,1)}<i data-state={character.worldAction?.state??'idle'}/></span><b>{character.name}</b><ResidentActionLabel action={character.lifeAction} language={language} intent={character.visibleIntent} intentZh={character.visibleIntentZh} compact className="world3d-resident-dock__action"/></button>{character.troubleSignal&&onTroubleOpen&&<button type="button" className="world3d-resident-trouble" onClick={()=>onTroubleOpen(character.id)} aria-label={language==='zh'?character.troubleSignal.summary_zh?.trim()||character.name+'似乎遇到了麻烦':character.troubleSignal.summary?.trim()||character.name+' seems troubled'}>?</button>}</div>)}

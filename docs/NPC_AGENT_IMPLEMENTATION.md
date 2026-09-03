@@ -1,8 +1,8 @@
 # NPC Agent implementation
 
-> Status: current runtime baseline as of 2026-08-26. This document describes
-> behavior that exists in code today; it is not the target life-simulation
-> design. The planned migration from daily social events to Desire →
+> Status: historical runtime baseline frozen at 2026-08-26. This document describes
+> behavior that existed at that checkpoint; it is not the current target or a reliable inventory of later code.
+> The target life-simulation design and the migration from daily social events to Desire →
 > Commitment → Life Action → Moment / Incident / Story Thread is tracked in
 > [LIFE_SIMULATION_IMPLEMENTATION_PLAN.md](LIFE_SIMULATION_IMPLEMENTATION_PLAN.md).
 
@@ -84,9 +84,9 @@ The social-world suite additionally covers directional relationship updates, par
 
 ## Planned replacement boundary
 
-The existing `SocialWorldEngine` remains the production path until the staged
-life-simulation migration passes its own compatibility, idempotency, database,
-API, and player-flow checks. New design documents must not be read as evidence
+At this historical checkpoint, the existing `SocialWorldEngine` remained the production path until the staged
+life-simulation migration passed its own compatibility, idempotency, database,
+API, and player-flow checks. Newer design documents must not be read as evidence
 that Desire, Household resources, Unresolved Threads, uncertain intervention,
 or romance states are already implemented. The migration is additive and
 feature-flagged; old tables and APIs remain readable until a separate removal

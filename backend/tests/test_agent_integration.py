@@ -89,18 +89,20 @@ def test_profile_requires_auth_and_rejects_oversized_drawing(tmp_path):
     assert client.put("/api/v1/npc/profile", headers=auth, json=profile).status_code == 422
 
 
-def test_up_to_five_custom_characters_have_separate_rooms(tmp_path):
+def test_up_to_eight_characters_keep_separate_conversations(tmp_path):
     client, _, auth = setup(tmp_path)
     base = client.get("/api/v1/npc/profile", headers=auth).json()
     created = []
-    for index in range(4):
+    for index in range(7):
         profile = {**base, "name": f"Character {index}", "relationship": f"custom bond {index}",
                    "occupation": f"custom job {index}", "personality": [f"trait {index}"],
                    "interests": [f"interest {index}"], "avatar": {**base["avatar"], "strokes": []}}
         response = client.post("/api/v1/npcs", headers=auth, json=profile)
         assert response.status_code == 201
         created.append(response.json()["id"])
-    assert len(client.get("/api/v1/npcs", headers=auth).json()["npcs"]) == 5
+    listing = client.get("/api/v1/npcs", headers=auth).json()
+    assert listing["limit"] == 8
+    assert len(listing["npcs"]) == 8
     assert client.post("/api/v1/npcs", headers=auth, json=base).status_code == 409
 
     second = created[0]

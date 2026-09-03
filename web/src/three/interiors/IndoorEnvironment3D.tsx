@@ -3,6 +3,7 @@ import {useThree} from '@react-three/fiber'
 import {Component,Suspense,useMemo,type ReactNode} from 'react'
 import * as THREE from 'three'
 import type {InteriorTheme} from './interiorThemes'
+import type {WorldLayoutInteriorPlacement} from '../../worldLayout'
 
 const BASE='/assets/life/interiors'
 
@@ -203,10 +204,16 @@ function RoomShell({theme,preview}:{theme:InteriorTheme;preview:boolean}){
  </group>
 }
 
-export function IndoorEnvironment3D({theme,mode='encounter'}:{theme:InteriorTheme;mode?:'encounter'|'preview'}){
+export function IndoorEnvironment3D({theme,mode='encounter',placements}:{theme:InteriorTheme;mode?:'encounter'|'preview';placements?:readonly WorldLayoutInteriorPlacement[]}){
  const preview=mode==='preview'
+ const sceneAssets=placements?.map(item=>({
+  id:item.id,asset:item.asset,
+  position:[item.position.x,item.position.y,item.position.z] as [number,number,number],
+  rotation:item.rotation.y,
+  scale:[item.scale.x,item.scale.y,item.scale.z] as [number,number,number],
+ }))??SCENE_ASSETS[theme]
  return <group name={`LingoLife ${theme} environment`} position={[0,preview ? -.08 : 0,preview ? .05 : 0]} scale={preview ? .94 : 1}>
   <RoomShell theme={theme} preview={preview}/>
-  {SCENE_ASSETS[theme].map(placement=><InteriorAssetBoundary key={placement.id} placement={placement}><Suspense fallback={<MissingInteriorAsset placement={placement}/>}><InteriorAsset placement={placement}/></Suspense></InteriorAssetBoundary>)}
+  {sceneAssets.map(placement=><InteriorAssetBoundary key={placement.id} placement={placement}><Suspense fallback={<MissingInteriorAsset placement={placement}/>}><InteriorAsset placement={placement}/></Suspense></InteriorAssetBoundary>)}
  </group>
 }

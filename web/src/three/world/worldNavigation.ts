@@ -1,5 +1,6 @@
 import {
  OPPOSITE_ROAD_DIRECTION,
+ ROAD_DIRECTION_OFFSET,
  ROAD_TILES,
  ROAD_TILE_STEP,
  roadConnections,
@@ -320,6 +321,49 @@ export function buildPedestrianRoute(origin:BuildingLot,target:BuildingLot,optio
   }
  }
  return best??makeRoute([stationary],false,origin.rotation)
+}
+
+/**
+ * Route against an administrator-authored road document.  The default city
+ * keeps using the richer prebuilt pavement graph above; this compact graph is
+ * rebuilt only when a published layout supplies a different road network.
+ */
+export function buildPedestrianRouteForRoads(origin:BuildingLot,target:BuildingLot,roads:readonly RoadTilePlacement[],options:PedestrianRouteOptions={}):PedestrianRoute{
+ if(!roads.length)return buildPedestrianRoute(origin,target,options)
+ const y=Number.isFinite(options.y)?Number(options.y):PEDESTRIAN_HEIGHT
+ const byCell=new Map<string,RoadTilePlacement>(),ports=new Map<string,ReadonlySet<RoadDirection>>()
+ roads.forEach(road=>{const [gx,gz]=cellForPoint(road.position);byCell.set(cellKey(gx,gz),road);ports.set(road.id,new Set(roadConnections(road)))})
+ const entry=(lot:BuildingLot,lateralOffset=0)=>{
+  const [gx,gz]=cellForPoint(lot.position),desired:[number,number]=[Math.sin(lot.rotation),Math.cos(lot.rotation)]
+  const candidates=CARDINAL_DIRECTIONS.flatMap(([dx,dz])=>{
+   const road=byCell.get(cellKey(gx+dx,gz+dz));if(!road)return []
+   const normal:[number,number]=[-dx,-dz],tangent:[number,number]=[-normal[1],normal[0]],lateral=clampLateral(lateralOffset)
+   const towardRoad:[number,number]=[-normal[0],-normal[1]]
+   return [{road,score:desired[0]*towardRoad[0]+desired[1]*towardRoad[1],point:[road.position[0]+normal[0]*PEDESTRIAN_SIDEWALK_OFFSET+tangent[0]*lateral,road.position[1]+normal[1]*PEDESTRIAN_SIDEWALK_OFFSET+tangent[1]*lateral] as Point2}]
+  })
+  return candidates.sort((a,b)=>b.score-a.score||a.road.id.localeCompare(b.road.id))[0]
+ }
+ const start=entry(origin,options.startLateralOffset),end=entry(target,options.endLateralOffset)
+ if(!start||!end)return makeRoute([[origin.position[0],y,origin.position[1]]],false,origin.rotation)
+ if(start.road.id===end.road.id)return makeRoute([[start.point[0],y,start.point[1]],[end.point[0],y,end.point[1]]],true,origin.rotation)
+ const previous=new Map<string,string>(),queue=[start.road.id],visited=new Set(queue)
+ const roadById=new Map(roads.map(road=>[road.id,road]))
+ while(queue.length){
+  const currentId=queue.shift()!,current=roadById.get(currentId);if(!current)continue
+  if(currentId===end.road.id)break
+  const [gx,gz]=cellForPoint(current.position)
+  const neighbours=(Object.entries(ROAD_DIRECTION_OFFSET) as [RoadDirection,readonly [number,number]][]).flatMap(([direction,[dx,dz]])=>{
+   if(!ports.get(current.id)?.has(direction))return []
+   const candidate=byCell.get(cellKey(gx+dx,gz+dz))
+   return candidate&&ports.get(candidate.id)?.has(OPPOSITE_ROAD_DIRECTION[direction])?[candidate]:[]
+  }).sort((a,b)=>stableHash(`${options.seed??''}:${a.id}`)-stableHash(`${options.seed??''}:${b.id}`)||a.id.localeCompare(b.id))
+  for(const neighbour of neighbours){if(visited.has(neighbour.id))continue;visited.add(neighbour.id);previous.set(neighbour.id,currentId);queue.push(neighbour.id)}
+ }
+ if(!visited.has(end.road.id))return makeRoute([[start.point[0],y,start.point[1]]],false,origin.rotation)
+ const path=[end.road.id]
+ while(path[0]!==start.road.id){const parent=previous.get(path[0]);if(!parent)break;path.unshift(parent)}
+ const centres=path.map(id=>roadById.get(id)!).map(road=>[road.position[0],y,road.position[1]] as WorldPoint)
+ return makeRoute([[start.point[0],y,start.point[1]],...centres,[end.point[0],y,end.point[1]]],true,origin.rotation)
 }
 
 /** Sample a route at normalized progress using cumulative world-space length. */

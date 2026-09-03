@@ -54,8 +54,8 @@ function Portrait({character}:{character:CityCharacter}){
 }
 
 function HomeMarker({character,homeLabel,onSelect}:{character:CityCharacter;homeLabel:string;onSelect:()=>void}){
- return <button type="button" className="city-home-marker" style={{left:`${clamp(character.home.x,24,1176)/12}%`,top:`${clamp(character.home.y,35,725)/7.6}%`}} aria-label={`${character.name} · ${homeLabel}`} onClick={onSelect}>
-  <i aria-hidden/><small>{character.name} · {homeLabel}</small>
+ return <button type="button" className="city-home-marker" style={{left:`${clamp(character.home.x,24,1176)/12}%`,top:`${clamp(character.home.y,35,725)/7.6}%`}} aria-label={homeLabel} onClick={onSelect}>
+  <i aria-hidden/><small>{homeLabel}</small>
  </button>
 }
 
@@ -89,8 +89,8 @@ export function CityMap({characters,landmarks=DEFAULT_LANDMARKS,activeCharacterI
   const gesture=useRef<{x:number;y:number;panX:number;panY:number;distance?:number}|null>(null)
   const [view,setView]=useState({zoom:1,panX:0,panY:0})
   const [selected,setSelected]=useState<{landmark?:CityLandmark;homeCharacter?:CityCharacter}|null>(null)
-  const selectedAsset=useMemo(()=>selected?.landmark?getLocationAsset(selected.landmark.id,selected.landmark.kind):selected?.homeCharacter?getHomeLocationAsset(selected.homeCharacter.id,selected.homeCharacter.avatar?.homeBackground):null,[selected])
-  const copy=language==='zh'?{label:'天空之城地图',home:'家',park:'绿荫公园',cafe:'橘子咖啡',school:'城市学校',hospital:'中心医院',shops:'商业街',station:'中央车站',office:'创意办公区',river:'月川',plus:'放大地图',minus:'缩小地图',reset:'重置地图'}:{label:'Sky City map',home:'Home',park:'Green Park',cafe:'Orange Café',school:'City School',hospital:'Central Hospital',shops:'Market Street',station:'Central Station',office:'Creative District',river:'Moon River',plus:'Zoom in',minus:'Zoom out',reset:'Reset map'}
+  const selectedAsset=useMemo(()=>selected?.landmark?getLocationAsset(selected.landmark.id,selected.landmark.kind):selected?.homeCharacter?getHomeLocationAsset():null,[selected])
+  const copy=language==='zh'?{label:'天空之城地图',home:'共享住宅',park:'绿荫公园',cafe:'橘子咖啡',school:'城市学校',hospital:'中心医院',shops:'商业街',station:'中央车站',office:'创意办公区',river:'月川',plus:'放大地图',minus:'缩小地图',reset:'重置地图'}:{label:'Sky City map',home:'Shared home',park:'Green Park',cafe:'Orange Café',school:'City School',hospital:'Central Hospital',shops:'Market Street',station:'Central Station',office:'Creative District',river:'Moon River',plus:'Zoom in',minus:'Zoom out',reset:'Reset map'}
   const constrain=useCallback((zoom:number,panX:number,panY:number)=>{
     const el=viewport.current;if(!el)return {zoom,panX,panY}
     const maxX=Math.max(0,(el.clientWidth*(zoom-1))/2),maxY=Math.max(0,(el.clientHeight*(zoom-1))/2)
@@ -136,7 +136,7 @@ export function CityMap({characters,landmarks=DEFAULT_LANDMARKS,activeCharacterI
         <img className="city-map__art" src="/assets/city/city-map-v2.jpg" alt="" draggable={false}/>
         <div className="city-landmarks">{landmarks.map(place=>{const resource=getLocationAsset(place.id,place.kind);return <button type="button" key={place.id} className={`city-landmark city-landmark--${place.kind}`} style={{left:`${place.x/12}%`,top:`${place.y/7.6}%`,'--landmark-accent':resource.accent} as React.CSSProperties} onClick={()=>setSelected({landmark:place})} aria-label={language==='zh'?`查看${place.name}详情`:`View details for ${place.name}`}><i><LocationIcon name={resource.icon}/></i><b>{place.name}</b></button>})}</div>
         <div className="city-map__characters">
-          {characters.slice(0,5).map(c=><HomeMarker key={`home-${c.id}`} character={c} homeLabel={copy.home} onSelect={()=>setSelected({homeCharacter:c})}/>)}
+          {characters.slice(0,1).map(c=><HomeMarker key="shared-home" character={c} homeLabel={copy.home} onSelect={()=>setSelected({homeCharacter:c})}/>)}
           {characters.slice(0,5).map(c=><CharacterPin key={c.id} character={c} active={c.id===activeCharacterId} onSelect={()=>onCharacterClick(c.id)}/>)}
         </div>
       </div>
@@ -147,16 +147,16 @@ export function CityMap({characters,landmarks=DEFAULT_LANDMARKS,activeCharacterI
 
 function LocationDetail({asset,landmark,homeCharacter,characters,language,reduce,onClose,onCharacterClick}:{asset:LocationAsset;landmark?:CityLandmark;homeCharacter?:CityCharacter;characters:CityCharacter[];language:'zh'|'en';reduce:boolean;onClose:()=>void;onCharacterClick:(id:string)=>void}){
  const base=locationCopy(asset,language)
- const name=homeCharacter?(language==='zh'?`${homeCharacter.name}的家`:`${homeCharacter.name}'s home`):landmark?.name||base.name
- const district=landmark?.district?(DISTRICT_NAMES[landmark.district]?.[language]||landmark.district):(language==='zh'?'住宅区':'Residential district')
- const visitors=homeCharacter?(homeCharacter.locationId?[]:[homeCharacter]):characters.filter(character=>character.locationId===landmark?.id)
+ const name=homeCharacter?(language==='zh'?'共享住宅':'Shared home'):landmark?.name||base.name
+ const district=landmark?.district?(DISTRICT_NAMES[landmark.district]?.[language]||landmark.district):(language==='zh'?'共享住宅区':'Shared residential district')
+ const visitors=homeCharacter?characters.filter(character=>!character.locationId):characters.filter(character=>character.locationId===landmark?.id)
  return <motion.aside className="location-detail" role="dialog" aria-modal="false" aria-label={language==='zh'?`${name}详情`:`Details for ${name}`} initial={reduce?{opacity:0}:{opacity:0,x:35,scale:.96}} animate={{opacity:1,x:0,scale:1}} exit={reduce?{opacity:0}:{opacity:0,x:25,scale:.97}} transition={{type:'spring',stiffness:230,damping:26}}>
   <div className="location-detail__hero" style={{'--location-accent':asset.accent,backgroundImage:`linear-gradient(180deg,transparent 25%,${asset.accent}e6 100%),url(${asset.image})`,backgroundPosition:asset.imagePosition||'center'} as React.CSSProperties}>
    <button type="button" onClick={onClose} aria-label={language==='zh'?'关闭地点详情':'Close location details'}>×</button>
    <div><span><LocationIcon name={asset.icon}/></span><p>{base.category}</p><h2>{name}</h2><small>⌖ {district}</small></div>
   </div>
   <div className="location-detail__body">
-   <p>{homeCharacter?(language==='zh'?`这是 ${homeCharacter.name} 在城市里的私人空间。熟悉的收藏、窗景和生活痕迹，让这里的谈话更放松也更亲密。`:`This is ${homeCharacter.name}'s private place in the city. Familiar objects and everyday traces make conversations here quieter and more intimate.`):base.description}</p>
+   <p>{base.description}</p>
    <dl><div><dt>{language==='zh'?'开放时间':'Hours'}</dt><dd>{base.hours}</dd></div><div><dt>{language==='zh'?'地点特色':'Highlights'}</dt><dd>{base.highlights.join(' · ')}</dd></div></dl>
    <section><h3>{language==='zh'?'今天在这里':'Here today'}</h3>{visitors.length?<div className="location-detail__visitors">{visitors.map(character=><button type="button" key={character.id} onClick={()=>{onClose();onCharacterClick(character.id)}}><Portrait character={character}/><span><b>{character.name}</b><small>{language==='zh'?'开始对话':'Start conversation'} →</small></span></button>)}</div>:<p className="location-detail__quiet">{language==='zh'?'现在没有熟悉的角色在这里，也许晚些时候再来看看。':'No familiar character is here right now. The place may feel different later.'}</p>}</section>
   </div>

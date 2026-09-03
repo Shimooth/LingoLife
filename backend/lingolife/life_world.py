@@ -732,6 +732,10 @@ class LifeWorldEngine:
                              profiles: Mapping[str, Mapping[str, Any]], now: datetime,
                              home_location_mapping: Mapping[str, Any] | None = None) -> None:
         residents = state["residents"]
+        previous_households = {
+            npc_id: str(resident.get("household_id") or "")
+            for npc_id, resident in residents.items()
+        }
         for npc_id in profiles:
             if npc_id in residents:
                 resident = residents[npc_id]
@@ -764,6 +768,40 @@ class LifeWorldEngine:
                                  "decision_serial": 0, "completed_action_count": 0,
                                  "pending_instruction": None,
                                  "relationship_policy": self._relationship_policy(profiles[npc_id])}
+
+        # Preserve open stories, unresolved responsibilities and historical
+        # facts when legacy per-resident households collapse into the one shared
+        # home. Stable story/thread ids remain unchanged; only their objective
+        # household/location references move to the canonical residence.
+        household_remap = {
+            old: str(residents[npc_id].get("household_id") or "")
+            for npc_id, old in previous_households.items()
+            if npc_id in residents and old
+            and old != str(residents[npc_id].get("household_id") or "")
+        }
+        if household_remap:
+            def rehome(value: Any) -> Any:
+                if isinstance(value, MutableMapping):
+                    for key, item in list(value.items()):
+                        if key == "household_id" and isinstance(item, str) and item in household_remap:
+                            value[key] = household_remap[item]
+                        elif key in {"location_id", "home_location_id"} and isinstance(item, str):
+                            old_prefix = next((old for old in household_remap
+                                               if item.startswith(f"{old}:")), None)
+                            if old_prefix:
+                                value[key] = household_remap[old_prefix] + item[len(old_prefix):]
+                        else:
+                            rehome(item)
+                elif isinstance(value, list):
+                    for item in value:
+                        rehome(item)
+                return value
+
+            for collection_name in (
+                "stories", "threads", "responsibilities", "boundary_events",
+                "environment_events", "aftermath", "memory_seeds",
+            ):
+                rehome(state.get(collection_name))
 
         # Rebuild objective household membership from resident locations while
         # preserving accumulated household state and resources.  In particular,

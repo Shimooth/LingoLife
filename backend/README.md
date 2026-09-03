@@ -1,6 +1,6 @@
-# LingoLife Demo API
+# LingoLife backend
 
-> 本文描述当前已实现 API。下一阶段会在保持这些接口可读和旧数据可迁移的前提下，引入 Desire、Commitment、Life Action、Household、Moment / Incident / Story Thread。目标与分阶段方案见 [`../docs/LIFE_SIMULATION_IMPLEMENTATION_PLAN.md`](../docs/LIFE_SIMULATION_IMPLEMENTATION_PLAN.md)，不要将该目标文档中的字段视为已上线 API。
+> 本文后半部分保留 2026-08-26 的旧 `SocialWorldEngine` 兼容接口说明，不再代表当前完整 world contract。2026-09-03 首版已经加入 onboarding、2～8 人整组创建、单一共享住宅协调与 world-layout API；完整目标、已验证范围和剩余差额以 [`../docs/LIFE_SIMULATION_IMPLEMENTATION_PLAN.md`](../docs/LIFE_SIMULATION_IMPLEMENTATION_PLAN.md) 的当前检查点为准，运行时精确接口以当前 OpenAPI 和测试为准。
 
 Python 3.11+：
 

@@ -8,6 +8,7 @@ import type {LifeLanguage} from '../life/lifeActionCatalog'
 import {deriveLifeStoryParticipantExpression} from '../life/characterExpression'
 import {CharacterEmote,DirectedCharacter3D,type CharacterMotion} from '../three/characters'
 import {IndoorEnvironment3D,INTERIOR_THEME_COPY,interiorThemeFor,type InteriorTheme} from '../three/interiors'
+import type {WorldLayoutRoom} from '../worldLayout'
 import './LifeStoryEncounter.css'
 
 type Props={
@@ -16,6 +17,7 @@ type Props={
  locationName?:string
  locationImage?:string
  participantAvatars?:Record<string,AvatarConfig>
+ layoutRooms?:readonly WorldLayoutRoom[]
  onClose:()=>void
  onObserve:(story:LifeStory)=>Promise<LifeStory>
  onIntervene:(story:LifeStory,action:string)=>Promise<LifeStory>
@@ -76,7 +78,7 @@ const statusLabel=(story:LifeStory,observed:boolean,language:LifeLanguage)=>{
  return language==='zh'?'尚未观察':'Not witnessed yet'
 }
 
-function LifeStoryCast3D({story,participants,avatars,reducedMotion,theme,language}:{story:LifeStory;participants:{id:string;name:string}[];avatars?:Record<string,AvatarConfig>;reducedMotion:boolean;theme:InteriorTheme;language:LifeLanguage}){
+function LifeStoryCast3D({story,participants,avatars,reducedMotion,theme,language,layoutRoom}:{story:LifeStory;participants:{id:string;name:string}[];avatars?:Record<string,AvatarConfig>;reducedMotion:boolean;theme:InteriorTheme;language:LifeLanguage;layoutRoom?:WorldLayoutRoom}){
  const cast=participants.slice(0,3),count=cast.length
  // Keep the authored furniture readable and reserve the right side for the
  // story card. The cast remains in a clear foreground lane instead of being
@@ -89,7 +91,7 @@ function LifeStoryCast3D({story,participants,avatars,reducedMotion,theme,languag
    <ambientLight intensity={1.15}/><hemisphereLight args={['#fff6df','#627a72',1.45]}/>
    <directionalLight position={[-4,6,5]} intensity={2.05} color="#fff0d8" castShadow shadow-mapSize={[512,512]}/>
    <pointLight position={[3,2.4,2]} intensity={5.5} distance={8} color="#f1a67d"/>
-   <Suspense fallback={null}><IndoorEnvironment3D theme={theme}/></Suspense>
+   <Suspense fallback={null}><IndoorEnvironment3D theme={theme} placements={layoutRoom?.placements}/></Suspense>
    {cast.map((person,index)=>{
     const authoredCue=story.presentation?.beats?.find(beat=>beat.speaker_id===person.id)?.animation_cue
     const animation=(authoredCue??expressions[index].motion) as CharacterMotion
@@ -104,7 +106,7 @@ function LifeStoryCast3D({story,participants,avatars,reducedMotion,theme,languag
  </div>
 }
 
-export function LifeStoryEncounter({story,language='zh',locationName,locationImage,participantAvatars,onClose,onObserve,onIntervene}:Props){
+export function LifeStoryEncounter({story,language='zh',locationName,locationImage,participantAvatars,layoutRooms=[],onClose,onObserve,onIntervene}:Props){
  const reduce=useReducedMotion(),closeRef=useRef<HTMLButtonElement>(null)
  const [current,setCurrent]=useState(story),[busy,setBusy]=useState(''),[error,setError]=useState(''),[observedLocally,setObservedLocally]=useState(Boolean(story.observed_at)),[decision,setDecision]=useState('')
  useEffect(()=>{setCurrent(story);setObservedLocally(Boolean(story.observed_at));setDecision('');setError('')},[story])
@@ -123,6 +125,8 @@ export function LifeStoryEncounter({story,language='zh',locationName,locationIma
  const subject=language==='zh'?current.presentation?.subject_zh?.trim()||current.presentation?.subject:current.presentation?.subject?.trim()||current.presentation?.subject_zh
  const interiorTheme=useMemo(()=>interiorThemeFor({locationId:current.location_id??current.presentation?.location?.id,hint:[current.title,current.title_zh,current.summary,current.summary_zh,current.presentation?.subject,current.presentation?.subject_zh].filter(Boolean).join(' ')}),[current.location_id,current.presentation?.location?.id,current.presentation?.subject,current.presentation?.subject_zh,current.summary,current.summary_zh,current.title,current.title_zh])
  const interiorCopy=INTERIOR_THEME_COPY[interiorTheme][language]
+ const authoredRoomKind=interiorTheme==='home_kitchen'?'kitchen':interiorTheme==='home_bathroom'?'bathroom':interiorTheme==='home_bedroom'?'bedroom':'living_room'
+ const authoredRoom=current.household_id?layoutRooms.find(room=>room.kind===authoredRoomKind):undefined
  const reactions=current.participant_reactions??current.outcome?.participant_reactions??[]
  const consequences=current.consequences??current.outcome?.consequences??[]
 
@@ -151,7 +155,7 @@ export function LifeStoryEncounter({story,language='zh',locationName,locationIma
    <section className="life-story-encounter__scene" data-interior-theme={interiorTheme} style={locationImage?{backgroundImage:`linear-gradient(180deg,rgba(229,240,233,.26),rgba(105,137,128,.5)),url("${locationImage}")`}:undefined}>
     <span className="life-story-encounter__scene-kind">{interiorCopy}</span>
     <div className="life-story-encounter__cast" aria-label={language==='zh'?'参与者':'Participants'}>
-     <LifeStoryCast3D story={current} participants={participants} avatars={participantAvatars} reducedMotion={Boolean(reduce)} theme={interiorTheme} language={language}/>
+     <LifeStoryCast3D story={current} participants={participants} avatars={participantAvatars} reducedMotion={Boolean(reduce)} theme={interiorTheme} language={language} layoutRoom={authoredRoom}/>
      <div className="life-story-encounter__cast-names">{participants.slice(0,3).map((person,index)=><motion.b key={person.id} initial={reduce?false:{opacity:0,y:8}} animate={{opacity:1,y:0}} transition={{delay:reduce?0:index*.08}}>{person.name}</motion.b>)}</div>
      {participants.length>3&&<span className="life-story-encounter__more">+{participants.length-3}</span>}
     </div>

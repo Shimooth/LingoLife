@@ -43,13 +43,18 @@ from .db import Database
 from .events import ActiveEvent, EventEngine, NPCEventContext
 from .learning import Evidence, LearningEngine
 from .life_service import LifeWorldService
-from .models import (AdminLoginRequest, AdminUserPatch, ChatRequest, ChatResponse,
-                     InviteCreateRequest, LifeInterventionRequest, LoginRequest, NpcProfile, PasswordChangeRequest, RegisterRequest,
-                     SocialInterventionRequest)
+from .layouts import default_world_layout
+from .models import (AdminLoginRequest, AdminUserPatch, AdminUserResetRequest,
+                     ChatRequest, ChatResponse,
+                     InviteCreateRequest, LifeInterventionRequest, LoginRequest, NpcProfile,
+                     OnboardingCompleteRequest, PasswordChangeRequest, RegisterRequest,
+                     SocialInterventionRequest, WorldLayout, WorldLayoutRequest)
 from .social import SocialWorldEngine
 
 KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$")
 USERNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{2,31}$")
+NPC_LIMIT = 8
+ONBOARDING_MIN_RESIDENTS = 2
 
 DEFAULT_NPC_PROFILE = {
     "name": "Emma", "age": 25, "relationship": "Friend",
@@ -71,6 +76,7 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
     event_engine = EventEngine(db)
     social_engine = SocialWorldEngine(db)
     life_world = LifeWorldService(db, settings.game_timezone) if settings.life_simulation_v2 else None
+    built_in_world_layout = default_world_layout()
     try:
         game_zone = ZoneInfo(settings.game_timezone)
     except ZoneInfoNotFoundError as exc:
@@ -122,7 +128,7 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         profile = db.get_npc_profile(player_id, npc_id)
         if profile:
             return profile
-        if npc_id == "emma" and create_default:
+        if npc_id == "emma" and create_default and not db.list_npc_profiles(player_id):
             return db.get_or_create_npc_profile(player_id, "emma", DEFAULT_NPC_PROFILE)
         raise HTTPException(404, {"code": "NPC_NOT_FOUND", "message": "Character was not found."})
 
@@ -207,8 +213,31 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
 
     def life_profiles(player_id: str) -> list[dict]:
         """Return the complete resident set after materializing the legacy default."""
+        entries = db.list_npc_profiles(player_id)
+        if entries:
+            return entries
         profile_for(player_id)
         return db.list_npc_profiles(player_id)
+
+    def onboarding_state(player_id: str) -> dict:
+        return db.onboarding_state(
+            player_id, minimum=ONBOARDING_MIN_RESIDENTS, maximum=NPC_LIMIT,
+        )
+
+    def published_world_layout() -> dict:
+        # Treat the DB as durable storage, not as a trust boundary.  This also
+        # makes upgrades safe if an old/corrupt row predates current asset and
+        # semantic validators (including malformed JSON from manual operations).
+        try:
+            stored = db.get_world_layout()
+            if stored:
+                return {
+                    "layout": WorldLayout.model_validate(stored["layout"]).model_dump(mode="json"),
+                    "updated_at": stored.get("updated_at"),
+                }
+        except (KeyError, TypeError, ValueError):
+            pass
+        return {"layout": built_in_world_layout, "updated_at": None}
 
     def life_dialogue_bundle(player_id: str, npc_id: str, profile: dict, stats,
                              learning_state: dict) -> tuple[dict, dict]:
@@ -302,7 +331,8 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         if not result:
             raise HTTPException(400, {"code": "INVALID_INVITE", "message": "Invite code is invalid or already used."})
         user, token = result
-        return {"session_token": token, "user": {"id": user["id"], "username": user["username"], "has_password": True}, "quota": db.quota(user["id"])}
+        return {"session_token": token, "user": {"id": user["id"], "username": user["username"], "has_password": True}, "quota": db.quota(user["id"]),
+                "onboarding": onboarding_state(user["player_id"])}
 
     @app.post(settings.api_prefix + "/auth/login")
     def login(body: LoginRequest, request: Request):
@@ -315,12 +345,60 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         if user.get("disabled"):
             raise HTTPException(403, {"code": "USER_DISABLED", "message": "This account is disabled."})
         clear_attempts("login", request)
-        return {"session_token": token, "user": {"id": user["id"], "username": user["username"], "has_password": True}, "quota": db.quota(user["id"])}
+        return {"session_token": token, "user": {"id": user["id"], "username": user["username"], "has_password": True}, "quota": db.quota(user["id"]),
+                "onboarding": onboarding_state(user["player_id"])}
 
     @app.get(settings.api_prefix + "/auth/me")
     def me(authorization: Optional[str] = Header(None)):
         user = current_user(authorization)
-        return {"user": {"id": user["id"], "username": user["username"], "has_password": bool(user.get("password_hash"))}, "quota": db.quota(user["id"])}
+        return {"user": {"id": user["id"], "username": user["username"], "has_password": bool(user.get("password_hash"))}, "quota": db.quota(user["id"]),
+                "onboarding": onboarding_state(user["player_id"])}
+
+    @app.get(settings.api_prefix + "/onboarding")
+    def onboarding(authorization: Optional[str] = Header(None)):
+        user = current_user(authorization)
+        return onboarding_state(user["player_id"])
+
+    @app.post(settings.api_prefix + "/onboarding/complete", status_code=201)
+    def complete_onboarding(body: OnboardingCompleteRequest,
+                            authorization: Optional[str] = Header(None)):
+        user = current_user(authorization); player_id = user["player_id"]
+        before = onboarding_state(player_id)
+        if before["completed"]:
+            raise HTTPException(409, {"code": "ONBOARDING_ALREADY_COMPLETED",
+                                      "message": "Character onboarding is already complete."})
+        entries = [
+            {"id": "npc-" + uuid.uuid4().hex[:12], "profile": profile.model_dump()}
+            for profile in body.residents
+        ]
+        try:
+            created = db.create_onboarding_residents(
+                player_id, entries, body.household_name, maximum=NPC_LIMIT,
+            )
+        except ValueError as error:
+            if str(error) == "NPC_LIMIT_REACHED":
+                raise HTTPException(409, {"code": "NPC_LIMIT_REACHED",
+                                          "message": "You can create up to eight characters."})
+            if str(error) == "ONBOARDING_ALREADY_COMPLETED":
+                raise HTTPException(409, {"code": "ONBOARDING_ALREADY_COMPLETED",
+                                          "message": "Character onboarding is already complete."})
+            if str(error) == "NPC_NAME_TAKEN":
+                raise HTTPException(409, {"code": "NPC_NAME_TAKEN",
+                                          "message": "Character names must be unique."})
+            raise
+        profiles = db.list_npc_profiles(player_id)
+        db.ensure_social_edges(player_id, [entry["id"] for entry in profiles])
+        world = life_world.city(player_id, profiles) if life_world is not None else None
+        if life_world is not None:
+            state = life_world.rename_shared_household(player_id, profiles, body.household_name)
+            # Reproject after the name-only world mutation.
+            world = life_world.city(player_id, profiles)
+            assert len(state.get("households") or {}) == 1
+        household = (world.get("households") or [None])[0] if world else None
+        return {
+            "onboarding": onboarding_state(player_id), "created": created,
+            "npcs": profiles, "household": household, "city": world,
+        }
 
     @app.put(settings.api_prefix + "/auth/password")
     def change_password(body: PasswordChangeRequest, authorization: Optional[str] = Header(None)):
@@ -374,13 +452,26 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
     @app.put(settings.api_prefix + "/npc/profile")
     def save_npc_profile(body: NpcProfile, authorization: Optional[str] = Header(None)):
         user = current_user(authorization)
-        return db.save_npc_profile(user["player_id"], "emma", body.model_dump())
+        try:
+            return db.save_npc_profile(user["player_id"], "emma", body.model_dump())
+        except ValueError as error:
+            if str(error) == "NPC_NAME_TAKEN":
+                raise HTTPException(409, {"code": "NPC_NAME_TAKEN",
+                                          "message": "Character names must be unique."})
+            raise
 
     @app.get(settings.api_prefix + "/npcs")
     def npc_profiles(authorization: Optional[str] = Header(None)):
         user = current_user(authorization); player_id = user["player_id"]
-        profile_for(player_id)
-        return {"npcs": db.list_npc_profiles(player_id), "limit": 5}
+        if not db.list_npc_profiles(player_id):
+            profile_for(player_id)
+        return {"npcs": db.list_npc_profiles(player_id), "limit": NPC_LIMIT,
+                "onboarding": onboarding_state(player_id)}
+
+    @app.get(settings.api_prefix + "/world-layout")
+    def world_layout():
+        # Public so the loading scene can fetch its published map before sign-in.
+        return published_world_layout()
 
     @app.get(settings.api_prefix + "/world")
     @app.get(settings.api_prefix + "/city")
@@ -584,23 +675,42 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
     @app.post(settings.api_prefix + "/npcs", status_code=201)
     def create_npc(body: NpcProfile, authorization: Optional[str] = Header(None)):
         user = current_user(authorization); player_id = user["player_id"]
-        profile_for(player_id)
-        if len(db.list_npc_profiles(player_id)) >= 5:
-            raise HTTPException(409, {"code": "NPC_LIMIT_REACHED", "message": "You can create up to five characters."})
+        if not db.list_npc_profiles(player_id):
+            profile_for(player_id)
         npc_id = "npc-" + uuid.uuid4().hex[:12]
-        db.ensure_npc(player_id, npc_id, f"Hi, I'm {body.name}. What would you like to talk about?",
-                      f"嗨，我是{body.name}。你想聊些什么？")
-        db.save_npc_profile(player_id, npc_id, body.model_dump())
+        try:
+            db.create_npc_profile(
+                player_id, npc_id, body.model_dump(),
+                f"Hi, I'm {body.name}. What would you like to talk about?",
+                f"嗨，我是{body.name}。你想聊些什么？", maximum=NPC_LIMIT,
+            )
+        except ValueError as error:
+            if str(error) == "NPC_LIMIT_REACHED":
+                raise HTTPException(409, {"code": "NPC_LIMIT_REACHED",
+                                          "message": "You can create up to eight characters."})
+            if str(error) == "NPC_NAME_TAKEN":
+                raise HTTPException(409, {"code": "NPC_NAME_TAKEN",
+                                          "message": "Character names must be unique."})
+            raise
         db.ensure_social_edges(player_id, [entry["id"] for entry in db.list_npc_profiles(player_id)])
+        progress = db.refresh_onboarding(
+            player_id, minimum=ONBOARDING_MIN_RESIDENTS, maximum=NPC_LIMIT,
+        )
         if life_world is not None:
             life_world.load(player_id, life_profiles(player_id), force_advance=True)
-        return {"id": npc_id, "profile": body.model_dump()}
+        return {"id": npc_id, "profile": body.model_dump(), "onboarding": progress}
 
     @app.put(settings.api_prefix + "/npcs/{npc_id}")
     def update_npc(npc_id: str, body: NpcProfile, authorization: Optional[str] = Header(None)):
         user = current_user(authorization); player_id = user["player_id"]
         profile_for(player_id, npc_id, create_default=False)
-        saved = db.save_npc_profile(player_id, npc_id, body.model_dump())
+        try:
+            saved = db.save_npc_profile(player_id, npc_id, body.model_dump())
+        except ValueError as error:
+            if str(error) == "NPC_NAME_TAKEN":
+                raise HTTPException(409, {"code": "NPC_NAME_TAKEN",
+                                          "message": "Character names must be unique."})
+            raise
         runtime = db.get_runtime_state(player_id, npc_id) or initial_runtime(db.state(player_id, npc_id).mood,
                                                                             db.state(player_id, npc_id).relationship)
         db.save_persona(player_id, npc_id, compile_persona(saved, runtime.get("growth")))
@@ -911,12 +1021,54 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         require_admin(request)
         return {"traces": db.list_agent_traces(limit)}
 
+    @app.get(settings.api_prefix + "/admin/world-layout")
+    def admin_world_layout(request: Request):
+        require_admin(request)
+        return published_world_layout()
+
+    @app.put(settings.api_prefix + "/admin/world-layout")
+    def admin_save_world_layout(body: WorldLayoutRequest, request: Request):
+        require_admin(request); check_admin_origin(request)
+        return db.save_world_layout(body.layout.model_dump(mode="json"))
+
+    @app.post(settings.api_prefix + "/admin/world-layout/reset")
+    def admin_reset_world_layout(request: Request):
+        require_admin(request); check_admin_origin(request)
+        db.reset_world_layout()
+        return published_world_layout()
+
     @app.patch(settings.api_prefix + "/admin/users/{user_id}")
     def admin_patch_user(user_id: str, body: AdminUserPatch, request: Request):
         require_admin(request); check_admin_origin(request)
         result = db.patch_user(user_id, body.disabled, body.quota_delta)
         if not result: raise HTTPException(404, {"code": "USER_NOT_FOUND", "message": "User was not found."})
         return result
+
+    @app.post(settings.api_prefix + "/admin/users/{user_id}/reset-onboarding")
+    def admin_reset_user_onboarding(user_id: str, body: AdminUserResetRequest,
+                                    request: Request):
+        """Return one existing account to the fresh-player game flow.
+
+        This operation is intentionally limited to the reserved
+        ``onboarding-test`` account family. Authentication, sessions, invite
+        redemption and quota/usage records deliberately survive. The typed
+        username confirmation prevents an accidentally selected test account
+        from losing its game save.
+        """
+        require_admin(request); check_admin_origin(request)
+        try:
+            return db.reset_user_game_progress(user_id, body.confirm_username)
+        except ValueError as error:
+            if str(error) == "USER_NOT_FOUND":
+                raise HTTPException(404, {"code": "USER_NOT_FOUND",
+                                          "message": "User was not found."})
+            if str(error) == "USERNAME_CONFIRMATION_MISMATCH":
+                raise HTTPException(409, {"code": "USERNAME_CONFIRMATION_MISMATCH",
+                                          "message": "Confirmation username does not match the selected account."})
+            if str(error) == "TEST_ACCOUNT_REQUIRED":
+                raise HTTPException(403, {"code": "TEST_ACCOUNT_REQUIRED",
+                                          "message": "Only onboarding-test accounts can reset their game save."})
+            raise
 
     @app.post(settings.api_prefix + "/admin/invites", status_code=201)
     def admin_invites(body: InviteCreateRequest, request: Request):

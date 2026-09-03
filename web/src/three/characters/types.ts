@@ -1,4 +1,5 @@
 import type { AvatarConfig, Message } from '../../types'
+import type {WorldLayoutInteriorPlacement} from '../../worldLayout'
 
 export type CharacterMotion =
   | 'idle'
@@ -107,4 +108,5 @@ export type ConversationStage3DProps = {
   className?: string
   reducedMotion?: boolean
   sceneryMode?: boolean
+  interiorPlacements?: readonly WorldLayoutInteriorPlacement[]
 }

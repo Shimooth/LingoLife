@@ -1,22 +1,38 @@
 # LingoLife 会话交接记录
 
-最后更新：2026-08-26（Asia/Shanghai）
+最后更新：2026-09-03（Asia/Shanghai）
 
 本文件用于在新 Codex 窗口中快速恢复项目上下文。这里只记录可提交的非敏感信息；密码、私钥、API Key、令牌和服务端环境变量值不得写入本文件或聊天。
 
 ## 当前阶段
 
 - 当前分支：`main`
-- 本轮玩法文档改造前的本地基线：`7c552a2 fix: make backend editable installs reproducible`；本文提交后继续以 `git log -1` 读取最新本地提交。生产环境实际版本必须在发布前单独核对，不能由本文件推断。
+- 当前本地与生产提交均必须在开始工作时用 Git/部署只读检查确认，不能由本文件中的历史提交推断。
 - 当前产品方向是 3D Web-first；玩家登录后直接进入 3D 天空之城观察主流程，不设独立 `/3d` 路由。Unity 客户端开发暂停，源码保留在 `unity/`。
 - 仓库已有 FastAPI 后端、React Web 玩家端/管理端、SQLite 数据层、DeepSeek 适配、Docker Compose、Nginx 配置、备份与发布脚本。
-- 已实现邀请码账号与管理端、事件/学习/角色定制、流式多语言多角色对话、3D 天空之城与统一 3D 角色、方向性 NPC 社交关系和自主多 NPC 日常事件。本阶段明确排除宠物。
-- 下一阶段已确定为生活模拟 v2：Desire → Commitment → Life Action → Moment / Incident / Story Thread，并先验证四名居民共享 Household。目标设计见仓库根目录三份 v0.3 文档，分阶段技术方案与家里/公司交接记录统一维护在 `docs/LIFE_SIMULATION_IMPLEMENTATION_PLAN.md`。
-- 当前运行时尚未实现 Household、共享资源、Desire、Unresolved Thread 和不确定干预；不要把目标设计误写成已完成能力。`docs/NPC_AGENT_IMPLEMENTATION.md` 只记录当前代码事实。
+- 2026-08-28 实施检查点报告已实现 Life Simulation v2 的 Desire → Commitment → Life Action → Moment / Incident / Story Thread、共享资源、多频道关系和生活表现基础；开始新工作前仍需通过代码与测试复核，不能只依赖文档勾选。
+- 2026-09-03 已确认新的产品拓扑：首次介绍后建立 2～8 名完整、随机、可编辑且能产生差异轨迹的居民；所有 active NPC 住在一个共享 Household/Residence；只先完成一套正式品质住宅室内；城市和住宅布局由管理端使用批准的现有资产编辑。
+- Phase 6～7 的首个可运行切片已经进入当前工作树：首次介绍与 2～8 人核心预设建组、账号内标准化姓名唯一、整组原子创建、单共享住宅运行时协调、唯一 shared-home，以及管理端城市/四房住宅 placement 编辑与单 published layout API 已落地。完整 Agent 默认字段、服务端门禁、迁移报告、布局草稿/不可变历史/回滚、独立作者权限、高级空间校验和正式室内品质仍待完成。作者工具属于开发/运营能力，普通玩家仍是观察者/有限管理者，服务端继续独占 NPC 状态、关系、记忆与事件结算。
+- 固定用户名 `onboarding-test` 用于跨设备反复验证首次引导。管理端只对该名称及 `onboarding-test-*` 开放存档重置，重置保留账号、密码、邀请码资格、额度和审计；密码、数据库和邀请/会话凭据不得写入 Git，完整操作规范见 `docs/P0_BETA_OPERATIONS.md`。
 - 玩家端为 `https://lingolife.shimooth.me`，管理端为 `https://lingolife.admin.shimooth.me`。每次发布前后仍需重新验证线上即时状态。
-- 主要文档入口：`README.md`、三份根目录 v0.3 设计文档、`docs/LIFE_SIMULATION_IMPLEMENTATION_PLAN.md`、`docs/NPC_AGENT_IMPLEMENTATION.md`、`docs/3D_ARCHITECTURE.md`、`docs/CONFIGURATION.md`、`docs/P0_BETA_OPERATIONS.md`、`deploy/README.md`。
+- 主要文档入口：`README.md`、根目录 GDD/NPC Agent/涌现剧情设计、`docs/LIFE_SIMULATION_IMPLEMENTATION_PLAN.md`、`docs/3D_ARCHITECTURE.md`、`docs/MAP_AUTHORING.md`、`docs/CONFIGURATION.md`、`docs/P0_BETA_OPERATIONS.md`、`deploy/README.md`。`docs/NPC_AGENT_IMPLEMENTATION.md` 只保留为 2026-08-26 历史基线。
 
 ## 本次会话已验证
+
+本地聚焦回归（2026-09-03，当前未提交工作树）：
+
+```text
+backend onboarding/layout + household topology: 22 passed
+web onboarding guard: passed（12 个不同预设，2～8 人）
+web life-simulation guard: passed
+```
+
+本地全量回归（2026-09-03，首次引导重置能力）：
+
+```text
+backend: 248 passed
+web: ESLint、TypeScript、全部运行时守卫和 Vite production build passed
+```
 
 本地回归（2026-08-26）：
 
