@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
-from lingolife.app import create_app
+from lingolife.app import DEFAULT_NPC_PROFILE, create_app
 from lingolife.city import (CITY_LOCATIONS, EVENT_LOCATION_HINTS, HOME_SLOTS,
                             MIN_NPC_DISTANCE, city_payload, daily_location_id)
 from lingolife.config import Settings
@@ -122,6 +122,11 @@ def test_city_api_requires_auth_and_includes_event_summary(tmp_path):
     code = client.app.state.db.create_invites(1, 30)[0]
     registration = client.post("/api/v1/auth/register", json={"username": "cityuser", "invite_code": code, "password": "city-pass"}).json()
     headers = {"Authorization": "Bearer " + registration["session_token"]}
+    user = client.app.state.db.authenticate(registration["session_token"])
+    client.app.state.db.get_or_create_npc_profile(
+        user["player_id"], "emma", DEFAULT_NPC_PROFILE,
+    )
+    client.app.state.db.refresh_onboarding(user["player_id"], force_complete=True)
     response = client.get("/api/v1/city", headers=headers)
     assert response.status_code == 200
     body = response.json()

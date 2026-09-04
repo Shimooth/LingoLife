@@ -65,7 +65,7 @@ const mainSource=await readFile(new URL('../src/main.tsx',import.meta.url),'utf8
 if(!mainSource.includes("window.location.hostname==='lingolife.admin.shimooth.me'"))fail('the admin bundle is no longer restricted to the dedicated hostname')
 if(!mainSource.includes("import.meta.env.DEV&&new URLSearchParams(window.location.search).get('admin')==='1'"))fail('the local admin switch is not explicitly restricted to Vite development')
 const editorSource=await readFile(new URL('../src/components/AdminWorldLayoutEditor.tsx',import.meta.url),'utf8')
-if(!editorSource.includes('adminApi.saveWorldLayout(draft)'))fail('the admin editor no longer publishes through the protected API')
+if(!editorSource.includes('adminApi.saveWorldLayoutDraft(')||!editorSource.includes('adminApi.validateWorldLayout(')||!editorSource.includes('adminApi.publishWorldLayout('))fail('the admin editor no longer uses the protected draft, validation and publish workflow')
 const hookSource=await readFile(new URL('../src/three/world/useWorldDecorationEditor.ts',import.meta.url),'utf8')
 if(!hookSource.includes('validationApi.audit(parsed.document)'))fail('imports are not fully audited before rendering')
 if(!hookSource.includes('validateCandidate(candidate,current.id)'))fail('move/rotation mutations no longer revalidate their final footprint')

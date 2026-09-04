@@ -1,9 +1,23 @@
-import type {LifeIncident,LifeMoment,LifeStory,PublicRelationshipSummary,StoryThread} from '../types'
+import {useEffect,useState} from 'react'
+import type {LifeIncident,LifeMoment,LifeStory,PublicRelationshipSummary,StoryAttentionBudget,StoryThread} from '../types'
 import type {LifeLanguage} from '../life/lifeActionCatalog'
 import './StoryThreadsPanel.css'
 
 type SelectableStory=StoryThread|LifeIncident|LifeMoment
-type Props={moments?:readonly LifeMoment[];threads:readonly StoryThread[];incidents?:readonly LifeIncident[];relationships?:readonly PublicRelationshipSummary[];residentNames?:Record<string,string>;language?:LifeLanguage;legacyCount?:number;onClose:()=>void;onSelect?:(story:SelectableStory)=>void;onOpenLegacy?:()=>void;className?:string}
+type Props={moments?:readonly LifeMoment[];threads:readonly StoryThread[];incidents?:readonly LifeIncident[];recentAftermath?:readonly LifeStory[];relationships?:readonly PublicRelationshipSummary[];attentionBudget?:StoryAttentionBudget;residentNames?:Record<string,string>;language?:LifeLanguage;legacyCount?:number;onClose:()=>void;onSelect?:(story:SelectableStory)=>void;onOpenLegacy?:()=>void;className?:string}
+
+const useCompactViewport=()=>{
+ const query='(max-width: 720px)'
+ const [compact,setCompact]=useState(()=>typeof window!=='undefined'&&window.matchMedia(query).matches)
+ useEffect(()=>{const media=window.matchMedia(query),update=()=>setCompact(media.matches);update();media.addEventListener('change',update);return()=>media.removeEventListener('change',update)},[])
+ return compact
+}
+
+const urgentFirst=<T extends LifeIncident,>(values:readonly T[],limit:number)=>{
+ const urgent=values.filter(value=>value.status==='awaiting_management'||Boolean(value.trouble_signal))
+ const urgentIds=new Set(urgent.map(value=>value.id))
+ return [...urgent,...values.filter(value=>!urgentIds.has(value.id))].slice(0,Math.max(limit,urgent.length))
+}
 
 const CHANNEL_COPY={
  friendship:{emerging:{zh:'友情萌芽',en:'New friendship'},friend:{zh:'朋友',en:'Friends'},close_friend:{zh:'好朋友',en:'Close friends'},estranged:{zh:'友情疏远',en:'Estranged'}},
@@ -59,19 +73,26 @@ const statusCopy=(thread:LifeStory,language:LifeLanguage)=>{
  return language==='zh'?'故事仍在生活中延续':'Still unfolding through daily life'
 }
 
-function StoryCard({story,language,kind,onSelect}:{story:SelectableStory;language:LifeLanguage;kind:'moment'|'incident'|'thread';onSelect?:Props['onSelect']}){
+function StoryCard({story,language,kind,onSelect}:{story:SelectableStory;language:LifeLanguage;kind:'moment'|'incident'|'thread'|'aftermath';onSelect?:Props['onSelect']}){
  const title=language==='zh'?story.title_zh?.trim()||story.title:story.title
  const summary=language==='zh'?story.summary_zh?.trim()||story.summary:story.summary
  const aftermath=language==='zh'?story.aftermath_zh?.trim()||story.aftermath:story.aftermath
  const participants=story.participants?.map(person=>person.name).filter(Boolean).join(' · ')
- const eyebrow=kind==='incident'?(language==='zh'?'此刻正在发生':'Happening now'):kind==='moment'&&!['resolved_autonomously','resolved_with_management','closed'].includes(story.status)?(language==='zh'?'生活里的一个片段':'A moment from daily life'):statusCopy(story,language)
+ const eyebrow=kind==='incident'?(language==='zh'?'此刻正在发生':'Happening now'):kind==='aftermath'?(language==='zh'?'你离开后留下的变化':'What changed while you were away'):kind==='moment'&&!['resolved_autonomously','resolved_with_management','closed'].includes(story.status)?(language==='zh'?'生活里的一个片段':'A moment from daily life'):statusCopy(story,language)
  return <article className={`story-thread is-${kind}`}><small>{eyebrow}</small><h3>{title}</h3><p>{summary}</p>{aftermath&&<blockquote>{aftermath}</blockquote>}{participants&&<span>{participants}</span>}{onSelect&&<button type="button" className="story-thread__open" onClick={()=>onSelect(story)} aria-label={language==='zh'?`查看${title}`:`Open ${title}`}><i aria-hidden>›</i></button>}</article>
 }
 
-export function StoryThreadsPanel({moments=[],threads,incidents=[],relationships=[],residentNames={},language='zh',legacyCount=0,onClose,onSelect,onOpenLegacy,className=''}:Props){
+export function StoryThreadsPanel({moments=[],threads,incidents=[],recentAftermath=[],relationships=[],attentionBudget,residentNames={},language='zh',legacyCount=0,onClose,onSelect,onOpenLegacy,className=''}:Props){
+ const compact=useCompactViewport(),limits=attentionBudget?.[compact?'compact':'desktop']
+ const visibleIncidents=limits?urgentFirst(incidents,limits.incidents):incidents
+ const visibleMoments=limits?moments.slice(0,limits.moments):moments
+ const visibleThreads=limits?threads.slice(0,limits.threads):threads
+ const visibleAftermath=limits?recentAftermath.slice(0,limits.aftermath):recentAftermath
+ const hiddenHere=(incidents.length-visibleIncidents.length)+(moments.length-visibleMoments.length)+(threads.length-visibleThreads.length)+(recentAftermath.length-visibleAftermath.length)
+ const hiddenUpstream=attentionBudget?.suppressed?Object.values(attentionBudget.suppressed).reduce((sum,value)=>sum+value,0):0
  return <aside className={`story-threads-panel ${className}`.trim()} role="dialog" aria-modal="true" aria-label={language==='zh'?'连续故事':'Ongoing stories'}>
   <header><div><small>{language==='zh'?'城市记忆':'CITY MEMORY'}</small><h2>{language==='zh'?'仍在延续的故事':'Stories still unfolding'}</h2><p>{language==='zh'?'这里记录关系和生活留下的线索，不是必须完成的任务。':'These are traces left by relationships and daily life, not tasks you must complete.'}</p></div><button type="button" onClick={onClose} aria-label={language==='zh'?'关闭':'Close'}>×</button></header>
-  <div className="story-threads-panel__list">{incidents.length>0&&<section className="story-threads-panel__section"><h3>{language==='zh'?'此刻值得留意':'Needs attention now'}</h3>{incidents.map(incident=><StoryCard key={incident.id} story={incident} kind="incident" language={language} onSelect={onSelect}/>)}</section>}{moments.length>0&&<section className="story-threads-panel__section"><h3>{language==='zh'?'近日生活片段':'Recent life moments'}</h3>{moments.map(moment=><StoryCard key={moment.id} story={moment} kind="moment" language={language} onSelect={onSelect}/>)}</section>}{threads.length>0&&<section className="story-threads-panel__section"><h3>{language==='zh'?'延续中的故事':'Ongoing threads'}</h3>{threads.map(thread=><StoryCard key={thread.id} story={thread} kind="thread" language={language} onSelect={onSelect}/>)}</section>}{relationships.length>0&&<section className="story-threads-panel__section story-threads-panel__relationships"><h3>{language==='zh'?'居民关系':'Resident relationships'}</h3><p>{language==='zh'?'这里只展示已经公开形成的关系，不显示居民尚未说出口的感受。':'Only established public relationships appear here; unspoken feelings stay private.'}</p><div>{relationships.map(relationship=><RelationshipCard key={relationship.pair_key} relationship={relationship} language={language} names={residentNames}/>)}</div></section>}{!moments.length&&!threads.length&&!incidents.length&&!relationships.length&&<div className="story-threads-panel__empty"><span aria-hidden>☁</span><h3>{language==='zh'?'故事还在慢慢形成':'Stories are still taking shape'}</h3><p>{language==='zh'?'居民继续生活以后，值得记住的线索会自然出现在这里。':'As residents keep living, memorable threads will naturally appear here.'}</p></div>}</div>
+  <div className="story-threads-panel__list">{visibleIncidents.length>0&&<section className="story-threads-panel__section"><h3>{language==='zh'?'此刻值得留意':'Needs attention now'}</h3>{visibleIncidents.map(incident=><StoryCard key={incident.id} story={incident} kind="incident" language={language} onSelect={onSelect}/>)}</section>}{visibleAftermath.length>0&&<section className="story-threads-panel__section story-threads-panel__aftermath"><h3>{language==='zh'?'昨日与离线余波':'Since your last visit'}</h3><p>{language==='zh'?'这些事情在你没有观看时仍然继续，并留下了可以回访的结果。':'Life continued while you were away, leaving outcomes you can revisit.'}</p>{visibleAftermath.map(story=><StoryCard key={`aftermath:${story.id}`} story={story as SelectableStory} kind="aftermath" language={language} onSelect={onSelect}/>)}</section>}{visibleMoments.length>0&&<section className="story-threads-panel__section"><h3>{language==='zh'?'近日生活片段':'Recent life moments'}</h3>{visibleMoments.map(moment=><StoryCard key={moment.id} story={moment} kind="moment" language={language} onSelect={onSelect}/>)}</section>}{visibleThreads.length>0&&<section className="story-threads-panel__section"><h3>{language==='zh'?'延续中的故事':'Ongoing threads'}</h3>{visibleThreads.map(thread=><StoryCard key={thread.id} story={thread} kind="thread" language={language} onSelect={onSelect}/>)}</section>}{hiddenHere+hiddenUpstream>0&&<p className="story-threads-panel__budget-note">{language==='zh'?`另有 ${hiddenHere+hiddenUpstream} 条较弱或重复的线索暂时收起`:`${hiddenHere+hiddenUpstream} quieter or repeated traces are tucked away for now`}</p>}{relationships.length>0&&<section className="story-threads-panel__section story-threads-panel__relationships"><h3>{language==='zh'?'居民关系':'Resident relationships'}</h3><p>{language==='zh'?'这里只展示已经公开形成的关系，不显示居民尚未说出口的感受。':'Only established public relationships appear here; unspoken feelings stay private.'}</p><div>{relationships.map(relationship=><RelationshipCard key={relationship.pair_key} relationship={relationship} language={language} names={residentNames}/>)}</div></section>}{!moments.length&&!threads.length&&!incidents.length&&!recentAftermath.length&&!relationships.length&&<div className="story-threads-panel__empty"><span aria-hidden>☁</span><h3>{language==='zh'?'故事还在慢慢形成':'Stories are still taking shape'}</h3><p>{language==='zh'?'居民继续生活以后，值得记住的线索会自然出现在这里。':'As residents keep living, memorable threads will naturally appear here.'}</p></div>}</div>
   {legacyCount>0&&onOpenLegacy&&<footer><button type="button" onClick={onOpenLegacy}>{language==='zh'?`查看今日互动（${legacyCount}）`:`View today's interactions (${legacyCount})`}<span aria-hidden>›</span></button></footer>}
  </aside>
 }

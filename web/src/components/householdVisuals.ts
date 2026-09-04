@@ -10,6 +10,7 @@ export type HouseholdResidentVisual={
  avatar:AvatarConfig
  isHome?:boolean
  roomId?:string|null
+ privateRoomId?:string|null
  currentAction?:NormalizedResidentAction|null
  animationCue?:AnimationCue
  observableState?:ObservableLifeState|null

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import type { NpcProfile } from "../types";
+import type { FamilyRole, NpcProfile, SharedHistoryKind, SharedHistoryTone } from "../types";
+import {AVATAR_HAIR_COLORS,AVATAR_OUTFIT_COLORS,AVATAR_SKIN_COLORS} from "../avatar";
 import {isAdultProfile,ROMANCE_ADULT_AGE,romanceIsEnabled,withProfileAge,withRomancePreference} from "../profilePolicy";
 import { CharacterCanvas3D } from "../three/characters";
 import {
@@ -14,11 +15,14 @@ import {
   resolveChibiHair,
   resolveChibiOutfit,
 } from "../three/characters/characterAssets";
-const skinTones=["#f7d7c4","#efb99b","#d99772","#b87352","#8b533b","#57372f"]
+const familyLabels:Record<FamilyRole,{zh:string;en:string}>={sibling:{zh:'兄弟姐妹',en:'Sibling'},cousin:{zh:'表/堂亲',en:'Cousin'},parent:{zh:'父母',en:'Parent'},child:{zh:'子女',en:'Child'},guardian:{zh:'监护人',en:'Guardian'},dependent:{zh:'被监护人',en:'Dependent'}}
+const historyKinds:Record<SharedHistoryKind,{zh:string;en:string}>={grew_up_together:{zh:'一起长大',en:'Grew up together'},studied_together:{zh:'曾经同学',en:'Studied together'},worked_together:{zh:'曾经共事',en:'Worked together'},shared_project:{zh:'合作过项目',en:'Shared a project'},weathered_hardship:{zh:'共同度过难关',en:'Weathered hardship'},family_tradition:{zh:'共享家庭传统',en:'Family tradition'},friendly_rivalry:{zh:'长期友好竞争',en:'Friendly rivalry'}}
+const historyTones:Record<SharedHistoryTone,{zh:string;en:string}>={warm:{zh:'温暖',en:'Warm'},neutral:{zh:'平静',en:'Neutral'},complicated:{zh:'复杂',en:'Complicated'}}
 const split = (value: string, max: number) =>
   value
     .split(/[,，]/)
     .map((x) => x.trim())
+    .filter(Boolean)
     .slice(0, max);
 export function CharacterStudio({
   profile,
@@ -50,10 +54,19 @@ export function CharacterStudio({
     .filter(candidate=>candidate.id!==editingNpcId)
     .map(candidate=>[candidate.id,candidate])).values());
   const familyIds=Array.from(new Set((profile.familyIds??[]).filter(id=>id&&id!==editingNpcId))).slice(0,4);
+  const familyRelations=profile.familyRelations??[];
+  const sharedHistory=profile.shared_history_hooks??[];
   const set = <K extends keyof NpcProfile>(key: K, value: NpcProfile[K]) =>
     onChange({ ...profile, [key]: value });
   const avatar = (key: string, value: string) =>
     set("avatar", { ...profile.avatar, [key]: value, strokes: [] });
+  const updateHistory=(id:string,change:{kind?:SharedHistoryKind;summary?:string;tone?:SharedHistoryTone})=>set('shared_history_hooks',sharedHistory.map(hook=>hook.id===id?{...hook,...change}:hook));
+  const removeHistory=(id:string)=>set('shared_history_hooks',sharedHistory.filter(hook=>hook.id!==id));
+  const addHistory=(candidate:{id:string;name:string})=>{
+    if(!editingNpcId||sharedHistory.length>=4)return;
+    const id=`history-${Date.now().toString(36)}-${editingNpcId.slice(-5)}-${candidate.id.slice(-5)}`;
+    set('shared_history_hooks',[...sharedHistory,{id,participantIds:[editingNpcId,candidate.id],kind:'shared_project',summary:`${profile.name} and ${candidate.name} once completed an important project together.`,tone:'neutral'}]);
+  };
   return (
     <motion.div
       className="studio-backdrop"
@@ -169,6 +182,12 @@ export function CharacterStudio({
                         }
                       />
                     </label>
+                    <div className="field-grid">
+                      <label>{zh?"喜欢（最多6项）":"Likes (up to 6)"}<input value={profile.likes.join(", ")} onChange={e=>set("likes",split(e.target.value,6))}/></label>
+                      <label>{zh?"不喜欢（最多6项）":"Dislikes (up to 6)"}<input value={profile.dislikes.join(", ")} onChange={e=>set("dislikes",split(e.target.value,6))}/></label>
+                      <label>{zh?"小怪癖（最多4项）":"Quirks (up to 4)"}<input value={profile.quirks.join(", ")} onChange={e=>set("quirks",split(e.target.value,4))}/></label>
+                      <label>{zh?"日常习惯（最多4项）":"Habits (up to 4)"}<input value={profile.habits.join(", ")} onChange={e=>set("habits",split(e.target.value,4))}/></label>
+                    </div>
                     <label>
                       {zh ? "长期目标" : "Long-term dream"}
                       <textarea
@@ -196,17 +215,28 @@ export function CharacterStudio({
                       <div className="studio-relationship-card__heading">
                         <div>
                           <b id="studio-family-title">{zh?'家庭成员':'Family members'}</b>
-                          <small>{zh?'从现有居民中选择，最多 4 人。':'Choose up to 4 existing residents.'}</small>
+                          <small>{zh?'客观亲属关系会在首次建组时由双方共同确认。':'Objective family ties are confirmed by both residents during initial setup.'}</small>
                         </div>
                         <span>{familyIds.length} / 4</span>
                       </div>
-                      {relationshipOptions.length?<div className="studio-resident-options" role="group" aria-labelledby="studio-family-title">
-                        {relationshipOptions.map(candidate=>{
-                          const selected=familyIds.includes(candidate.id),disabled=!selected&&familyIds.length>=4;
-                          return <button type="button" className={selected?'is-selected':''} aria-pressed={selected} disabled={disabled} onClick={()=>set("familyIds",selected?familyIds.filter(id=>id!==candidate.id):[...familyIds,candidate.id])} key={candidate.id}><span aria-hidden>{selected?'✓':'+'}</span>{candidate.name}</button>
-                        })}
-                      </div>:<p className="studio-empty-options">{zh?'创建更多居民后，可以在这里建立家庭关系。':'Create more residents to define family relationships here.'}</p>}
-                      <p className="studio-relationship-note">{zh?'家庭关系会阻止角色彼此发展恋爱关系，但友情、竞争与冲突仍会自然发生。':'Family ties prevent romance between those characters, while friendship, rivalry, and conflict can still develop.'}</p>
+                      {familyIds.length?<div className="studio-resident-options" role="list" aria-labelledby="studio-family-title">{familyIds.map(id=>{const candidate=relationshipOptions.find(item=>item.id===id),relation=familyRelations.find(item=>item.targetId===id);return <span className="studio-relation-fact" role="listitem" key={id}><i aria-hidden>✓</i>{candidate?.name??id}<small>{relation?familyLabels[relation.role][language]:(zh?'旧版亲属记录':'Legacy family record')}</small></span>})}</div>:<p className="studio-empty-options">{zh?'当前没有已确认的亲属关系。':'No confirmed family ties.'}</p>}
+                      <p className="studio-relationship-note">{zh?'为避免单方改写客观事实，亲属关系不能在单人编辑器中增删；它仍会阻止角色彼此发展恋爱关系。':'To prevent one-sided rewrites of an objective fact, family ties cannot be added or removed in this single-resident editor. They still prevent romance between those characters.'}</p>
+                    </section>
+
+                    <section className="studio-relationship-card" aria-labelledby="studio-history-title">
+                      <div className="studio-relationship-card__heading"><div><b id="studio-history-title">{zh?'共同历史 Hook':'Shared-history hooks'}</b><small>{zh?'可编辑的故事起点，不会直接写死友情、恋爱或冲突结果。':'Editable story seeds that never pre-write friendship, romance, or conflict outcomes.'}</small></div><span>{sharedHistory.length} / 4</span></div>
+                      {sharedHistory.length?<div className="studio-history-hooks">{sharedHistory.map(hook=><article key={hook.id}><div><select aria-label={zh?'共同历史类型':'Shared-history type'} value={hook.kind} onChange={event=>updateHistory(hook.id,{kind:event.target.value as SharedHistoryKind})}>{(Object.entries(historyKinds) as [SharedHistoryKind,{zh:string;en:string}][]).map(([kind,label])=><option value={kind} key={kind}>{label[language]}</option>)}</select><select aria-label={zh?'共同历史氛围':'Shared-history tone'} value={hook.tone} onChange={event=>updateHistory(hook.id,{tone:event.target.value as SharedHistoryTone})}>{(Object.entries(historyTones) as [SharedHistoryTone,{zh:string;en:string}][]).map(([tone,label])=><option value={tone} key={tone}>{label[language]}</option>)}</select><button type="button" onClick={()=>removeHistory(hook.id)} aria-label={zh?'删除共同历史':'Delete shared history'}>×</button></div><textarea maxLength={180} rows={2} value={hook.summary} onChange={event=>updateHistory(hook.id,{summary:event.target.value})}/></article>)}</div>:<p className="studio-empty-options">{zh?'还没有共同历史。你可以为当前角色和另一位居民添加一段。':'No shared history yet. Add one with another resident.'}</p>}
+                      {sharedHistory.length<4&&relationshipOptions.length>0&&<div className="studio-resident-options" role="group" aria-label={zh?'添加共同历史':'Add shared history'}>{relationshipOptions.filter(candidate=>!sharedHistory.some(hook=>hook.participantIds.includes(candidate.id))).map(candidate=><button type="button" onClick={()=>addHistory(candidate)} key={candidate.id}><span aria-hidden>＋</span>{candidate.name}</button>)}</div>}
+                    </section>
+
+                    <section className="studio-relationship-card" aria-labelledby="studio-life-contract-title">
+                      <div className="studio-relationship-card__heading"><div><b id="studio-life-contract-title">{zh?'共同生活方式':'Shared-life style'}</b><small>{zh?'这些选择会实际影响日常行为、资源碰撞和冲突反应。':'These choices directly shape daily actions, resource collisions, and conflict responses.'}</small></div></div>
+                      <div className="field-grid">
+                        <label>{zh?'家庭角色':'Household role'}<select value={profile.householdRole} onChange={e=>set('householdRole',e.target.value as NpcProfile['householdRole'])}><option value="organizer">{zh?'组织者':'Organizer'}</option><option value="caretaker">{zh?'照顾者':'Caretaker'}</option><option value="mediator">{zh?'协调者':'Mediator'}</option><option value="cook">{zh?'主厨':'Cook'}</option><option value="fixer">{zh?'维修担当':'Fixer'}</option><option value="free_spirit">{zh?'自由派':'Free spirit'}</option></select></label>
+                        <label>{zh?'私人空间需求':'Private-space preference'}<select value={profile.privateSpacePreference} onChange={e=>set('privateSpacePreference',e.target.value as NpcProfile['privateSpacePreference'])}><option value="low">{zh?'喜欢共享空间':'Enjoys shared space'}</option><option value="balanced">{zh?'平衡':'Balanced'}</option><option value="high">{zh?'需要较多独处':'Needs more solitude'}</option></select></label>
+                      </div>
+                      <label>{zh?'生活边界（逗号分隔，最多8项）':'Everyday boundaries (comma-separated, up to 8)'}<textarea rows={2} value={profile.boundaries.join(', ')} onChange={e=>set('boundaries',split(e.target.value,8))}/></label>
+                      <div><b>{zh?'偏好的家务（最多3项）':'Preferred chores (up to 3)'}</b><div className="studio-resident-options">{([['cooking',zh?'做饭':'Cooking'],['dishes',zh?'洗碗':'Dishes'],['cleaning',zh?'清洁':'Cleaning'],['shopping',zh?'采购':'Shopping'],['repairs',zh?'维修':'Repairs'],['laundry',zh?'洗衣':'Laundry']] as [NpcProfile['chorePreferences'][number],string][]).map(([value,label])=>{const selected=profile.chorePreferences.includes(value);return <button type="button" className={selected?'is-selected':''} aria-pressed={selected} onClick={()=>set('chorePreferences',selected?profile.chorePreferences.filter(item=>item!==value):[...profile.chorePreferences,value].slice(-3))} key={value}><span aria-hidden>{selected?'✓':'+'}</span>{label}</button>})}</div></div>
                     </section>
 
                     <section className={`studio-romance-policy ${adult?'':'is-disabled'}`} aria-labelledby="studio-romance-title">
@@ -263,29 +293,11 @@ export function CharacterStudio({
                     <fieldset>
                       <legend>{zh ? "肤色" : "Skin tone"}</legend>
                       <div className="avatar-option-grid avatar-option-grid--skin">
-                        {skinTones.map(value=><button type="button" className={profile.avatar.skin===value?'chosen':''} onClick={()=>avatar('skin',value)} key={value}><span className="skin-swatch skin-swatch--large" style={{background:value}}/><span>{zh?'肤色':'Tone'}</span></button>)}
+                        {AVATAR_SKIN_COLORS.map(value=><button type="button" className={profile.avatar.skin.toLowerCase()===value?'chosen':''} onClick={()=>avatar('skin',value)} key={value}><span className="skin-swatch skin-swatch--large" style={{background:value}}/><span>{zh?'肤色':'Tone'}</span></button>)}
                       </div>
                     </fieldset>
-                    <div className="field-grid color-fields">
-                      <label>
-                        {zh ? "发色" : "Hair color"}
-                        <input
-                          type="color"
-                          value={profile.avatar.hairColor}
-                          onChange={(e) => avatar("hairColor", e.target.value)}
-                        />
-                      </label>
-                      <label>
-                        {zh ? "服装颜色" : "Outfit color"}
-                        <input
-                          type="color"
-                          value={profile.avatar.outfitColor}
-                          onChange={(e) =>
-                            avatar("outfitColor", e.target.value)
-                          }
-                        />
-                      </label>
-                    </div>
+                    <fieldset><legend>{zh ? "发色" : "Hair color"}</legend><div className="avatar-option-grid avatar-option-grid--skin">{AVATAR_HAIR_COLORS.map(value=><button type="button" className={profile.avatar.hairColor.toLowerCase()===value?'chosen':''} onClick={()=>avatar('hairColor',value)} key={value}><span className="skin-swatch skin-swatch--large" style={{background:value}}/><span>{zh?'发色':'Color'}</span></button>)}</div></fieldset>
+                    <fieldset><legend>{zh ? "服装颜色" : "Outfit color"}</legend><div className="avatar-option-grid avatar-option-grid--skin">{AVATAR_OUTFIT_COLORS.map(value=><button type="button" className={profile.avatar.outfitColor.toLowerCase()===value?'chosen':''} onClick={()=>avatar('outfitColor',value)} key={value}><span className="skin-swatch skin-swatch--large" style={{background:value}}/><span>{zh?'服装色':'Color'}</span></button>)}</div></fieldset>
                     <fieldset>
                       <legend>{zh ? "发型" : "Hair"}</legend>
                       <div className="avatar-option-grid avatar-option-grid--assets">
@@ -328,7 +340,7 @@ export function CharacterStudio({
                             : "City bodies, faces, and outfits are authored as one mesh; only the separate hair material can be recolored safely."}
                         </p>
                         <div className="avatar-option-grid">
-                          {["#2d2323", "#65423b", "#b36b43", "#e0b06f", "#6d718d", "#d67683"].map((value) => <button
+                          {AVATAR_HAIR_COLORS.map((value) => <button
                             type="button"
                             className={profile.avatar.hairColor.toLowerCase() === value ? "chosen" : ""}
                             onClick={() => avatar("hairColor", value)}

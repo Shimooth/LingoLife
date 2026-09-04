@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from lingolife.app import create_app
+from lingolife.app import DEFAULT_NPC_PROFILE, create_app
 from lingolife.config import Settings
 from lingolife.models import AIResult, EnglishFeedback, LearningEvidence
 
@@ -28,7 +28,17 @@ def setup(tmp_path):
     client = TestClient(create_app(settings, provider))
     code = client.app.state.db.create_invites(1, 30)[0]
     token = client.post("/api/v1/auth/register", json={"username": "agentuser", "invite_code": code, "password": "agent-pass"}).json()["session_token"]
+    _grandfather_legacy_emma(client, token)
     return client, provider, {"Authorization": "Bearer " + token}
+
+
+def _grandfather_legacy_emma(client: TestClient, token: str) -> None:
+    user = client.app.state.db.authenticate(token)
+    assert user is not None
+    client.app.state.db.get_or_create_npc_profile(
+        user["player_id"], "emma", DEFAULT_NPC_PROFILE,
+    )
+    client.app.state.db.refresh_onboarding(user["player_id"], force_complete=True)
 
 
 def test_profile_event_and_learning_are_one_persisted_loop(tmp_path):
@@ -68,8 +78,10 @@ def test_profile_event_and_learning_are_one_persisted_loop(tmp_path):
     empathy = next(item for item in learning["targets"] if item["id"] == "intent.empathy")
     assert empathy["successes"] == 1
 
-    duplicate = client.post("/api/v1/chat", headers={**auth, "Idempotency-Key": "agent-loop-001"},
-                            json={"message": "must not apply twice"}).json()
+    duplicate = client.post(
+        "/api/v1/chat", headers={**auth, "Idempotency-Key": "agent-loop-001"},
+        json={"message": "I understand. What happened, and how can I help?"},
+    ).json()
     assert duplicate == data
     empathy_again = next(item for item in client.get("/api/v1/learning/profile", headers=auth).json()["targets"]
                          if item["id"] == "intent.empathy")
@@ -119,7 +131,8 @@ def test_agent_endpoint_exposes_persistent_life_without_other_players_data(tmp_p
     client = TestClient(create_app(settings))
     code = client.app.state.db.create_invites(1, 30)[0]
     token = client.post("/api/v1/auth/register", json={"username": "lifetest", "invite_code": code,
-                                                        "password": "pass"}).json()["session_token"]
+                                                            "password": "pass"}).json()["session_token"]
+    _grandfather_legacy_emma(client, token)
     auth = {"Authorization": "Bearer " + token}
     room = client.get("/api/v1/room", headers=auth).json()
     endpoint_agent = client.get("/api/v1/npcs/emma/agent", headers=auth).json()

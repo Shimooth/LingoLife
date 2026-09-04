@@ -132,6 +132,20 @@ def test_initialize_is_deterministic_json_ready_and_every_resident_has_an_action
     assert {item["kind"] for item in household} == {"kitchen", "television", "bathroom"}
 
 
+def test_collision_story_persists_its_replayable_multistage_interaction():
+    _, _, state = _world()
+    record = state["stories"][_collision_story_id(state)]
+
+    assert record["interaction"]["rules_version"] == "interaction-scene-v1"
+    assert [stage["id"] for stage in record["interaction"]["stages"]] == [
+        "setup", "exchange", "reaction", "closure",
+    ]
+    assert sum(len(stage["beats"]) for stage in record["interaction"]["stages"]) >= 5
+    encoded = json.dumps(record["interaction"], ensure_ascii=False)
+    assert "response_by_participant" not in encoded
+    assert "relationship_changes" not in encoded
+
+
 def test_advance_at_the_same_time_is_an_idempotent_noop_and_offline_advance_progresses():
     engine, profiles, state = _world()
     assert engine.advance(state, profiles, NOW) == state
@@ -570,6 +584,29 @@ def test_high_tension_low_trust_can_backfire_through_the_engine():
     assert "conflict" in result["stories"][story_id]["resolution"]["outcome_tags"]
 
 
+def test_contextually_wrong_management_can_be_misunderstood_without_backfiring():
+    engine, _, state = _world()
+    story_id = _collision_story_id(state)
+    opened = _reopen_intervention(state, story_id)
+    story = opened["stories"][story_id]["story"]
+    story["visible_facts"]["topic"] = "dishwashing"
+    for direction in ("a_to_b", "b_to_a"):
+        opened["relationships"]["alex:emma"][direction].update({
+            "trust": 50, "affinity": 50, "tension": 5, "resentment": 0,
+        })
+
+    result = engine.intervene(
+        opened, story_id, "give_space", "misunderstood-branch",
+        NOW + timedelta(seconds=3),
+    )
+
+    aftermath = next(item for item in reversed(result["aftermath"])
+                     if item.get("kind") == "management_aftermath")
+    assert set(aftermath["participant_acceptance"].values()) == {"misunderstood"}
+    assert aftermath["outcome"] == "misunderstood"
+    assert "misunderstanding" in result["stories"][story_id]["resolution"]["outcome_tags"]
+
+
 def test_mutually_accepted_mediation_can_create_a_truce_but_backfire_cannot():
     engine, _, state = _world()
     story_id = _collision_story_id(state)
@@ -806,6 +843,12 @@ def test_thirty_day_soak_remains_json_ready_bounded_and_keeps_every_npc_acting()
     assert len(state["stories"]) <= 360
     assert len(state["processed_collision_ids"]) <= 1600
     assert len(state["processed_collision_ids"]) == len(set(state["processed_collision_ids"]))
+    assert all(len(resident["daily_plans"]) <= 34 for resident in state["residents"].values())
+    assert all(len(resident["desire_stack"]) <= 24 for resident in state["residents"].values())
+    assert all(len(resident["action_transition_log"]) <= 160
+               for resident in state["residents"].values())
+    assert all(len(resident["schedule_consequences"]) <= 80
+               for resident in state["residents"].values())
     assert state["relationship_evidence"]
     recent_action_types = {
         record["story"]["visible_facts"].get("action_type")

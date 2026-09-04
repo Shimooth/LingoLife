@@ -186,6 +186,48 @@
         {"id": "turn_it_personal", "style": "confrontational", "weight": 3, "relationship_deltas": {"respect": -3, "trust": -2, "tension": 5, "resentment": 2}}
       ],
       "thread_hook": "shared_hobby_rivalry"
+    },
+    {
+      "id": "trash_duty_responsibility",
+      "kind": "person_responsibility",
+      "triggers": ["trash_duty", "trash_bin_full", "trash_overdue"],
+      "topic": "trash_duty",
+      "base_severity": 39,
+      "responses": [
+        {"id": "take_trash_out_now", "style": "cooperative", "weight": 9, "relationship_deltas": {"trust": 2, "comfort": 1, "tension": -1}},
+        {"id": "agree_trash_schedule", "style": "fair", "weight": 10, "relationship_deltas": {"trust": 2, "respect": 2, "resentment": -1}},
+        {"id": "leave_trash_reminder", "style": "assertive", "weight": 7, "relationship_deltas": {"respect": 1, "tension": 1}},
+        {"id": "refuse_trash_duty", "style": "confrontational", "weight": 3, "relationship_deltas": {"trust": -3, "tension": 7, "resentment": 5}}
+      ],
+      "thread_hook": "trash_duty"
+    },
+    {
+      "id": "private_food_taken_boundary",
+      "kind": "person_boundary",
+      "triggers": ["private_food_taken", "food_taken_without_asking", "personal_food"],
+      "topic": "private_food",
+      "base_severity": 47,
+      "responses": [
+        {"id": "replace_taken_food", "style": "cooperative", "weight": 9, "relationship_deltas": {"trust": 1, "tension": -2, "resentment": -2}},
+        {"id": "explain_food_mixup", "style": "warm", "weight": 7, "relationship_deltas": {"familiarity": 1, "trust": -1, "tension": -1}},
+        {"id": "label_private_food", "style": "boundaried", "weight": 9, "relationship_deltas": {"respect": 2, "comfort": -1}},
+        {"id": "deny_taking_food", "style": "confrontational", "weight": 3, "relationship_deltas": {"trust": -5, "tension": 6, "resentment": 5}}
+      ],
+      "thread_hook": "food_boundary"
+    },
+    {
+      "id": "shared_food_moment",
+      "kind": "person_person",
+      "triggers": ["shared_food", "food_sharing", "offered_food"],
+      "topic": "shared_food",
+      "base_severity": 16,
+      "responses": [
+        {"id": "accept_shared_food", "style": "warm", "weight": 10, "relationship_deltas": {"familiarity": 2, "affinity": 2, "comfort": 2}},
+        {"id": "share_food_together", "style": "cooperative", "weight": 9, "relationship_deltas": {"trust": 1, "affinity": 2, "comfort": 2}},
+        {"id": "save_food_for_later", "style": "patient", "weight": 6, "relationship_deltas": {"trust": 1, "comfort": 1}},
+        {"id": "decline_shared_food", "style": "boundaried", "weight": 5, "relationship_deltas": {"trust": 1, "respect": 1}}
+      ],
+      "thread_hook": "food_sharing_pattern"
     }
   ]
 }

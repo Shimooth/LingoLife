@@ -59,6 +59,12 @@ def _auth(client: TestClient, username: str) -> tuple[dict[str, str], dict]:
     token = response.json()["session_token"]
     user = client.app.state.db.authenticate(token)
     assert user is not None
+    # These tests exercise the established single-Emma world contract rather
+    # than first-run onboarding, so model a schema-v3-grandfathered account.
+    client.app.state.db.get_or_create_npc_profile(
+        user["player_id"], "emma", DEFAULT_NPC_PROFILE,
+    )
+    client.app.state.db.refresh_onboarding(user["player_id"], force_complete=True)
     return {"Authorization": f"Bearer {token}"}, user
 
 
@@ -85,10 +91,25 @@ def _assert_safe_agent(agent: dict) -> None:
         "subdued", "balanced", "bright", "radiant", "calm", "noticeable", "tense",
         "overwhelmed", "tired", "steady", "energetic", "lively",
     }
+    development = agent["development"]
+    assert development["version"] == "resident-development-v1"
+    assert development["confidence"] in {"fragile", "growing", "steady", "grounded"}
+    assert set(development["relationship_strategies"]) == {
+        "cooperation", "repair", "boundary_setting", "reflection",
+    }
+    assert set(development["relationship_strategies"].values()) <= {
+        "untried", "emerging", "practiced", "reliable",
+    }
+    assert all(set(habit) == {"id", "label", "strength", "last_practiced_at"}
+               for habit in development["habits"])
+    assert all(habit["strength"] in {"new", "forming", "established", "ingrained"}
+               for habit in development["habits"])
     encoded = json.dumps(agent, ensure_ascii=False)
     for forbidden in (
         '"active_desire_ids"', '"current_commitment_id"', '"queued_commitment_id"',
         '"love"', '"privacy"', '"security"', '"attraction"', '"response_preview"',
+        '"confidence":{"value"', '"successful_commitments"', '"setbacks"',
+        '"practice_count"', '"applied_evidence"',
     ):
         assert forbidden not in encoded
 
@@ -171,6 +192,16 @@ def test_first_world_is_a_life_city_dto_and_repeated_read_keeps_revision(tmp_pat
     assert isinstance(first["observable_moments"], list)
     assert isinstance(first["open_incidents"], list)
     assert isinstance(first["story_threads"], list)
+    assert first["attention_budget"]["resident_count"] == len(first["npcs"])
+    assert set(first["attention_budget"]["desktop"]) == {
+        "incidents", "moments", "threads", "aftermath",
+    }
+    assert set(first["attention_budget"]["compact"]) == {
+        "incidents", "moments", "threads", "aftermath",
+    }
+    assert set(first["attention_budget"]["suppressed"]) == {
+        "incidents", "moments", "threads", "aftermath",
+    }
     assert isinstance(first["relationships"], list)
     assert first["npcs"]
     assert first["households"]
@@ -178,6 +209,11 @@ def test_first_world_is_a_life_city_dto_and_repeated_read_keeps_revision(tmp_pat
     households = {value["id"]: value for value in first["households"]}
     for resident in first["npcs"]:
         assert resident["household_id"] in households
+        assert resident["development"]["goal"]["title"]
+        assert resident["development"]["confidence"] in {
+            "fragile", "growing", "steady", "grounded",
+        }
+        assert "applied_evidence" not in resident["development"]
         assert resident["current_action"]["id"]
         assert resident["current_action"]["type"]
         assert resident["current_action"]["visible_intent"]
@@ -381,7 +417,13 @@ def test_life_story_observation_intervention_idempotency_and_account_isolation(t
     assert all(value["description"] and value["description_zh"]
                for value in story["management"]["actions"])
     assert story["presentation"]["location"]["id"] == story["location_id"]
+    assert [stage["id"] for stage in story["presentation"]["stages"]] == [
+        "setup", "exchange", "reaction", "closure",
+    ]
+    assert story["presentation"]["stages"][2]["can_intervene_after"] is True
     assert all(value["text"] and value["translation_zh"]
+               for value in story["presentation"]["beats"])
+    assert all(value["duration_ms"] >= 900 and value["animation_cue"]
                for value in story["presentation"]["beats"])
 
     before_observe = deepcopy(client.app.state.db.get_life_world_state(owner["player_id"]))
@@ -517,7 +559,7 @@ def test_chat_receives_current_life_and_cached_replay_does_not_repeat_life_effec
     replay = client.post(
         "/api/v1/chat",
         headers=request_headers,
-        json={"message": "this body must be ignored on replay", "npc_id": "emma"},
+        json={"message": "You seem worried. Do you want to talk?", "npc_id": "emma"},
     )
     assert replay.status_code == 200, replay.text
     assert replay.json() == first.json()

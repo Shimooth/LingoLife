@@ -4,6 +4,7 @@ export const ROMANCE_ADULT_AGE=18
 const ROMANCE_BLOCKERS=new Set(['no_romance','no-romance','aromantic'])
 
 const boundaryKey=(value:string)=>value.trim().toLocaleLowerCase()
+const clean=(values:readonly string[]|undefined,limit:number)=>Array.from(new Map((values??[]).map(value=>value.trim()).filter(Boolean).map(value=>[value.toLocaleLowerCase(),value])).values()).slice(0,limit)
 const normalizedNpcIds=(values:string[]|undefined,selfId:string|undefined,limit:number)=>{
  const unique:string[]=[]
  for(const rawId of values??[]){
@@ -37,9 +38,13 @@ export function withRomancePreference(profile:NpcProfile,enabled:boolean):NpcPro
 
 /** Produces an explicit, safe payload while retaining compatibility defaults. */
 export function normalizeNpcProfilePolicy(profile:NpcProfile,selfId?:string):NpcProfile{
- const relationshipBoundaries=(profile.relationshipBoundaries??[]).map(item=>item.trim()).filter(Boolean).slice(0,8)
+ const relationshipBoundaries=clean(profile.relationshipBoundaries,8)
  return {
   ...profile,
+  personality:clean(profile.personality,4),interests:clean(profile.interests,5),
+  likes:clean(profile.likes,6),dislikes:clean(profile.dislikes,6),
+  quirks:clean(profile.quirks,4),habits:clean(profile.habits,4),boundaries:clean(profile.boundaries,8),
+  chorePreferences:Array.from(new Set(profile.chorePreferences)).slice(0,3),
   romanceEnabled:romanceIsEnabled({...profile,relationshipBoundaries}),
   relationshipBoundaries,
   familyIds:normalizedNpcIds(profile.familyIds,selfId,4),

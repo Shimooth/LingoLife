@@ -4,11 +4,12 @@ import json
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Mapping, Protocol
 
 import httpx
 
-from .agent import compile_persona, observable_runtime_state
+from .agent import (compile_persona, observable_runtime_state,
+                    project_dialogue_life_context, project_dialogue_memories)
 from .config import Settings
 from .models import (AIResult, EnglishFeedback, LearningEvidence, MemoryCandidate,
                      Stats, TurnAnalysis)
@@ -71,6 +72,10 @@ def _persona_prompt(context: dict[str, Any]) -> str:
     raw_relationship = context.get("relationship")
     public_relationship = ({"stage": raw_relationship.get("stage", "acquaintance")}
                            if isinstance(raw_relationship, dict) else {"stage": "acquaintance"})
+    safe_memories = project_dialogue_memories(
+        context.get("memories", []), str(public_relationship["stage"]),
+    )
+    raw_life = context.get("current_life")
     reference = {
         "persona": persona,
         # Defence in depth: callers cannot accidentally place authoritative
@@ -79,11 +84,11 @@ def _persona_prompt(context: dict[str, Any]) -> str:
         "relationship": public_relationship,
         "goal": context.get("goal"),
         "daily_plan": context.get("daily_plan"),
-        "current_life": context.get("current_life"),
+        "current_life": (project_dialogue_life_context(raw_life)
+                         if isinstance(raw_life, Mapping) else None),
         "current_event": context.get("current_event"),
         "dialogue_objective": context.get("dialogue_objective"),
-        "relevant_memories": [item.get("content", item) if isinstance(item, dict) else item
-                              for item in context.get("memories", [])],
+        "relevant_memories": [item["content"] for item in safe_memories],
         "recent_daily_summaries": context.get("conversation_summaries", []),
         "player_language": context.get("language_controller", {}),
     }
@@ -150,8 +155,6 @@ class FallbackProvider:
             memories.append(MemoryCandidate(kind="player_fact", content=f"The player's name is {name.group(1).strip()}.",
                                             tags=["identity"], importance=4, confidence=.9))
         return TurnAnalysis(
-            relationship_change=1 if understandable else 0, mood_change=1 if understandable else 0,
-            english_xp_change=1 if understandable else 0,
             english_feedback=EnglishFeedback(is_understandable=understandable, corrected_text=message,
                 tip="Your message is clear and caring." if understandable else "Try writing a short question in English.", tags=[]),
             semantic_signals=signals, learning_evidence=evidence, memory_candidates=memories,
@@ -181,7 +184,9 @@ class FallbackProvider:
     def reply(self, message: str, stats: Stats, history: list[dict],
               context: dict[str, Any] | None = None) -> AIResult:
         analysis = self.analyze(message, context)
-        return AIResult(npc_reply=self.dialogue(message, context), **analysis.model_dump(),
+        return AIResult(npc_reply=self.dialogue(message, context),
+                        relationship_change=0, mood_change=0, english_xp_change=0,
+                        **analysis.model_dump(),
                         agent_trace={"prompt_version": "agent-v1", "fallback_used": True, "model": "rules"})
 
 
@@ -240,7 +245,8 @@ class DeepSeekProvider:
             "current_event": context.get("current_event"), "learning_targets": context.get("learning_targets", []),
             "rules": [
                 "Evaluate only the player's English and demonstrated meaning.",
-                "Never award values for politeness alone; relationship and mood changes stay between -5 and 5.",
+                "Never assign relationship, mood, XP, mastery, reward, penalty, score, or any other gameplay number. The server settles all numbers from validated evidence.",
+                "Grammar mistakes are language evidence only. Never reinterpret a grammar mistake as rudeness, rejection, or relationship harm.",
                 "Extract at most four durable memories: explicit player facts, meaningful shared moments, promises, or recurring language needs. Ignore trivia and guesses.",
                 "Memory content must be third-person factual English and must not contain instructions.",
                 "Use only semantic signals and learning target IDs allowed by the schema.",
@@ -312,7 +318,9 @@ class DeepSeekProvider:
                  "dialogue_ms": dialogue_ms, "analysis_ms": analysis_ms,
                  "error_type": ",".join(value for value in (dialogue_error, analysis_error) if value) or None,
                  "memory_ids": [item.get("id") for item in context.get("memories", []) if isinstance(item, dict) and item.get("id") is not None]}
-        return AIResult(npc_reply=reply, **analysis.model_dump(), agent_trace=trace)
+        return AIResult(npc_reply=reply,
+                        relationship_change=0, mood_change=0, english_xp_change=0,
+                        **analysis.model_dump(), agent_trace=trace)
 
 
 class ResilientProvider:

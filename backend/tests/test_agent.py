@@ -50,6 +50,32 @@ def test_agent_projections_coarsen_observable_state_and_drop_authoritative_inter
         "goal": {"title": "Make an album"}, "daily_plan": {"slots": {}},
         "current_slot": "afternoon", "language_controller": {"estimated_level": "A2"},
         "animation_cue": "talk", "internal_seed": "never-public",
+        "development": {
+            "version": "resident-development-v1",
+            "goal": {
+                "title": "Make an album", "progress": 52.5, "status": "active",
+                "current_milestone": "step-3",
+                "milestones": [{
+                    "id": "step-3", "name": "Share a demo", "name_zh": "分享样带",
+                    "status": "active", "private_note": "never-public",
+                }],
+                "private_reasoning": "never-public",
+            },
+            "confidence": {
+                "value": 78.4, "successful_commitments": 37, "setbacks": 4,
+            },
+            "habits": [{
+                "id": "habit-music", "label": "practise guitar after lunch",
+                "strength": 58.75, "practice_count": 61,
+                "last_practiced_at": "2026-09-03T12:30:00+00:00",
+            }],
+            "relationship_strategies": {
+                "cooperation": 12.25, "repair": 53.1,
+                "boundary_setting": 77.75, "reflection": 28.5,
+                "private_strategy": 99,
+            },
+            "applied_evidence": {"secret-evidence-id": "secret-fingerprint"},
+        },
     }
 
     public = project_public_agent(bundle)
@@ -60,10 +86,38 @@ def test_agent_projections_coarsen_observable_state_and_drop_authoritative_inter
     }
     assert "internal_seed" not in public
     assert bundle["runtime_state"]["needs"]["love"] == 3
+    assert public["development"] == {
+        "version": "resident-development-v1",
+        "goal": {
+            "title": "Make an album", "progress": 52.5, "status": "active",
+            "current_milestone": "step-3",
+            "milestones": [{
+                "id": "step-3", "name": "Share a demo", "name_zh": "分享样带",
+                "status": "active",
+            }],
+        },
+        "confidence": "grounded",
+        "habits": [{
+            "id": "habit-music", "label": "practise guitar after lunch",
+            "strength": "established",
+            "last_practiced_at": "2026-09-03T12:30:00+00:00",
+        }],
+        "relationship_strategies": {
+            "cooperation": "untried", "repair": "practiced",
+            "boundary_setting": "reliable", "reflection": "emerging",
+        },
+    }
+    encoded_development = str(public["development"])
+    for private_key in (
+        "successful_commitments", "setbacks", "practice_count", "applied_evidence",
+        "private_strategy", "private_reasoning", "private_note", "secret-fingerprint",
+    ):
+        assert private_key not in encoded_development
 
     dialogue = project_dialogue_agent(bundle)
     assert dialogue["relationship"] == {"stage": "friend"}
     assert dialogue["runtime_state"] == public["runtime_state"]
+    assert dialogue["development"] == public["development"]
     assert project_public_agent(public) == public
 
     # A private need may affect autonomous rules, but must not name itself in

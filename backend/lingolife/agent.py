@@ -19,6 +19,33 @@ _PUBLIC_AGENT_FIELDS = (
     "language_controller", "animation_cue",
 )
 
+_DEVELOPMENT_CONFIDENCE_BANDS = ("fragile", "growing", "steady", "grounded")
+_DEVELOPMENT_HABIT_BANDS = ("new", "forming", "established", "ingrained")
+_DEVELOPMENT_STRATEGY_BANDS = ("untried", "emerging", "practiced", "reliable")
+_DEVELOPMENT_STRATEGY_KEYS = (
+    "cooperation", "repair", "boundary_setting", "reflection",
+)
+
+_RELATIONSHIP_STAGE_RANK = {
+    "stranger": 0,
+    "acquaintance": 1,
+    "friend": 2,
+    "close_friend": 3,
+}
+
+_PUBLIC_MEMORY_FIELDS = ("id", "kind", "content", "created_at")
+
+_PUBLIC_LIFE_ACTION_FIELDS = (
+    "type", "status", "phase", "visible_intent", "visible_intent_zh",
+    "visible_context", "observable_state", "interruptibility", "animation_cue",
+)
+
+_PUBLIC_VISIBLE_CONTEXT_FIELDS = (
+    "icon", "activity", "activity_zh", "topic", "phase", "phase_label",
+    "phase_label_zh", "progress_kind", "visibility", "location", "location_zh",
+    "target_name", "object", "object_zh",
+)
+
 
 def _clamp(value: float, low: float = 0, high: float = 100) -> int:
     return round(max(low, min(high, value)))
@@ -68,6 +95,215 @@ def observable_runtime_state(runtime: Mapping[str, Any] | None) -> dict[str, Any
     return {"emotion": emotion, "needs": needs}
 
 
+def _memory_is_available(memory: Mapping[str, Any], relationship_stage: str,
+                         now: datetime | None = None) -> bool:
+    """Apply the persisted disclosure level before a memory leaves the server.
+
+    Missing access metadata belongs to the pre-disclosure schema and therefore
+    keeps its historical ``stranger`` visibility.  Unknown non-empty stages are
+    denied instead of being silently downgraded to public.
+    """
+    required = str(memory.get("access_stage") or "stranger")
+    if required not in _RELATIONSHIP_STAGE_RANK:
+        return False
+    allowed = _RELATIONSHIP_STAGE_RANK.get(str(relationship_stage), 0)
+    if _RELATIONSHIP_STAGE_RANK[required] > allowed:
+        return False
+    expires_at = memory.get("expires_at")
+    if not expires_at:
+        return True
+    try:
+        expiry = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+        moment = now or datetime.now(timezone.utc)
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        return expiry.astimezone(timezone.utc) > moment.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        # Malformed expiry metadata must never turn a potentially temporary
+        # memory into an indefinitely public one.
+        return False
+
+
+def project_public_memories(memories: Sequence[Mapping[str, Any]], relationship_stage: str,
+                            *, now: datetime | None = None) -> list[dict[str, Any]]:
+    """Return the user-facing memory DTO.
+
+    The identifier is retained solely so the owner can delete a visible
+    memory.  Confidence, appraisal, source/fact ids, ranking signals, tags and
+    correction links are rule-owned metadata and intentionally excluded.
+    """
+    result: list[dict[str, Any]] = []
+    for memory in memories:
+        if not isinstance(memory, Mapping) or not _memory_is_available(
+            memory, relationship_stage, now,
+        ):
+            continue
+        result.append({
+            key: json.loads(json.dumps(memory[key]))
+            for key in _PUBLIC_MEMORY_FIELDS if key in memory
+        })
+    return result
+
+
+def project_dialogue_memories(memories: Sequence[Mapping[str, Any] | str], relationship_stage: str,
+                              *, now: datetime | None = None) -> list[dict[str, str]]:
+    """Return memory text an external dialogue provider is allowed to use."""
+    structured = [memory for memory in memories if isinstance(memory, Mapping)]
+    visible = project_public_memories(structured, relationship_stage, now=now)
+    result = [
+        {"kind": str(memory.get("kind") or "memory"),
+         "content": str(memory.get("content") or "")}
+        for memory in visible if str(memory.get("content") or "").strip()
+    ]
+    # Legacy provider callers supplied already-projected strings.  Keep that
+    # narrow contract without teaching raw database rows to bypass access-stage
+    # checks.
+    result.extend(
+        {"kind": "memory", "content": memory.strip()}
+        for memory in memories if isinstance(memory, str) and memory.strip()
+    )
+    return result
+
+
+def project_public_life_context(context: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Allow-list an NPC's observable life context.
+
+    Action locations, resource ids, target ids, transition reasons and exact
+    timestamps are simulation facts.  Natural-language labels produced by the
+    observable-action layer are the public contract.  Private actions are also
+    collapsed to a generic activity and neutral animation so shower/sleep
+    details cannot be reconstructed from adjacent fields.
+    """
+    source = context if isinstance(context, Mapping) else {}
+    raw_action = source.get("current_action")
+    raw_action = raw_action if isinstance(raw_action, Mapping) else {}
+    raw_visible = raw_action.get("visible_context")
+    raw_visible = raw_visible if isinstance(raw_visible, Mapping) else {}
+    visibility = str(raw_visible.get("visibility") or "open")
+    visible_context = {
+        key: json.loads(json.dumps(raw_visible[key]))
+        for key in _PUBLIC_VISIBLE_CONTEXT_FIELDS if key in raw_visible
+    }
+    action = {
+        key: json.loads(json.dumps(raw_action[key]))
+        for key in _PUBLIC_LIFE_ACTION_FIELDS if key in raw_action
+        and key not in {"visible_context"}
+    }
+    action["visible_context"] = visible_context
+    if visibility == "private":
+        action["type"] = "private_time"
+        action["animation_cue"] = "idle"
+        action["interruptibility"] = "private"
+        action["visible_context"] = {
+            key: value for key, value in visible_context.items()
+            if key not in {"location", "location_zh", "target_name", "object", "object_zh"}
+        }
+
+    result: dict[str, Any] = {"current_action": action}
+    for key in ("recent_life_stories", "npc_relationships", "household_id"):
+        if key in source:
+            result[key] = json.loads(json.dumps(source[key]))
+    return result
+
+
+def project_dialogue_life_context(context: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Provider projection of life context, without household identifiers."""
+    result = project_public_life_context(context)
+    result.pop("household_id", None)
+    return result
+
+
+def _development_band(value: Any, labels: tuple[str, str, str, str],
+                      default: str) -> str:
+    """Accept either an already-public band or a private numeric value safely."""
+    if isinstance(value, Mapping):
+        value = value.get("value")
+    if isinstance(value, str) and value in labels:
+        return value
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return default
+    return _semantic_band(numeric, (25, 50, 75), labels)
+
+
+def _project_development_goal(value: Any) -> dict[str, Any] | None:
+    """Keep the authored public goal shape while dropping unknown nested data."""
+    if not isinstance(value, Mapping):
+        return None
+    result: dict[str, Any] = {
+        "title": str(value.get("title") or ""),
+        "progress": max(0, min(100, float(value.get("progress") or 0))),
+        "status": str(value.get("status") or "active"),
+        "current_milestone": (
+            str(value["current_milestone"])
+            if value.get("current_milestone") is not None else None
+        ),
+        "milestones": [],
+    }
+    milestones = value.get("milestones")
+    if isinstance(milestones, list):
+        result["milestones"] = [
+            {
+                "id": str(item.get("id") or ""),
+                "name": str(item.get("name") or ""),
+                **({"name_zh": str(item["name_zh"])} if item.get("name_zh") else {}),
+                "status": str(item.get("status") or "locked"),
+            }
+            for item in milestones if isinstance(item, Mapping)
+        ]
+    return result
+
+
+def _project_public_development(value: Any) -> dict[str, Any] | None:
+    """Defensively expose development bands without its evidence or score ledger.
+
+    Normal callers pass :func:`development.public_development` here.  Numeric
+    handling is deliberate defence in depth so an accidental raw resident
+    bundle is still coarsened at the final API/provider boundary.
+    """
+    if not isinstance(value, Mapping):
+        return None
+    goal = _project_development_goal(value.get("goal"))
+    habits: list[dict[str, Any]] = []
+    raw_habits = value.get("habits")
+    if isinstance(raw_habits, list):
+        for item in raw_habits:
+            if not isinstance(item, Mapping):
+                continue
+            habits.append({
+                "id": str(item.get("id") or ""),
+                "label": str(item.get("label") or ""),
+                "strength": _development_band(
+                    item.get("strength"), _DEVELOPMENT_HABIT_BANDS, "new",
+                ),
+                "last_practiced_at": (
+                    str(item["last_practiced_at"])
+                    if item.get("last_practiced_at") is not None else None
+                ),
+            })
+    raw_strategies = value.get("relationship_strategies")
+    raw_strategies = raw_strategies if isinstance(raw_strategies, Mapping) else {}
+    result: dict[str, Any] = {
+        "version": "resident-development-v1",
+        "confidence": _development_band(
+            value.get("confidence"), _DEVELOPMENT_CONFIDENCE_BANDS, "steady",
+        ),
+        "habits": habits,
+        "relationship_strategies": {
+            key: _development_band(
+                raw_strategies.get(key), _DEVELOPMENT_STRATEGY_BANDS, "untried",
+            )
+            for key in _DEVELOPMENT_STRATEGY_KEYS
+        },
+    }
+    if goal is not None:
+        result["goal"] = goal
+    return result
+
+
 def project_public_agent(bundle: Mapping[str, Any]) -> dict[str, Any]:
     """Return the ordinary-player Agent DTO without authoritative internals."""
     result = {
@@ -77,6 +313,9 @@ def project_public_agent(bundle: Mapping[str, Any]) -> dict[str, Any]:
     result["runtime_state"] = observable_runtime_state(
         bundle.get("runtime_state") if isinstance(bundle.get("runtime_state"), Mapping) else None,
     )
+    development = _project_public_development(bundle.get("development"))
+    if development is not None:
+        result["development"] = development
     return result
 
 
@@ -98,7 +337,26 @@ def relationship_stage(value: int) -> str:
 def compile_persona(profile: Mapping[str, Any], growth: Mapping[str, float] | None = None) -> dict[str, Any]:
     """Compile free-form customization into a stable, prompt-ready behavior contract."""
     traits = [str(value).strip() for value in profile.get("personality", ()) if str(value).strip()]
-    text = " ".join(traits).casefold()
+    likes = [str(value).strip() for value in profile.get("likes", ()) if str(value).strip()]
+    dislikes = [str(value).strip() for value in profile.get("dislikes", ()) if str(value).strip()]
+    quirks = [str(value).strip() for value in profile.get("quirks", ()) if str(value).strip()]
+    habits = [str(value).strip() for value in profile.get("habits", ()) if str(value).strip()]
+    boundaries = [str(value).strip() for value in profile.get("boundaries", ()) if str(value).strip()]
+    household_role = str(profile.get("householdRole") or "free_spirit")
+    chore_preferences = [str(value) for value in profile.get("chorePreferences", ())]
+    private_space = str(profile.get("privateSpacePreference") or "balanced")
+    shared_history = [
+        {
+            "id": str(item.get("id") or ""),
+            "participant_ids": [str(value) for value in item.get("participantIds", ())],
+            "kind": str(item.get("kind") or ""),
+            "summary": str(item.get("summary") or ""),
+            "tone": str(item.get("tone") or "neutral"),
+        }
+        for item in profile.get("shared_history_hooks", ())
+        if isinstance(item, Mapping) and str(item.get("summary") or "").strip()
+    ]
+    text = " ".join((*traits, *quirks, *habits)).casefold()
     axes = {"warmth": 55, "extraversion": 50, "assertiveness": 50,
             "openness": 55, "emotional_stability": 55, "humor": 40}
     rules = (
@@ -114,6 +372,9 @@ def compile_persona(profile: Mapping[str, Any], growth: Mapping[str, float] | No
         (("sensitive", "anxious", "敏感", "焦虑"), "emotional_stability", -24),
         (("funny", "witty", "sarcastic", "幽默", "毒舌"), "humor", 30),
         (("serious", "严肃", "认真"), "humor", -20),
+        (("persistent", "stubborn", "ambitious", "执着", "固执", "有野心"), "assertiveness", 14),
+        (("meticulous", "detail-oriented", "谨慎", "一丝不苟"), "emotional_stability", 10),
+        (("spontaneous", "restless", "随性", "坐不住"), "emotional_stability", -10),
     )
     for words, axis, delta in rules:
         if any(word in text for word in words):
@@ -130,18 +391,45 @@ def compile_persona(profile: Mapping[str, Any], growth: Mapping[str, float] | No
         "humor_style": "dry" if "sarcastic" in text or "毒舌" in text else "playful" if axes["humor"] > 65 else "rare",
         "question_frequency": "low" if axes["extraversion"] < 35 else "natural",
     }
+    initiative_score = axes["extraversion"] * .55 + axes["assertiveness"] * .45
+    if household_role in {"organizer", "caretaker"}:
+        initiative_score += 10
+    persistence_score = axes["assertiveness"] * .5 + axes["emotional_stability"] * .35 + axes["openness"] * .15
+    if any(word in text for word in ("persistent", "stubborn", "ambitious", "执着", "固执")):
+        persistence_score += 15
+    flexibility_score = axes["openness"] * .65 + (100 - axes["assertiveness"]) * .2 + axes["emotional_stability"] * .15
+    if any(word in text for word in ("stubborn", "traditional", "固执", "传统")):
+        flexibility_score -= 20
+    pride_score = axes["assertiveness"] * .55 + (100 - axes["warmth"]) * .25 + axes["emotional_stability"] * .2
+    if any(word in text for word in ("proud", "stubborn", "ambitious", "骄傲", "固执")):
+        pride_score += 14
+    disclosure_score = axes["warmth"] * .45 + axes["extraversion"] * .4 + axes["openness"] * .15
+    disclosure_score += {"low": 10, "balanced": 0, "high": -18}.get(private_space, 0)
+
     behavior = {
-        "initiative": "low" if axes["extraversion"] < 35 else "high" if axes["extraversion"] > 70 else "moderate",
+        "initiative": "low" if initiative_score < 40 else "high" if initiative_score > 68 else "moderate",
         "conflict_style": "avoidant" if axes["assertiveness"] < 38 else "direct" if axes["assertiveness"] > 70 else "measured",
-        "support_style": "listen_before_advice" if axes["warmth"] > 65 else "practical" if axes["assertiveness"] > 60 else "reserved",
+        "support_style": ("practical" if household_role in {"organizer", "fixer"}
+                          else "listen_before_advice" if axes["warmth"] > 65
+                          else "reserved"),
+        "disclosure_style": "guarded" if disclosure_score < 40 else "open" if disclosure_score > 68 else "selective",
+        "persistence": "low" if persistence_score < 42 else "high" if persistence_score > 68 else "steady",
+        "flexibility": "rigid" if flexibility_score < 40 else "adaptive" if flexibility_score > 68 else "balanced",
+        "pride": "low" if pride_score < 42 else "high" if pride_score > 68 else "moderate",
     }
     identity = {key: profile.get(key, "") for key in ("name", "age", "relationship", "occupation", "longTermGoal")}
+    public_preferences = {
+        "likes": likes, "dislikes": dislikes, "quirks": quirks, "habits": habits,
+        "boundaries": boundaries, "household_role": household_role,
+        "chore_preferences": chore_preferences, "private_space_preference": private_space,
+        "shared_history_hooks": shared_history,
+    }
     source = json.dumps({"identity": identity, "traits": traits, "interests": profile.get("interests", []),
-                         "growth": growth or {}},
+                         "preferences": public_preferences, "growth": growth or {}},
                         ensure_ascii=False, sort_keys=True)
-    return {"version": "persona-v1-" + hashlib.sha256(source.encode()).hexdigest()[:10],
+    return {"version": "persona-v2-" + hashlib.sha256(source.encode()).hexdigest()[:10],
             "identity": identity, "traits": traits, "interests": list(profile.get("interests", [])),
-            "axes": axes, "voice": voice, "behavior": behavior}
+            "preferences": public_preferences, "axes": axes, "voice": voice, "behavior": behavior}
 
 
 def initial_runtime(stats_mood: int, relationship: int, now: datetime | None = None) -> dict[str, Any]:

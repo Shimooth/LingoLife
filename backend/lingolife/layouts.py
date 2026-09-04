@@ -8,7 +8,10 @@ asset catalog before it can reach persistence.
 
 from __future__ import annotations
 
+import json
 import math
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from .city import CITY_LOCATIONS
@@ -17,6 +20,12 @@ from .models import WorldLayout
 
 CITY_ASSET_ROOT = "/assets/world/kaykit-city/gltf"
 INTERIOR_ROOT = "/assets/life/interiors"
+SHARED_HOME_MANIFEST_PATH = Path(__file__).resolve().parents[2] / "config" / "shared-home-layout.json"
+SHARED_HOME_ACTIONS = frozenset({
+    "prepare_food", "eat", "sleep", "shower", "use_television", "read",
+    "practice_hobby", "borrow_household_item", "clean_shared_space", "leave_dishes",
+    "rest_alone", "seek_company", "talk_to_resident",
+})
 
 
 def _vector(x: float = 0, y: float = 0, z: float = 0) -> dict[str, float]:
@@ -319,55 +328,168 @@ def _default_decorations() -> list[dict[str, Any]]:
     return result
 
 
-def _room(room_id: str, name: str, kind: str,
-          definitions: tuple[tuple[str, str, tuple[float, float, float], float,
-                                   float | tuple[float, float, float]], ...]) -> dict[str, Any]:
-    return {
-        "id": room_id, "name": name, "kind": kind,
-        "placements": [
-            _placement(identifier, f"{INTERIOR_ROOT}/{asset}", *position,
-                       rotation, scale, room_id=room_id)
-            for identifier, asset, position, rotation, scale in definitions
-        ],
+@lru_cache(maxsize=1)
+def shared_home_manifest() -> dict[str, Any]:
+    """Load and validate the one shared-home art/action contract.
+
+    The JSON is also imported by the Web renderer and its static guard, so the
+    eight private sleep slots and all thirteen Life Action anchors cannot drift
+    independently from the backend's built-in placement defaults.
+    """
+    value = json.loads(SHARED_HOME_MANIFEST_PATH.read_text(encoding="utf-8"))
+    validate_shared_home_manifest(value)
+    return value
+
+
+def _oriented_rectangles_overlap(first: dict[str, Any], second: dict[str, Any],
+                                  footprints: dict[str, list[float]]) -> bool:
+    """Return whether two blocking floor footprints overlap with a small seam."""
+    def rectangle(item: dict[str, Any]):
+        width, depth = footprints[item["asset"]]
+        scale = item["scale"]
+        width, depth = width * scale[0], depth * scale[2]
+        angle = float(item.get("rotation", 0))
+        center = (float(item["position"][0]), float(item["position"][2]))
+        axes = ((math.cos(angle), math.sin(angle)), (-math.sin(angle), math.cos(angle)))
+        return center, axes, (width / 2, depth / 2)
+
+    a_center, a_axes, a_half = rectangle(first)
+    b_center, b_axes, b_half = rectangle(second)
+    difference = (b_center[0] - a_center[0], b_center[1] - a_center[1])
+    for axis in (*a_axes, *b_axes):
+        distance = abs(difference[0] * axis[0] + difference[1] * axis[1])
+        a_radius = sum(a_half[index] * abs(a_axes[index][0] * axis[0]
+                                             + a_axes[index][1] * axis[1]) for index in (0, 1))
+        b_radius = sum(b_half[index] * abs(b_axes[index][0] * axis[0]
+                                             + b_axes[index][1] * axis[1]) for index in (0, 1))
+        if distance >= a_radius + b_radius - .025:
+            return False
+    return True
+
+
+def validate_shared_home_manifest(value: dict[str, Any]) -> None:
+    """Fail closed on visual collisions, missing resources or action anchors."""
+    if value.get("version") != 1 or value.get("max_residents") != 8:
+        raise ValueError("shared home must support exactly eight active residents")
+    if value.get("occupancy_scenarios") != [2, 4, 8]:
+        raise ValueError("shared home must retain 2/4/8 occupancy scenarios")
+    bounds = value.get("room_bounds") or {}
+    half_width, half_depth = float(bounds.get("width", 0)) / 2, float(bounds.get("depth", 0)) / 2
+    center_z = float(bounds.get("center_z", 0))
+    if half_width < 5 or half_depth < 3:
+        raise ValueError("shared home room bounds are too small")
+
+    rooms = value.get("rooms") or []
+    required_rooms = {
+        "living-room": "living_room", "kitchen": "kitchen",
+        "bathroom": "bathroom", "bedroom": "bedroom",
     }
+    if {room.get("id"): room.get("kind") for room in rooms} != required_rooms:
+        raise ValueError("shared home must contain its four canonical functional rooms")
+    footprints = value.get("asset_footprints") or {}
+    fixture_ids: set[str] = {"builtin-television"}
+    action_coverage: set[str] = set()
+    sleep_slots: set[int] = set()
+    required_assets = {
+        "living-room": {"furniture/couch_pillows.gltf": 1,
+                         "furniture/armchair_pillows.gltf": 3,
+                         "furniture/shelf_B_large_decorated.gltf": 1},
+        "kitchen": {"kitchen/countertop_sink.gltf": 1, "kitchen/fridge.gltf": 1,
+                    "kitchen/stove.gltf": 1, "kitchen/table_A.gltf": 2,
+                    "kitchen/chair.gltf": 4, "kitchen/floor_tiles_kitchen.gltf": 1},
+        "bathroom": {"bathroom/shower.gltf": 1, "bathroom/bath.gltf": 1,
+                     "bathroom/cabinet_bathroom.gltf": 1, "bathroom/toilet.gltf": 1,
+                     "bathroom/floor_tiled.gltf": 1},
+        "bedroom": {"furniture/bed_single_A.gltf": 8},
+    }
+    for room in rooms:
+        placements = room.get("placements") or []
+        placement_ids = [str(item.get("id")) for item in placements]
+        if len(placement_ids) != len(set(placement_ids)):
+            raise ValueError(f"duplicate shared-home fixture id in {room['id']}")
+        fixture_ids.update(placement_ids)
+        counts: dict[str, int] = {}
+        blocking: list[dict[str, Any]] = []
+        for placement in placements:
+            asset = str(placement.get("asset") or "")
+            counts[asset] = counts.get(asset, 0) + 1
+            position, scale = placement.get("position") or [], placement.get("scale") or []
+            if len(position) != 3 or len(scale) != 3 or min(map(float, scale)) <= 0:
+                raise ValueError(f"invalid shared-home transform: {placement.get('id')}")
+            x, z = float(position[0]), float(position[2])
+            if not (-half_width <= x <= half_width and center_z - half_depth <= z <= center_z + half_depth):
+                raise ValueError(f"shared-home fixture outside room: {placement.get('id')}")
+            if asset in footprints:
+                blocking.append(placement)
+        for asset, minimum in required_assets[room["id"]].items():
+            if counts.get(asset, 0) < minimum:
+                raise ValueError(f"shared home {room['id']} requires {minimum} x {asset}")
+        for index, first in enumerate(blocking):
+            for second in blocking[index + 1:]:
+                if _oriented_rectangles_overlap(first, second, footprints):
+                    raise ValueError(
+                        f"shared-home fixtures overlap in {room['id']}: {first['id']} / {second['id']}"
+                    )
+
+        anchors = room.get("anchors") or []
+        anchor_ids = [str(anchor.get("id")) for anchor in anchors]
+        if len(anchor_ids) != len(set(anchor_ids)) or not any(
+            anchor.get("kind") == "entry" for anchor in anchors
+        ):
+            raise ValueError(f"shared home {room['id']} needs unique anchors and an entry")
+        for anchor in anchors:
+            position = anchor.get("position") or []
+            if len(position) != 3:
+                raise ValueError(f"invalid shared-home anchor: {anchor.get('id')}")
+            x, z = float(position[0]), float(position[2])
+            if not (-half_width <= x <= half_width and center_z - half_depth <= z <= center_z + half_depth):
+                raise ValueError(f"shared-home anchor outside room: {anchor.get('id')}")
+            fixture_id = anchor.get("fixture_id")
+            if fixture_id and fixture_id not in placement_ids:
+                raise ValueError(f"shared-home anchor has missing fixture: {anchor.get('id')}")
+            actions = set(anchor.get("actions") or [])
+            if not actions <= SHARED_HOME_ACTIONS:
+                raise ValueError(f"shared-home anchor has unknown Life Action: {anchor.get('id')}")
+            action_coverage.update(actions)
+            if anchor.get("kind") == "private-bed":
+                if anchor.get("privacy") != "private" or "sleep" not in actions:
+                    raise ValueError("every sleeping pod must be private and support sleep")
+                sleep_slots.add(int(anchor.get("slot", 0)))
+
+    if action_coverage != SHARED_HOME_ACTIONS:
+        missing = ", ".join(sorted(SHARED_HOME_ACTIONS - action_coverage))
+        raise ValueError(f"shared home is missing Life Action anchors: {missing}")
+    if sleep_slots != set(range(1, 9)):
+        raise ValueError("shared home must expose eight distinct private sleeping slots")
+
+    resources = value.get("resources") or []
+    by_kind = {resource.get("kind"): resource for resource in resources}
+    if set(by_kind) != {"kitchen", "television", "bathroom"}:
+        raise ValueError("shared home must expose kitchen, television and bathroom resources")
+    expected_capacities = {"kitchen": 1, "television": 2, "bathroom": 1}
+    for kind, expected in expected_capacities.items():
+        resource = by_kind[kind]
+        if resource.get("capacity") != expected:
+            raise ValueError(f"shared home {kind} capacity must be {expected}")
+        if not resource.get("fixture_ids") or not set(resource["fixture_ids"]) <= fixture_ids:
+            raise ValueError(f"shared home {kind} references a missing fixture")
 
 
 def _default_rooms() -> list[dict[str, Any]]:
-    return [
-        _room("living-room", "Living room", "living_room", (
-            ("sofa", "furniture/couch_pillows.gltf", (0, 0, -2.2), 0, .55),
-            ("shelf", "furniture/shelf_B_large_decorated.gltf", (-3.45, 0, -2.42), .08, .48),
-            ("lamp", "furniture/lamp_standing.gltf", (2.55, 0, -2.18), 0, .58),
-            ("table", "furniture/table_low.gltf", (0, 0, -.92), 0, .4),
-            ("rug", "furniture/rug_rectangle_A.gltf", (0, .015, -.75), 0, (1.08, .9, .8)),
-            ("plant", "plants/monstera_plant_medium_potted.gltf", (3.45, 0, -1.85), -.2, .42),
-        )),
-        _room("kitchen", "Kitchen", "kitchen", (
-            ("tile-floor", "kitchen/floor_tiles_kitchen.gltf", (0, .01, -.35), 0, (5, .18, 3.35)),
-            ("sink", "kitchen/countertop_sink.gltf", (-2.8, 0, -2.45), 0, .5),
-            ("fridge", "kitchen/fridge.gltf", (-4.05, 0, -2.32), 0, .5),
-            ("stove", "kitchen/stove.gltf", (-1.55, 0, -2.44), 0, .5),
-            ("table", "kitchen/table_A.gltf", (2.45, 0, -1.8), 0, .48),
-            ("chair-a", "kitchen/chair.gltf", (1.45, 0, -1.85), -math.pi / 2, .48),
-            ("chair-b", "kitchen/chair.gltf", (3.46, 0, -1.85), math.pi / 2, .48),
-            ("kettle", "kitchen/kettle.gltf", (-2.16, .52, -2.25), 0, .35),
-        )),
-        _room("bathroom", "Bathroom", "bathroom", (
-            ("tile-floor", "bathroom/floor_tiled.gltf", (0, .01, -.35), 0, (5, .18, 3.35)),
-            ("shower", "bathroom/shower.gltf", (-3.15, 0, -2.35), 0, .5),
-            ("bath", "bathroom/bath.gltf", (2.25, 0, -2.08), -.1, .54),
-            ("cabinet", "bathroom/cabinet_bathroom.gltf", (-1.28, 0, -2.47), 0, .5),
-            ("mirror", "bathroom/mirror.gltf", (-1.28, 1.3, -2.56), 0, .5),
-            ("toilet", "bathroom/toilet.gltf", (3.7, 0, -2.35), -.2, .5),
-        )),
-        _room("bedroom", "Bedroom", "bedroom", (
-            ("bed", "furniture/bed_single_A.gltf", (-2.05, 0, -1.92), .05, .58),
-            ("shelf", "furniture/shelf_B_large_decorated.gltf", (3.32, 0, -2.4), -.05, .43),
-            ("chair", "furniture/armchair_pillows.gltf", (1.65, 0, -1.93), -.28, .52),
-            ("lamp", "furniture/lamp_standing.gltf", (2.48, 0, -2.32), 0, .54),
-            ("rug", "furniture/rug_rectangle_A.gltf", (0, .015, -.7), 0, (1.1, .9, .78)),
-        )),
-    ]
+    rooms = []
+    for room in shared_home_manifest()["rooms"]:
+        rooms.append({
+            "id": room["id"], "name": room["name"], "kind": room["kind"],
+            "placements": [
+                _placement(
+                    placement["id"], f"{INTERIOR_ROOT}/{placement['asset']}",
+                    *placement["position"], placement.get("rotation", 0),
+                    tuple(placement["scale"]), room_id=room["id"],
+                )
+                for placement in room["placements"]
+            ],
+        })
+    return rooms
 
 
 def default_world_layout() -> dict[str, Any]:

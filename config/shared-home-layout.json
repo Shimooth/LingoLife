@@ -1,0 +1,187 @@
+{
+  "version": 1,
+  "max_residents": 8,
+  "occupancy_scenarios": [2, 4, 8],
+  "room_bounds": {"width": 10.6, "depth": 7.2, "center_z": -0.35},
+  "room_connections": [["living-room", "kitchen"], ["living-room", "bathroom"], ["living-room", "bedroom"]],
+  "resources": [
+    {"kind": "kitchen", "room_id": "kitchen", "capacity": 1, "fixture_ids": ["kitchen-stove", "kitchen-sink"]},
+    {"kind": "television", "room_id": "living-room", "capacity": 2, "fixture_ids": ["builtin-television"]},
+    {"kind": "bathroom", "room_id": "bathroom", "capacity": 1, "fixture_ids": ["bathroom-shower"]}
+  ],
+  "asset_footprints": {
+    "furniture/couch_pillows.gltf": [3.0, 1.6],
+    "furniture/armchair_pillows.gltf": [1.8, 1.6],
+    "furniture/bed_single_A.gltf": [1.6, 3.0],
+    "furniture/table_low.gltf": [2.4, 1.5],
+    "furniture/shelf_B_large_decorated.gltf": [2.0, 0.5],
+    "furniture/lamp_standing.gltf": [1.0, 1.0],
+    "kitchen/table_A.gltf": [2.0, 1.5],
+    "kitchen/chair.gltf": [0.8, 0.92],
+    "kitchen/countertop_sink.gltf": [2.0, 1.5],
+    "kitchen/fridge.gltf": [2.98, 1.18],
+    "kitchen/stove.gltf": [2.0, 1.66],
+    "bathroom/shower.gltf": [1.14, 1.18],
+    "bathroom/bath.gltf": [2.0, 3.0],
+    "bathroom/cabinet_bathroom.gltf": [2.0, 1.55],
+    "bathroom/toilet.gltf": [1.02, 1.32],
+    "plants/monstera_plant_medium_potted.gltf": [2.03, 2.23]
+  },
+  "rooms": [
+    {
+      "id": "living-room",
+      "name": "Living room",
+      "kind": "living_room",
+      "placements": [
+        {"id": "living-rug", "asset": "furniture/rug_rectangle_A.gltf", "position": [-1.45, 0.015, -0.45], "rotation": 1.5708, "scale": [1.12, 0.9, 1.18]},
+        {"id": "living-sofa", "asset": "furniture/couch_pillows.gltf", "position": [-1.35, 0.0, -0.45], "rotation": -1.5708, "scale": [0.58, 0.58, 0.58]},
+        {"id": "living-coffee-table", "asset": "furniture/table_low.gltf", "position": [-2.75, 0.0, -0.45], "rotation": 1.5708, "scale": [0.44, 0.44, 0.44]},
+        {"id": "living-chair-north", "asset": "furniture/armchair_pillows.gltf", "position": [-2.0, 0.0, -2.15], "rotation": -0.82, "scale": [0.5, 0.5, 0.5]},
+        {"id": "living-chair-south", "asset": "furniture/armchair_pillows.gltf", "position": [-2.0, 0.0, 1.32], "rotation": -2.32, "scale": [0.5, 0.5, 0.5]},
+        {"id": "living-bookshelf", "asset": "furniture/shelf_B_large_decorated.gltf", "position": [2.65, 0.0, -2.95], "rotation": 0.0, "scale": [0.62, 0.62, 0.62]},
+        {"id": "living-reading-chair", "asset": "furniture/armchair_pillows.gltf", "position": [2.75, 0.0, -1.35], "rotation": 0.2, "scale": [0.5, 0.5, 0.5]},
+        {"id": "living-hobby-table", "asset": "furniture/table_low.gltf", "position": [2.25, 0.0, 0.78], "rotation": 0.0, "scale": [0.42, 0.42, 0.42]},
+        {"id": "living-floor-lamp", "asset": "furniture/lamp_standing.gltf", "position": [4.18, 0.0, -2.55], "rotation": -0.12, "scale": [0.6, 0.6, 0.6]},
+        {"id": "living-plant", "asset": "plants/monstera_plant_medium_potted.gltf", "position": [4.12, 0.0, 1.82], "rotation": -0.25, "scale": [0.38, 0.38, 0.38]}
+      ],
+      "anchors": [
+        {"id": "living-entry", "kind": "entry", "position": [-4.45, -0.17, 2.35], "rotation": 1.5708, "privacy": "open", "actions": []},
+        {"id": "living-tv-a", "kind": "television-seat", "position": [-1.72, -0.17, -0.82], "rotation": -1.5708, "privacy": "open", "fixture_id": "living-sofa", "actions": ["use_television", "seek_company", "talk_to_resident"]},
+        {"id": "living-tv-b", "kind": "television-seat", "position": [-1.72, -0.17, -0.08], "rotation": -1.5708, "privacy": "open", "fixture_id": "living-sofa", "actions": ["use_television", "seek_company", "talk_to_resident"]},
+        {"id": "living-read", "kind": "reading-seat", "position": [2.15, -0.17, -1.0], "rotation": 0.2, "privacy": "open", "fixture_id": "living-reading-chair", "actions": ["read", "rest_alone"]},
+        {"id": "living-hobby", "kind": "activity", "position": [2.25, -0.17, 1.62], "rotation": 3.1416, "privacy": "open", "fixture_id": "living-hobby-table", "actions": ["practice_hobby"]},
+        {"id": "living-borrow", "kind": "storage", "position": [2.65, -0.17, -2.15], "rotation": 3.1416, "privacy": "open", "fixture_id": "living-bookshelf", "actions": ["borrow_household_item"]},
+        {"id": "living-clean", "kind": "room-center", "position": [-0.05, -0.17, 1.85], "rotation": -0.35, "privacy": "open", "actions": ["clean_shared_space"]},
+        {"id": "living-social-north", "kind": "conversation", "position": [-2.58, -0.17, -1.78], "rotation": 0.78, "privacy": "open", "fixture_id": "living-chair-north", "actions": ["seek_company", "talk_to_resident"]},
+        {"id": "living-social-south", "kind": "conversation", "position": [-2.58, -0.17, 0.98], "rotation": 2.35, "privacy": "open", "fixture_id": "living-chair-south", "actions": ["seek_company", "talk_to_resident"]},
+        {"id": "living-idle-east", "kind": "idle", "position": [3.7, -0.17, 0.22], "rotation": -0.65, "privacy": "open", "actions": []},
+        {"id": "living-idle-west", "kind": "idle", "position": [-3.72, -0.17, 0.28], "rotation": 0.75, "privacy": "open", "actions": []},
+        {"id": "living-idle-lamp", "kind": "idle", "position": [4.0, -0.17, -1.75], "rotation": -0.45, "privacy": "open", "actions": []},
+        {"id": "living-idle-sofa", "kind": "idle", "position": [0.0, -0.17, -0.75], "rotation": -1.0, "privacy": "open", "actions": []},
+        {"id": "living-idle-plant", "kind": "idle", "position": [3.25, -0.17, 2.25], "rotation": -0.7, "privacy": "open", "actions": []},
+        {"id": "living-idle-window", "kind": "idle", "position": [-1.0, -0.17, 1.25], "rotation": 0.35, "privacy": "open", "actions": []},
+        {"id": "living-idle-hobby", "kind": "idle", "position": [1.25, -0.17, 0.75], "rotation": -0.25, "privacy": "open", "actions": []},
+        {"id": "living-idle-door", "kind": "idle", "position": [-2.75, -0.17, 2.0], "rotation": 0.72, "privacy": "open", "actions": []}
+      ]
+    },
+    {
+      "id": "kitchen",
+      "name": "Kitchen",
+      "kind": "kitchen",
+      "placements": [
+        {"id": "kitchen-floor", "asset": "kitchen/floor_tiles_kitchen.gltf", "position": [0.0, -0.09, -0.35], "rotation": 0.0, "scale": [5.2, 0.18, 3.52]},
+        {"id": "kitchen-fridge", "asset": "kitchen/fridge.gltf", "position": [-4.0, 0.0, -2.77], "rotation": 0.0, "scale": [0.58, 0.58, 0.58]},
+        {"id": "kitchen-sink", "asset": "kitchen/countertop_sink.gltf", "position": [-2.18, 0.0, -2.79], "rotation": 0.0, "scale": [0.58, 0.58, 0.58]},
+        {"id": "kitchen-stove", "asset": "kitchen/stove.gltf", "position": [-0.82, 0.0, -2.78], "rotation": 0.0, "scale": [0.58, 0.58, 0.58]},
+        {"id": "kitchen-island", "asset": "kitchen/table_A.gltf", "position": [-1.78, 0.0, -0.2], "rotation": 1.5708, "scale": [0.58, 0.58, 0.58]},
+        {"id": "kitchen-dining-table", "asset": "kitchen/table_A.gltf", "position": [2.35, 0.0, -0.5], "rotation": 0.0, "scale": [0.65, 0.65, 0.65]},
+        {"id": "kitchen-chair-west", "asset": "kitchen/chair.gltf", "position": [1.25, 0.0, -0.5], "rotation": -1.5708, "scale": [0.56, 0.56, 0.56]},
+        {"id": "kitchen-chair-east", "asset": "kitchen/chair.gltf", "position": [3.45, 0.0, -0.5], "rotation": 1.5708, "scale": [0.56, 0.56, 0.56]},
+        {"id": "kitchen-chair-north", "asset": "kitchen/chair.gltf", "position": [2.35, 0.0, -1.55], "rotation": 0.0, "scale": [0.56, 0.56, 0.56]},
+        {"id": "kitchen-chair-south", "asset": "kitchen/chair.gltf", "position": [2.35, 0.0, 0.55], "rotation": 3.1416, "scale": [0.56, 0.56, 0.56]},
+        {"id": "kitchen-kettle", "asset": "kitchen/kettle.gltf", "position": [-0.82, 0.76, -2.68], "rotation": 0.18, "scale": [0.4, 0.4, 0.4]},
+        {"id": "kitchen-dishes", "asset": "restaurant/dishrack_plates.gltf", "position": [-2.18, 1.02, -2.72], "rotation": 0.0, "scale": [0.4, 0.4, 0.4]},
+        {"id": "kitchen-meal", "asset": "restaurant/food_dinner.gltf", "position": [2.35, 0.65, -0.5], "rotation": 0.25, "scale": [0.34, 0.34, 0.34]},
+        {"id": "kitchen-plate", "asset": "restaurant/plate.gltf", "position": [1.92, 0.65, -0.5], "rotation": 0.0, "scale": [0.34, 0.34, 0.34]},
+        {"id": "kitchen-plant", "asset": "plants/monstera_plant_medium_potted.gltf", "position": [4.55, 0.0, 1.75], "rotation": -0.25, "scale": [0.3, 0.3, 0.3]},
+        {"id": "kitchen-pantry", "asset": "furniture/shelf_B_large_decorated.gltf", "position": [4.28, 0.0, -2.72], "rotation": -0.04, "scale": [0.55, 0.55, 0.55]}
+      ],
+      "anchors": [
+        {"id": "kitchen-entry", "kind": "entry", "position": [-4.45, -0.17, 2.35], "rotation": 1.5708, "privacy": "open", "actions": []},
+        {"id": "kitchen-prep", "kind": "counter", "position": [-0.82, -0.17, -1.82], "rotation": 3.1416, "privacy": "open", "fixture_id": "kitchen-stove", "actions": ["prepare_food"]},
+        {"id": "kitchen-dishes", "kind": "sink", "position": [-2.18, -0.17, -1.82], "rotation": 3.1416, "privacy": "open", "fixture_id": "kitchen-sink", "actions": ["leave_dishes"]},
+        {"id": "kitchen-eat-west", "kind": "dining-seat", "position": [1.15, -0.17, -0.5], "rotation": -1.5708, "privacy": "open", "fixture_id": "kitchen-chair-west", "actions": ["eat"]},
+        {"id": "kitchen-eat-east", "kind": "dining-seat", "position": [3.55, -0.17, -0.5], "rotation": 1.5708, "privacy": "open", "fixture_id": "kitchen-chair-east", "actions": ["eat"]},
+        {"id": "kitchen-eat-north", "kind": "dining-seat", "position": [2.35, -0.17, -1.65], "rotation": 0.0, "privacy": "open", "fixture_id": "kitchen-chair-north", "actions": ["eat"]},
+        {"id": "kitchen-eat-south", "kind": "dining-seat", "position": [2.35, -0.17, 0.65], "rotation": 3.1416, "privacy": "open", "fixture_id": "kitchen-chair-south", "actions": ["eat"]},
+        {"id": "kitchen-idle-a", "kind": "idle", "position": [-3.55, -0.17, -1.55], "rotation": 2.72, "privacy": "open", "actions": []},
+        {"id": "kitchen-idle-b", "kind": "idle", "position": [-0.5, -0.17, 1.7], "rotation": -0.4, "privacy": "open", "actions": []}
+      ]
+    },
+    {
+      "id": "bathroom",
+      "name": "Bathroom",
+      "kind": "bathroom",
+      "placements": [
+        {"id": "bathroom-floor", "asset": "bathroom/floor_tiled.gltf", "position": [0.0, 0.0, -0.35], "rotation": 0.0, "scale": [5.2, 0.18, 3.52]},
+        {"id": "bathroom-shower", "asset": "bathroom/shower.gltf", "position": [-4.0, 0.0, -2.65], "rotation": 0.0, "scale": [0.65, 0.65, 0.65]},
+        {"id": "bathroom-cabinet", "asset": "bathroom/cabinet_bathroom.gltf", "position": [-2.42, 0.0, -2.72], "rotation": 0.0, "scale": [0.62, 0.62, 0.62]},
+        {"id": "bathroom-mirror", "asset": "bathroom/mirror.gltf", "position": [-2.42, 1.55, -3.1], "rotation": 0.0, "scale": [0.62, 0.62, 0.62]},
+        {"id": "bathroom-toilet", "asset": "bathroom/toilet.gltf", "position": [-0.62, 0.0, -2.64], "rotation": 0.0, "scale": [0.6, 0.6, 0.6]},
+        {"id": "bathroom-bath", "asset": "bathroom/bath.gltf", "position": [2.18, 0.0, -1.72], "rotation": 1.5708, "scale": [0.62, 0.62, 0.62]},
+        {"id": "bathroom-plant", "asset": "plants/monstera_plant_medium_potted.gltf", "position": [4.45, 0.0, -2.65], "rotation": -0.28, "scale": [0.25, 0.25, 0.25]},
+        {"id": "bathroom-linen", "asset": "bathroom/cabinet_bathroom.gltf", "position": [4.0, 0.0, 0.48], "rotation": 3.1416, "scale": [0.45, 0.45, 0.45]}
+      ],
+      "anchors": [
+        {"id": "bathroom-entry", "kind": "entry", "position": [-4.45, -0.17, 2.35], "rotation": 1.5708, "privacy": "open", "actions": []},
+        {"id": "bathroom-shower", "kind": "shower", "position": [-4.0, -0.17, -1.78], "rotation": 3.1416, "privacy": "private", "fixture_id": "bathroom-shower", "actions": ["shower"]},
+        {"id": "bathroom-wait", "kind": "queue", "position": [-3.55, -0.17, 1.25], "rotation": -0.2, "privacy": "open", "actions": []}
+      ]
+    },
+    {
+      "id": "bedroom",
+      "name": "Private bedroom wing",
+      "kind": "bedroom",
+      "placements": [
+        {"id": "bedroom-corridor-rug", "asset": "furniture/rug_rectangle_A.gltf", "position": [0.0, 0.015, -0.04], "rotation": 1.5708, "scale": [0.92, 0.9, 0.31]},
+        {"id": "bed-01", "asset": "furniture/bed_single_A.gltf", "position": [-3.75, 0.0, -2.08], "rotation": 0.0, "scale": [0.46, 0.46, 0.46]},
+        {"id": "bed-02", "asset": "furniture/bed_single_A.gltf", "position": [-1.25, 0.0, -2.08], "rotation": 0.0, "scale": [0.46, 0.46, 0.46]},
+        {"id": "bed-03", "asset": "furniture/bed_single_A.gltf", "position": [1.25, 0.0, -2.08], "rotation": 0.0, "scale": [0.46, 0.46, 0.46]},
+        {"id": "bed-04", "asset": "furniture/bed_single_A.gltf", "position": [3.75, 0.0, -2.08], "rotation": 0.0, "scale": [0.46, 0.46, 0.46]},
+        {"id": "bed-05", "asset": "furniture/bed_single_A.gltf", "position": [-3.75, 0.0, 1.83], "rotation": 3.1416, "scale": [0.46, 0.46, 0.46]},
+        {"id": "bed-06", "asset": "furniture/bed_single_A.gltf", "position": [-1.25, 0.0, 1.83], "rotation": 3.1416, "scale": [0.46, 0.46, 0.46]},
+        {"id": "bed-07", "asset": "furniture/bed_single_A.gltf", "position": [1.25, 0.0, 1.83], "rotation": 3.1416, "scale": [0.46, 0.46, 0.46]},
+        {"id": "bed-08", "asset": "furniture/bed_single_A.gltf", "position": [3.75, 0.0, 1.83], "rotation": 3.1416, "scale": [0.46, 0.46, 0.46]},
+        {"id": "bedroom-lamp-01", "asset": "furniture/lamp_standing.gltf", "position": [-4.53, 0.0, -2.55], "rotation": 0.12, "scale": [0.28, 0.28, 0.28]},
+        {"id": "bedroom-lamp-02", "asset": "furniture/lamp_standing.gltf", "position": [-2.03, 0.0, -2.55], "rotation": -0.09, "scale": [0.28, 0.28, 0.28]},
+        {"id": "bedroom-lamp-03", "asset": "furniture/lamp_standing.gltf", "position": [0.47, 0.0, -2.55], "rotation": 0.08, "scale": [0.28, 0.28, 0.28]},
+        {"id": "bedroom-lamp-04", "asset": "furniture/lamp_standing.gltf", "position": [2.97, 0.0, -2.55], "rotation": -0.12, "scale": [0.28, 0.28, 0.28]},
+        {"id": "bedroom-lamp-05", "asset": "furniture/lamp_standing.gltf", "position": [-4.53, 0.0, 2.36], "rotation": -0.08, "scale": [0.28, 0.28, 0.28]},
+        {"id": "bedroom-lamp-06", "asset": "furniture/lamp_standing.gltf", "position": [-2.03, 0.0, 2.36], "rotation": 0.1, "scale": [0.28, 0.28, 0.28]},
+        {"id": "bedroom-lamp-07", "asset": "furniture/lamp_standing.gltf", "position": [0.47, 0.0, 2.36], "rotation": -0.11, "scale": [0.28, 0.28, 0.28]},
+        {"id": "bedroom-lamp-08", "asset": "furniture/lamp_standing.gltf", "position": [2.97, 0.0, 2.36], "rotation": 0.09, "scale": [0.28, 0.28, 0.28]},
+        {"id": "personal-shelf-01", "asset": "furniture/shelf_B_large_decorated.gltf", "position": [-4.53, 0.0, -2.94], "rotation": 0.0, "scale": [0.2, 0.2, 0.2]},
+        {"id": "personal-shelf-02", "asset": "furniture/shelf_B_large_decorated.gltf", "position": [-2.03, 0.0, -2.94], "rotation": 0.0, "scale": [0.2, 0.2, 0.2]},
+        {"id": "personal-shelf-03", "asset": "furniture/shelf_B_large_decorated.gltf", "position": [0.47, 0.0, -2.94], "rotation": 0.0, "scale": [0.2, 0.2, 0.2]},
+        {"id": "personal-shelf-04", "asset": "furniture/shelf_B_large_decorated.gltf", "position": [2.97, 0.0, -2.94], "rotation": 0.0, "scale": [0.2, 0.2, 0.2]},
+        {"id": "personal-shelf-05", "asset": "furniture/shelf_B_large_decorated.gltf", "position": [-4.53, 0.0, 2.73], "rotation": 3.1416, "scale": [0.2, 0.2, 0.2]},
+        {"id": "personal-shelf-06", "asset": "furniture/shelf_B_large_decorated.gltf", "position": [-2.03, 0.0, 2.73], "rotation": 3.1416, "scale": [0.2, 0.2, 0.2]},
+        {"id": "personal-shelf-07", "asset": "furniture/shelf_B_large_decorated.gltf", "position": [0.47, 0.0, 2.73], "rotation": 3.1416, "scale": [0.2, 0.2, 0.2]},
+        {"id": "personal-shelf-08", "asset": "furniture/shelf_B_large_decorated.gltf", "position": [2.97, 0.0, 2.73], "rotation": 3.1416, "scale": [0.2, 0.2, 0.2]}
+      ],
+      "anchors": [
+        {"id": "bedroom-entry", "kind": "entry", "position": [-4.72, -0.17, -0.04], "rotation": 1.5708, "privacy": "open", "actions": []},
+        {"id": "bedroom-idle", "kind": "idle", "position": [0.0, -0.17, -0.04], "rotation": 1.5708, "privacy": "open", "actions": []},
+        {"id": "private-door-01", "kind": "private-room-door", "position": [-3.75, -0.17, -0.79], "rotation": 3.1416, "privacy": "private", "slot": 1, "actions": []},
+        {"id": "private-door-02", "kind": "private-room-door", "position": [-1.25, -0.17, -0.79], "rotation": 3.1416, "privacy": "private", "slot": 2, "actions": []},
+        {"id": "private-door-03", "kind": "private-room-door", "position": [1.25, -0.17, -0.79], "rotation": 3.1416, "privacy": "private", "slot": 3, "actions": []},
+        {"id": "private-door-04", "kind": "private-room-door", "position": [3.75, -0.17, -0.79], "rotation": 3.1416, "privacy": "private", "slot": 4, "actions": []},
+        {"id": "private-door-05", "kind": "private-room-door", "position": [-3.75, -0.17, 0.71], "rotation": 0.0, "privacy": "private", "slot": 5, "actions": []},
+        {"id": "private-door-06", "kind": "private-room-door", "position": [-1.25, -0.17, 0.71], "rotation": 0.0, "privacy": "private", "slot": 6, "actions": []},
+        {"id": "private-door-07", "kind": "private-room-door", "position": [1.25, -0.17, 0.71], "rotation": 0.0, "privacy": "private", "slot": 7, "actions": []},
+        {"id": "private-door-08", "kind": "private-room-door", "position": [3.75, -0.17, 0.71], "rotation": 0.0, "privacy": "private", "slot": 8, "actions": []},
+        {"id": "sleep-01", "kind": "private-bed", "position": [-3.75, -0.17, -2.08], "rotation": 0.0, "privacy": "private", "fixture_id": "bed-01", "slot": 1, "actions": ["sleep", "rest_alone"]},
+        {"id": "sleep-02", "kind": "private-bed", "position": [-1.25, -0.17, -2.08], "rotation": 0.0, "privacy": "private", "fixture_id": "bed-02", "slot": 2, "actions": ["sleep", "rest_alone"]},
+        {"id": "sleep-03", "kind": "private-bed", "position": [1.25, -0.17, -2.08], "rotation": 0.0, "privacy": "private", "fixture_id": "bed-03", "slot": 3, "actions": ["sleep", "rest_alone"]},
+        {"id": "sleep-04", "kind": "private-bed", "position": [3.75, -0.17, -2.08], "rotation": 0.0, "privacy": "private", "fixture_id": "bed-04", "slot": 4, "actions": ["sleep", "rest_alone"]},
+        {"id": "sleep-05", "kind": "private-bed", "position": [-3.75, -0.17, 1.83], "rotation": 3.1416, "privacy": "private", "fixture_id": "bed-05", "slot": 5, "actions": ["sleep", "rest_alone"]},
+        {"id": "sleep-06", "kind": "private-bed", "position": [-1.25, -0.17, 1.83], "rotation": 3.1416, "privacy": "private", "fixture_id": "bed-06", "slot": 6, "actions": ["sleep", "rest_alone"]},
+        {"id": "sleep-07", "kind": "private-bed", "position": [1.25, -0.17, 1.83], "rotation": 3.1416, "privacy": "private", "fixture_id": "bed-07", "slot": 7, "actions": ["sleep", "rest_alone"]},
+        {"id": "sleep-08", "kind": "private-bed", "position": [3.75, -0.17, 1.83], "rotation": 3.1416, "privacy": "private", "fixture_id": "bed-08", "slot": 8, "actions": ["sleep", "rest_alone"]}
+      ],
+      "corridors": [
+        {"id": "bedroom-corridor", "bounds": [-5.08, 5.08, -0.56, 0.48], "entry_anchor_id": "bedroom-entry", "minimum_clearance": 0.72}
+      ],
+      "private_spaces": [
+        {"id": "private-bedroom-01", "slot": 1, "bounds": [-5.0, -2.5, -3.04, -0.62], "door": {"wall": "south", "center_x": -3.75, "width": 0.78, "approach": [-3.75, -0.17, -0.36]}, "fixture_ids": ["bed-01", "bedroom-lamp-01", "personal-shelf-01"], "bed_anchor_id": "sleep-01", "door_anchor_id": "private-door-01", "accent": "#c98272", "trace": "sketchbook"},
+        {"id": "private-bedroom-02", "slot": 2, "bounds": [-2.5, 0.0, -3.04, -0.62], "door": {"wall": "south", "center_x": -1.25, "width": 0.78, "approach": [-1.25, -0.17, -0.36]}, "fixture_ids": ["bed-02", "bedroom-lamp-02", "personal-shelf-02"], "bed_anchor_id": "sleep-02", "door_anchor_id": "private-door-02", "accent": "#6f9286", "trace": "books"},
+        {"id": "private-bedroom-03", "slot": 3, "bounds": [0.0, 2.5, -3.04, -0.62], "door": {"wall": "south", "center_x": 1.25, "width": 0.78, "approach": [1.25, -0.17, -0.36]}, "fixture_ids": ["bed-03", "bedroom-lamp-03", "personal-shelf-03"], "bed_anchor_id": "sleep-03", "door_anchor_id": "private-door-03", "accent": "#827fa0", "trace": "music"},
+        {"id": "private-bedroom-04", "slot": 4, "bounds": [2.5, 5.0, -3.04, -0.62], "door": {"wall": "south", "center_x": 3.75, "width": 0.78, "approach": [3.75, -0.17, -0.36]}, "fixture_ids": ["bed-04", "bedroom-lamp-04", "personal-shelf-04"], "bed_anchor_id": "sleep-04", "door_anchor_id": "private-door-04", "accent": "#c59b61", "trace": "camera"},
+        {"id": "private-bedroom-05", "slot": 5, "bounds": [-5.0, -2.5, 0.54, 2.9], "door": {"wall": "north", "center_x": -3.75, "width": 0.78, "approach": [-3.75, -0.17, 0.28]}, "fixture_ids": ["bed-05", "bedroom-lamp-05", "personal-shelf-05"], "bed_anchor_id": "sleep-05", "door_anchor_id": "private-door-05", "accent": "#aa7482", "trace": "plants"},
+        {"id": "private-bedroom-06", "slot": 6, "bounds": [-2.5, 0.0, 0.54, 2.9], "door": {"wall": "north", "center_x": -1.25, "width": 0.78, "approach": [-1.25, -0.17, 0.28]}, "fixture_ids": ["bed-06", "bedroom-lamp-06", "personal-shelf-06"], "bed_anchor_id": "sleep-06", "door_anchor_id": "private-door-06", "accent": "#6d929b", "trace": "crafts"},
+        {"id": "private-bedroom-07", "slot": 7, "bounds": [0.0, 2.5, 0.54, 2.9], "door": {"wall": "north", "center_x": 1.25, "width": 0.78, "approach": [1.25, -0.17, 0.28]}, "fixture_ids": ["bed-07", "bedroom-lamp-07", "personal-shelf-07"], "bed_anchor_id": "sleep-07", "door_anchor_id": "private-door-07", "accent": "#958064", "trace": "games"},
+        {"id": "private-bedroom-08", "slot": 8, "bounds": [2.5, 5.0, 0.54, 2.9], "door": {"wall": "north", "center_x": 3.75, "width": 0.78, "approach": [3.75, -0.17, 0.28]}, "fixture_ids": ["bed-08", "bedroom-lamp-08", "personal-shelf-08"], "bed_anchor_id": "sleep-08", "door_anchor_id": "private-door-08", "accent": "#78916e", "trace": "travel"}
+      ]
+    }
+  ]
+}

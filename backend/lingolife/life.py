@@ -45,6 +45,7 @@ ACTION_STATUSES = frozenset({
     "completed", "abandoned", "interrupted",
 })
 TERMINAL_ACTION_STATUSES = frozenset({"completed", "abandoned", "interrupted"})
+MAX_ACTION_TRANSITIONS = 64
 
 Period = Literal["morning", "afternoon", "evening", "night"]
 ActionStatus = Literal[
@@ -523,6 +524,12 @@ class NpcLifeContext:
     interests: tuple[str, ...] = ()
     habits: tuple[str, ...] = ()
     goal_tags: tuple[str, ...] = ()
+    likes: tuple[str, ...] = ()
+    dislikes: tuple[str, ...] = ()
+    household_role: str = "free_spirit"
+    chore_preferences: tuple[str, ...] = ()
+    private_space_preference: str = "balanced"
+    behavior: Mapping[str, str] = field(default_factory=dict)
     current_location_id: str | None = None
     current_location_kind: str = "home"
     scheduled_kind: str = "free"
@@ -630,6 +637,8 @@ def rank_life_actions(context: NpcLifeContext, catalog: LifeCatalog | None = Non
     traits = {value.casefold() for value in context.traits}
     interests = {value.casefold() for value in context.interests}
     habits = {value.casefold() for value in context.habits}
+    likes = {value.casefold() for value in context.likes}
+    dislikes = {value.casefold() for value in context.dislikes}
     goal_tags = {value.casefold() for value in context.goal_tags}
     candidates: list[ActionCandidate] = []
     for template in source.actions.values():
@@ -657,9 +666,70 @@ def rank_life_actions(context: NpcLifeContext, catalog: LifeCatalog | None = Non
             reasons.append("personality_fit")
         if interest_matches:
             reasons.append("interest_fit")
-        if template.type in habits or set(template.collision_hooks) & habits:
+        habit_text = " ".join(habits).replace("_", " ")
+        habit_keywords = {
+            "prepare_food": ("cook", "breakfast", "tea", "coffee", "烹饪", "早餐"),
+            "clean_shared_space": ("clean", "tidy", "straighten", "整理", "打扫"),
+            "read": ("read", "book", "notes", "阅读", "记笔记"),
+            "practice_hobby": ("practice", "hobby", "hum", "collect", "练习", "收藏"),
+            "rest_alone": ("alone", "quiet", "独处", "安静"),
+            "seek_company": ("check in", "housemate", "一起", "室友"),
+        }
+        habit_matches = (template.type in habits or set(template.collision_hooks) & habits
+                         or any(word in habit_text for word in habit_keywords.get(template.type, ())))
+        if habit_matches:
             score += 16
             reasons.append("habit")
+        affinity_text = " ".join((template.type, *template.trait_affinities,
+                                  *template.interest_affinities,
+                                  *template.preferred_location_kinds)).replace("_", " ")
+        if any(value in affinity_text or any(token in affinity_text for token in value.split())
+               for value in likes):
+            score += 10
+            reasons.append("like")
+        if any(value in affinity_text or any(token in affinity_text for token in value.split())
+               for value in dislikes):
+            score -= 14
+            reasons.append("dislike")
+
+        chore_actions = {
+            "cooking": {"prepare_food", "eat"},
+            "dishes": {"clean_shared_space"},
+            "cleaning": {"clean_shared_space"},
+            "shopping": {"prepare_food", "borrow_household_item"},
+            "repairs": {"borrow_household_item"},
+            "laundry": {"clean_shared_space"},
+        }
+        if any(template.type in chore_actions.get(preference, set())
+               for preference in context.chore_preferences):
+            score += 18
+            reasons.append("chore_preference")
+        role_actions = {
+            "organizer": {"clean_shared_space", "prepare_food"},
+            "caretaker": {"prepare_food", "seek_company", "talk_to_resident"},
+            "mediator": {"seek_company", "talk_to_resident"},
+            "cook": {"prepare_food", "eat"},
+            "fixer": {"borrow_household_item", "clean_shared_space"},
+            "free_spirit": {"practice_hobby", "rest_alone"},
+        }
+        if template.type in role_actions.get(context.household_role, set()):
+            score += 12
+            reasons.append("household_role")
+        if context.private_space_preference == "high":
+            if template.type in {"rest_alone", "read", "practice_hobby"}:
+                score += 15
+                reasons.append("private_space")
+            elif template.type in {"seek_company", "talk_to_resident"}:
+                score -= 9
+        elif context.private_space_preference == "low" and template.type in {
+            "seek_company", "talk_to_resident", "use_television",
+        }:
+            score += 15
+            reasons.append("shared_space")
+        initiative = context.behavior.get("initiative")
+        if template.type in {"seek_company", "talk_to_resident", "practice_hobby"}:
+            score += 9 if initiative == "high" else -7 if initiative == "low" else 0
+        flexibility = context.behavior.get("flexibility")
         if template.type == "practice_hobby" and goal_tags & interests:
             score += 8
             reasons.append("goal_relevance")
@@ -688,7 +758,7 @@ def rank_life_actions(context: NpcLifeContext, catalog: LifeCatalog | None = Non
                 score += 12 if template.type == "practice_hobby" else 18
                 reasons.append("schedule_alignment")
             elif not urgent:
-                score -= 24
+                score -= 14 if flexibility == "adaptive" else 32 if flexibility == "rigid" else 24
                 reasons.append("schedule_conflict")
         repetitions = context.recent_action_types.count(template.type)
         if repetitions:
@@ -698,7 +768,7 @@ def rank_life_actions(context: NpcLifeContext, catalog: LifeCatalog | None = Non
             reasons.append("recent_repetition")
         target_resource_id = _resource_target(template, context)
         if template.required_resource_kinds and not target_resource_id:
-            score -= 18  # The desire may survive and seek a city alternative.
+            score -= 10 if flexibility == "adaptive" else 24 if flexibility == "rigid" else 18
             reasons.append("resource_missing")
         target_npc_id = None
         if template.requires_resident_target:
@@ -768,12 +838,19 @@ class LifeAction:
     blocked_reason: str | None = None
     completed_at: datetime | None = None
     rules_version: str = RULES_VERSION
+    transition_reason: str | None = None
+    transitioned_at: datetime | None = None
+    transition_history: tuple[Mapping[str, Any], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
-        for key in ("planned_at", "arrives_at", "started_at", "ends_at", "retry_at", "completed_at"):
+        for key in (
+            "planned_at", "arrives_at", "started_at", "ends_at", "retry_at",
+            "completed_at", "transitioned_at",
+        ):
             result[key] = result[key].isoformat() if result[key] else None
         result["collision_hooks"] = list(self.collision_hooks)
+        result["transition_history"] = [dict(item) for item in self.transition_history]
         return result
 
     @classmethod
@@ -795,6 +872,9 @@ class LifeAction:
             _parse_time(value.get("retry_at")), int(value.get("attempt", 0)),
             value.get("blocked_reason"), _parse_time(value.get("completed_at")),
             str(value.get("rules_version", RULES_VERSION)),
+            value.get("transition_reason"), _parse_time(value.get("transitioned_at")),
+            tuple(dict(item) for item in value.get("transition_history", [])
+                  if isinstance(item, Mapping)),
         )
 
 
@@ -828,6 +908,10 @@ def create_life_action(decision: ActionDecision, *, player_id: str, npc_id: str,
     travel = max(0, min(3600, int(travel_seconds)))
     arrives = moment + timedelta(seconds=travel) if travel and location != current_location_id else None
     action_id = stable_id("action", decision.commitment_id, rules_version=decision.rules_version)
+    initial_transition = {
+        "from": None, "to": "planned", "reason": "commitment_selected",
+        "at": moment.isoformat(),
+    }
     return LifeAction(
         action_id, player_id, npc_id, template.type, "planned", decision.desire_id,
         decision.commitment_id, location, decision.selected.target_resource_id,
@@ -835,6 +919,8 @@ def create_life_action(decision: ActionDecision, *, player_id: str, npc_id: str,
         template.animation_cue, template.collision_hooks, dict(template.need_deltas),
         dict(template.emotion_deltas), dict(template.resource_deltas), arrives_at=arrives,
         rules_version=decision.rules_version,
+        transition_reason="commitment_selected", transitioned_at=moment,
+        transition_history=(initial_transition,),
     )
 
 
@@ -843,11 +929,29 @@ def _effects(action: LifeAction) -> dict[str, Mapping[str, int]]:
             "resource": dict(action.resource_deltas)}
 
 
-def _perform(action: LifeAction, start: datetime) -> LifeAction:
+def record_action_transition(action: LifeAction, *, status: ActionStatus,
+                             reason: str, at: datetime, **changes: Any) -> LifeAction:
+    """Return an action with one replayable, reasoned status transition."""
+    moment = _utc(at)
+    if action.status == status:
+        return replace(action, **changes)
+    history = (*action.transition_history, {
+        "from": action.status, "to": status, "reason": str(reason),
+        "at": moment.isoformat(),
+    })[-MAX_ACTION_TRANSITIONS:]
+    return replace(
+        action, status=status, transition_reason=str(reason), transitioned_at=moment,
+        transition_history=history, **changes,
+    )
+
+
+def _perform(action: LifeAction, start: datetime, reason: str) -> LifeAction:
     begins = _utc(start)
-    return replace(action, status="performing", started_at=begins,
-                   ends_at=begins + timedelta(seconds=action.duration_seconds),
-                   retry_at=None, blocked_reason=None)
+    return record_action_transition(
+        action, status="performing", reason=reason, at=begins,
+        started_at=begins, ends_at=begins + timedelta(seconds=action.duration_seconds),
+        retry_at=None, blocked_reason=None,
+    )
 
 
 def advance_life_action(action: LifeAction, *, now: datetime,
@@ -864,50 +968,70 @@ def advance_life_action(action: LifeAction, *, now: datetime,
     if action.status in TERMINAL_ACTION_STATUSES:
         return ActionTransition(previous, action, False, action.status == "completed", None, empty)
     if interruption_reason and action.interruptible:
-        updated = replace(action, status="interrupted", blocked_reason=interruption_reason)
+        updated = record_action_transition(
+            action, status="interrupted", reason=interruption_reason, at=current,
+            blocked_reason=interruption_reason, completed_at=current,
+        )
         return ActionTransition(previous, updated, True, False, interruption_reason, empty)
 
     updated = action
     reason: str | None = None
     if updated.status == "planned":
         if updated.arrives_at and current < updated.arrives_at:
-            updated = replace(updated, status="traveling")
+            updated = record_action_transition(
+                updated, status="traveling", reason="journey_started", at=current,
+            )
             reason = "journey_started"
         elif updated.target_resource_id and resource_outcome != "acquired":
             retry_delay = 20 + stable_number(updated.id, updated.attempt, "retry",
                                              rules_version=updated.rules_version) % 41
-            updated = replace(updated, status="blocked", blocked_reason=resource_outcome,
-                              retry_at=current + timedelta(seconds=retry_delay))
+            updated = record_action_transition(
+                updated, status="blocked", reason=resource_outcome, at=current,
+                blocked_reason=resource_outcome,
+                retry_at=current + timedelta(seconds=retry_delay),
+            )
             reason = resource_outcome
         else:
-            updated = _perform(updated, updated.arrives_at or current)
+            updated = _perform(updated, updated.arrives_at or current, "performance_started")
             reason = "performance_started"
     if updated.status == "traveling" and updated.arrives_at and current >= updated.arrives_at:
         if updated.target_resource_id and resource_outcome != "acquired":
             retry_delay = 20 + stable_number(updated.id, updated.attempt, "retry",
                                              rules_version=updated.rules_version) % 41
-            updated = replace(updated, status="blocked", blocked_reason=resource_outcome,
-                              retry_at=current + timedelta(seconds=retry_delay))
+            updated = record_action_transition(
+                updated, status="blocked", reason=resource_outcome, at=current,
+                blocked_reason=resource_outcome,
+                retry_at=current + timedelta(seconds=retry_delay),
+            )
             reason = resource_outcome
         else:
-            updated = _perform(updated, updated.arrives_at)
+            updated = _perform(updated, updated.arrives_at, "arrived")
             reason = "arrived"
     elif updated.status == "blocked" and updated.retry_at and current >= updated.retry_at:
-        updated = replace(updated, status="retrying", attempt=updated.attempt + 1)
+        updated = record_action_transition(
+            updated, status="retrying", reason="retry_due", at=current,
+            attempt=updated.attempt + 1,
+        )
         reason = "retry_due"
     elif updated.status == "retrying":
         if resource_outcome == "acquired":
-            updated = _perform(updated, current)
+            updated = _perform(updated, current, "resource_acquired")
             reason = "resource_acquired"
         else:
             retry_delay = 20 + stable_number(updated.id, updated.attempt, "retry",
                                              rules_version=updated.rules_version) % 41
-            updated = replace(updated, status="blocked", blocked_reason=resource_outcome,
-                              retry_at=current + timedelta(seconds=retry_delay))
+            updated = record_action_transition(
+                updated, status="blocked", reason=resource_outcome, at=current,
+                blocked_reason=resource_outcome,
+                retry_at=current + timedelta(seconds=retry_delay),
+            )
             reason = resource_outcome
 
     if updated.status == "performing" and updated.ends_at and current >= updated.ends_at:
-        completed = replace(updated, status="completed", completed_at=updated.ends_at)
+        completed = record_action_transition(
+            updated, status="completed", reason="completed", at=updated.ends_at,
+            completed_at=updated.ends_at,
+        )
         return ActionTransition(previous, completed, completed != action, True, "completed", _effects(completed))
     return ActionTransition(previous, updated, updated != action, False, reason, empty)
 

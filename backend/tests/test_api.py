@@ -4,17 +4,34 @@ import threading
 from fastapi.testclient import TestClient
 
 from lingolife.animation import ANIMATION_CUES
-from lingolife.app import create_app
+from lingolife.app import DEFAULT_NPC_PROFILE, create_app
 from lingolife.config import Settings
-from lingolife.models import AIResult, EnglishFeedback
+from lingolife.models import AIResult, EnglishFeedback, LearningEvidence
 
 
 class Stub:
     calls = 0
     def reply(self, message, stats, history):
         self.calls += 1
-        return AIResult(npc_reply="That's sweet of you...", relationship_change=12, mood_change=3, english_xp_change=9,
-            english_feedback=EnglishFeedback(is_understandable=True, corrected_text=message, tip="Natural and caring question.", tags=[]))
+        return AIResult(
+            npc_reply="That's sweet of you...",
+            # Deliberately hostile legacy values: authoritative settlement must
+            # use the evidence below and ignore all three provider numbers.
+            relationship_change=-999,
+            mood_change=-999,
+            english_xp_change=-999,
+            english_feedback=EnglishFeedback(
+                is_understandable=True,
+                corrected_text=message,
+                tip="Natural and caring question.",
+                tags=[],
+            ),
+            semantic_signals=["empathy", "practical_help", "accept"],
+            learning_evidence=[
+                LearningEvidence(target_id="intent.empathy", outcome="success"),
+                LearningEvidence(target_id="intent.follow_up", outcome="success"),
+            ],
+        )
 
 
 def client(tmp_path, provider=None, web_root=None):
@@ -26,7 +43,18 @@ def client(tmp_path, provider=None, web_root=None):
 def auth(c, username="tester", quota=30):
     code = c.app.state.db.create_invites(1, quota)[0]
     data = c.post("/api/v1/auth/register", json={"username": username, "invite_code": code, "password": "test-password"}).json()
+    _grandfather_legacy_emma(c, data["session_token"])
     return {"Authorization": "Bearer " + data["session_token"]}
+
+
+def _grandfather_legacy_emma(c, token: str) -> None:
+    """Give non-onboarding endpoint tests the pre-v3 single-Emma world."""
+    user = c.app.state.db.authenticate(token)
+    assert user is not None
+    c.app.state.db.get_or_create_npc_profile(
+        user["player_id"], "emma", DEFAULT_NPC_PROFILE,
+    )
+    c.app.state.db.refresh_onboarding(user["player_id"], force_complete=True)
 
 
 def test_serves_web_root_and_static_assets_without_shadowing_api(tmp_path):
@@ -88,11 +116,12 @@ def test_health_and_new_room(tmp_path):
     assert room["active_event"]["stage_turns"] == 0
 
 
-def test_chat_clamps_and_is_idempotent(tmp_path):
+def test_chat_ignores_provider_numbers_and_is_idempotent(tmp_path):
     stub = Stub(); c = client(tmp_path, stub)
     headers = {**auth(c), "Idempotency-Key": "12345678-abcd"}
-    first = c.post("/api/v1/chat", headers=headers, json={"message": "Why? What happened today?"})
-    second = c.post("/api/v1/chat", headers=headers, json={"message": "ignored duplicate"})
+    request = {"message": "Why? What happened today?"}
+    first = c.post("/api/v1/chat", headers=headers, json=request)
+    second = c.post("/api/v1/chat", headers=headers, json=request)
     assert first.status_code == 200 and first.json() == second.json()
     assert first.json()["relationship_change"] == 5
     assert first.json()["english_xp_change"] == 5
@@ -104,7 +133,12 @@ def test_chat_clamps_and_is_idempotent(tmp_path):
     reopened = c.get("/api/v1/room", headers=headers).json()
     assert len(reopened["messages"]) == 3
     assert reopened["messages"][-1]["text"] == first.json()["npc_reply"]
-    assert reopened["active_event"]["stage_turns"] == 1
+    assert reopened["active_event"]["id"] == first.json()["active_event"]["id"]
+    assert reopened["active_event"]["stage_index"] == first.json()["active_event"]["stage_index"]
+    assert reopened["active_event"]["stage_turns"] == first.json()["active_event"]["stage_turns"]
+    conflict = c.post("/api/v1/chat", headers=headers, json={"message": "different command"})
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "IDEMPOTENCY_KEY_REUSED"
 
 
 def test_legacy_cached_chat_is_upgraded_to_the_animation_cue_contract(tmp_path):
@@ -133,6 +167,11 @@ def test_legacy_cached_chat_is_upgraded_to_the_animation_cue_contract(tmp_path):
             "UPDATE chat_requests SET response_json=? WHERE player_id=? AND idempotency_key=?",
             (json.dumps(legacy), player_id, "legacy-animation-01"),
         )
+        # Model a database written before the durable journal migration.
+        c.app.state.db._connection.execute(
+            "DELETE FROM chat_turn_journal WHERE player_id=? AND idempotency_key=?",
+            (player_id, "legacy-animation-01"),
+        )
     replay = c.post("/api/v1/chat", headers=headers, json={"message": "ignored"}).json()
     assert replay["animation"] == "happy"
     assert replay["animation_cue"] == "happy"
@@ -143,10 +182,17 @@ def test_legacy_cached_chat_is_upgraded_to_the_animation_cue_contract(tmp_path):
     assert all(value not in encoded for value in (
         "desire-from-old-cache", "commitment-from-old-cache", '"love"', '"privacy"', '"security"',
     ))
-    streamed = c.post("/api/v1/chat/stream", headers=headers, json={"message": "ignored again"})
+    streamed = c.post("/api/v1/chat/stream", headers=headers, json={"message": "ignored"})
     stream_events = [json.loads(line) for line in streamed.text.splitlines()]
     assert stream_events[-1]["type"] == "final"
     assert stream_events[-1]["data"]["agent"] == replay["agent"]
+    # Pre-v6 rows did not retain their original request body. The first replay
+    # adopts and pins it; later reuse with another body is rejected.
+    legacy_conflict = c.post(
+        "/api/v1/chat", headers=headers, json={"message": "another legacy body"},
+    )
+    assert legacy_conflict.status_code == 409
+    assert legacy_conflict.json()["error"]["code"] == "IDEMPOTENCY_KEY_REUSED"
 
 
 def test_positive_relationship_growth_has_a_per_character_daily_cap(tmp_path):
@@ -174,7 +220,7 @@ def test_fallback_when_primary_raises(tmp_path):
     c = client(tmp_path, ResilientProvider(Broken()))
     response = c.post("/api/v1/chat", headers={**auth(c), "Idempotency-Key": "abcdefgh"}, json={"message": "Are you okay?"})
     assert response.status_code == 200
-    assert response.json()["english_xp_change"] == 1
+    assert response.json()["english_xp_change"] == 5
     assert response.json()["npc_reply_zh"]
     assert c.get("/api/v1/room", headers=response.request.headers).json()["messages"][-1]["translation"]
 
@@ -212,7 +258,7 @@ def test_chat_stream_sends_delta_then_validated_final_result(tmp_path):
     assert events[0]["type"] == "delta" and events[0]["data"]
     assert events[-1]["type"] == "final"
     assert events[-1]["data"]["npc_reply"].startswith(events[0]["data"])
-    assert events[-1]["data"]["stats"]["english_xp"] == 1
+    assert events[-1]["data"]["stats"]["english_xp"] == 5
     assert all(isinstance(value, str)
                for value in events[-1]["data"]["agent"]["runtime_state"]["needs"].values())
 
@@ -241,6 +287,7 @@ def test_password_login_restores_the_same_account_on_another_device(tmp_path):
         "username": "AcrossDevices", "invite_code": code, "password": "🌙 spaces and symbols !?",
     }).json()
     old_token = registered["session_token"]
+    _grandfather_legacy_emma(c, old_token)
     player_id = c.app.state.db.authenticate(old_token)["player_id"]
     c.app.state.db.state(player_id, "emma")
     with c.app.state.db._connection:
@@ -349,7 +396,7 @@ def test_daily_quota_rate_limit_and_idempotency(tmp_path):
         result = c.post("/api/v1/chat", headers={**headers, "Idempotency-Key": f"request-{i:03d}"}, json={"message": "How are you?"})
         assert result.status_code == 200
     # Retry is cached and consumes no extra unit.
-    retry = c.post("/api/v1/chat", headers={**headers, "Idempotency-Key": "request-001"}, json={"message": "ignored"})
+    retry = c.post("/api/v1/chat", headers={**headers, "Idempotency-Key": "request-001"}, json={"message": "How are you?"})
     assert retry.status_code == 200 and retry.json()["quota"]["used_today"] == 2
     denied = c.post("/api/v1/chat", headers={**headers, "Idempotency-Key": "request-999"}, json={"message": "One more"})
     assert denied.status_code == 429 and denied.json()["error"]["code"] == "DAILY_QUOTA_EXCEEDED"
@@ -378,6 +425,7 @@ def test_admin_invites_user_management_summary_and_no_message_leak(tmp_path):
     encrypted = c.app.state.db._connection.execute("SELECT code_value FROM invitations WHERE used_at IS NULL").fetchone()[0]
     assert made.json()["invites"][0] not in encrypted
     token = c.post("/api/v1/auth/register", json={"username": "managed", "invite_code": made.json()["invites"][0], "password": "managed-pass"}).json()["session_token"]
+    _grandfather_legacy_emma(c, token)
     assert c.get("/api/v1/admin/invites").json() == {"invites": []}
     c.post("/api/v1/chat", headers={"Authorization": "Bearer " + token, "Idempotency-Key": "managed-001"}, json={"message": "private chat text"})
     listing = c.get("/api/v1/admin/users").json()

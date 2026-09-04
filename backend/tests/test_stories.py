@@ -231,6 +231,33 @@ def test_management_action_and_each_participants_reaction_change_rule_owned_cons
     assert {item["npc_id"] for item in comfort.memory_seeds} == {"emma", "alex"}
 
 
+def test_misunderstood_is_distinct_from_refusal_and_backfire():
+    collision = make_collision(
+        kind="person_responsibility", triggers=("care_imbalance",),
+        source="managed-misunderstanding", recurrence=7, severe=True,
+    )
+    resolution = resolve_collision_autonomously(collision, settled_at=NOW)
+    story = story_from_collision(collision, resolution, now=NOW, intervention_seconds=120)
+
+    misunderstood = settle_story_with_management(
+        story, action="give_space",
+        participant_acceptance={"emma": "misunderstood", "alex": "misunderstood"},
+        now=NOW + timedelta(seconds=10), base_resolution=resolution,
+    )
+    refused = settle_story_with_management(
+        story, action="give_space",
+        participant_acceptance={"emma": "refuse", "alex": "refuse"},
+        now=NOW + timedelta(seconds=10), base_resolution=resolution,
+    )
+
+    aftermath = misunderstood.observable_aftermath[0]
+    assert aftermath["outcome"] == "misunderstood"
+    assert "misunderstanding" in misunderstood.outcome_tags
+    assert "conflict" not in misunderstood.outcome_tags
+    assert misunderstood.relationship_changes != refused.relationship_changes
+    assert all("misunderstood" in item["content_seed"] for item in misunderstood.memory_seeds)
+
+
 def test_relationship_labels_allow_friendship_conflict_and_romance_to_coexist():
     labels = derive_relationship_labels({
         "familiarity": 82, "trust": 75, "affinity": 76, "comfort": 62,

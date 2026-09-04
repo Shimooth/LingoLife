@@ -47,17 +47,18 @@ def test_fallback_extracts_conservative_signals_and_learning_evidence():
         "intent.follow_up", "intent.empathy", "intent.advice", "grammar.questions",
     }
     assert all(0 <= item.confidence <= 1 for item in result.learning_evidence)
+    assert (result.relationship_change, result.mood_change, result.english_xp_change) == (0, 0, 0)
 
 
 def test_fallback_awards_no_evidence_for_non_english_input():
     result = FallbackProvider().reply("你还好吗？", Stats(relationship=35, mood=30, english_xp=0), [])
     assert result.semantic_signals == [] and result.learning_evidence == []
+    assert (result.relationship_change, result.mood_change, result.english_xp_change) == (0, 0, 0)
 
 
 def test_deepseek_prompt_contains_optional_agent_context(monkeypatch):
     captured = []
     analysis = TurnAnalysis(
-        relationship_change=2, mood_change=1, english_xp_change=2,
         english_feedback=EnglishFeedback(is_understandable=True, corrected_text="Are you okay?", tip="Natural."),
         semantic_signals=["empathy"], learning_evidence=[{
             "target_id": "intent.empathy", "outcome": "success", "confidence": .9,
@@ -97,9 +98,29 @@ def test_deepseek_prompt_contains_optional_agent_context(monkeypatch):
     assert dialogue["messages"][1] == {"role": "assistant", "content": "I had a difficult day."}
     prompt = json.loads(analyzer["messages"][1]["content"])
     assert prompt["learning_targets"] == ["intent.empathy"]
+    assert not ({"relationship_change", "mood_change", "english_xp_change"}
+                & prompt["schema"]["properties"].keys())
     assert set(prompt["schema"]["properties"]["animation_cue"]["enum"]) == {
         "idle", "talk", "listen", "happy", "sad", "tired",
         "look_around", "walk", "run", "jump", "crouch", "push",
     }
     assert result.npc_reply == "I answer in my own voice."
     assert result.semantic_signals == ["empathy"]
+    assert (result.relationship_change, result.mood_change, result.english_xp_change) == (0, 0, 0)
+
+
+def test_turn_analysis_rejects_model_authored_gameplay_numbers():
+    schema = TurnAnalysis.model_json_schema()
+    assert not ({"relationship_change", "mood_change", "english_xp_change"}
+                & schema["properties"].keys())
+    with pytest.raises(ValidationError):
+        TurnAnalysis.model_validate({
+            "relationship_change": 5,
+            "mood_change": 5,
+            "english_xp_change": 5,
+            "english_feedback": {
+                "is_understandable": True,
+                "corrected_text": "Hello",
+                "tip": "Clear.",
+            },
+        })

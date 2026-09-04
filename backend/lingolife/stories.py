@@ -20,6 +20,9 @@ MOMENT_PRESENTATION_TTL_SECONDS = 180
 INCIDENT_INTERVENTION_MIN_SECONDS = 10 * 60
 INCIDENT_INTERVENTION_MAX_SECONDS = 15 * 60
 StoryLevel = Literal["ambient", "moment", "incident", "thread"]
+ManagementReaction = Literal[
+    "accept", "accept_later", "refuse", "misunderstood", "backfire",
+]
 StoryStatus = Literal[
     "open", "intervention_window", "resolved_autonomously",
     "resolved_with_management", "archived",
@@ -458,8 +461,16 @@ def _contextual_management_delta(action: str, reaction: str, topic: str) -> dict
     accepted = reaction in {"accept", "accept_later"}
     source = _MANAGEMENT_ACCEPT_EFFECTS if accepted else _MANAGEMENT_REFUSAL_EFFECTS
     result = dict(source.get(action, {}))
-    factor = .55 if reaction == "accept_later" else 1.5 if reaction == "backfire" else 1.0
+    # A misunderstanding is not a refusal: the resident engaged with the
+    # manager, but interpreted the intent incorrectly. Keep its immediate
+    # relationship cost below a refusal while leaving a distinct story result
+    # that later conversation can repair.
+    factor = (.55 if reaction == "accept_later" else .65 if reaction == "misunderstood"
+              else 1.5 if reaction == "backfire" else 1.0)
     result = {key: round(value * factor) for key, value in result.items()}
+    if reaction == "misunderstood":
+        result["trust"] = result.get("trust", 0) - 1
+        result["tension"] = result.get("tension", 0) + 1
 
     boundary_topics = {"privacy", "borrowed_property", "noise"}
     practical_topics = {"dishwashing", "unequal_care", "shared_kitchen", "bathroom_access",
@@ -485,9 +496,7 @@ def _contextual_management_delta(action: str, reaction: str, topic: str) -> dict
 
 
 def settle_story_with_management(story: LifeStory, *, action: str,
-                                 participant_acceptance: Mapping[str, Literal[
-                                     "accept", "accept_later", "refuse", "backfire"
-                                 ]], now: datetime,
+                                 participant_acceptance: Mapping[str, ManagementReaction], now: datetime,
                                  base_resolution: CollisionResolution) -> StorySettlement:
     """Apply already rule-evaluated participant reactions without inventing numbers."""
     if story.status in TERMINAL_STORY_STATUSES:
@@ -502,15 +511,24 @@ def settle_story_with_management(story: LifeStory, *, action: str,
     if unknown or not participant_acceptance:
         raise ValueError("participant acceptance must be scoped to story participants")
     invalid_reactions = set(participant_acceptance.values()) - {
-        "accept", "accept_later", "refuse", "backfire",
+        "accept", "accept_later", "refuse", "misunderstood", "backfire",
     }
     if invalid_reactions:
         raise ValueError("unknown participant acceptance reaction")
     accepted = sum(value in {"accept", "accept_later"} for value in participant_acceptance.values())
-    negative = sum(value in {"refuse", "backfire"} for value in participant_acceptance.values())
+    misunderstood = sum(value == "misunderstood" for value in participant_acceptance.values())
+    refused = sum(value == "refuse" for value in participant_acceptance.values())
+    negative = misunderstood + refused + sum(
+        value == "backfire" for value in participant_acceptance.values()
+    )
     backfires = sum(value == "backfire" for value in participant_acceptance.values())
-    outcome = ("backfired" if backfires else "mixed" if accepted and negative
-               else "accepted" if accepted else "refused")
+    outcome = (
+        "backfired" if backfires else
+        "mixed" if misunderstood and (accepted or refused) else
+        "misunderstood" if misunderstood else
+        "mixed" if accepted and refused else
+        "accepted" if accepted else "refused"
+    )
     resolution_id = stable_id("resolution", story.id, action, sorted(participant_acceptance.items()),
                               rules_version=story.rules_version)
     updated = replace(story, status="resolved_with_management", resolution_id=resolution_id,
@@ -552,12 +570,24 @@ def settle_story_with_management(story: LifeStory, *, action: str,
         elif action in {"mediate", "offer_help", "invite_talk", "comfort"} and reaction == "accept":
             instructions[instruction_ids[index]] = "continue"
 
+    reaction_memory = {
+        "accept": "I accepted the help.",
+        "accept_later": "I asked to revisit the help later.",
+        "refuse": "I chose not to accept the help.",
+        "misunderstood": "I misunderstood what the manager was trying to do.",
+        "backfire": "I felt the intervention made the moment harder.",
+    }
     memories = tuple({
         "npc_id": npc_id, "kind": "relationship", "topic": topic,
-        "content_seed": f"Management tried {action.replace('_', ' ')}; I chose to {reaction.replace('_', ' ')}.",
+        "content_seed": (
+            f"Management tried {action.replace('_', ' ')}; "
+            f"{reaction_memory[reaction]}"
+        ),
     } for npc_id, reaction in participant_acceptance.items())
     tags = tuple(dict.fromkeys((
-        "conflict" if backfires or not accepted else "cooperation" if not negative else "mixed",
+        "conflict" if backfires or (refused and not accepted) else
+        "misunderstanding" if misunderstood and not accepted else
+        "cooperation" if not negative else "mixed",
         "managed", f"management_{action}",
     )))
     return StorySettlement(updated, True, "managed", tuple(managed_changes), instructions,

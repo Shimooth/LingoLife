@@ -9,16 +9,115 @@ client.
 from __future__ import annotations
 
 import copy
+import math
 import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping, Sequence
 
 from .animation import animation_cue, performance_to_dict, journey_performance, ambient_performance
+from .agent import project_public_life_context
 from .city import HOME_SLOTS, LOCATION_BY_ID, city_payload, home_slot
 from .db import Database, LifeWorldRevisionConflict
+from .interaction import build_interaction_scene, public_interaction_scene
+from .layout_runtime import compile_city_runtime, compile_shared_home_runtime
 from .life import LifeAction, stable_id
 from .life_observable import life_action_phase, project_observable_action
 from .life_world import LifeWorldEngine
+
+
+def story_attention_budget(resident_count: int) -> dict[str, Any]:
+    """Return bounded story budgets for the current cast and viewport class.
+
+    More residents create more legitimate social signals, but the UI must not
+    grow linearly with every possible pair. Compact screens receive a smaller
+    budget while urgent incidents remain eligible for pinning by the selector.
+    """
+    actual_population = max(0, int(resident_count))
+    # New worlds are always 2–8 residents; keep the 2-person floor only for
+    # sizing the grandfathered one-resident saves that remain readable.
+    population = max(2, min(8, actual_population))
+    desktop = {
+        "incidents": min(8, 2 + math.ceil(population / 2)),
+        "moments": min(12, 3 + population),
+        "threads": min(10, 2 + math.ceil(population / 2)),
+        "aftermath": min(8, 2 + math.ceil(population / 3)),
+    }
+    compact = {
+        "incidents": min(desktop["incidents"], 1 + math.ceil(population / 4)),
+        "moments": min(desktop["moments"], 2 + math.ceil(population / 4)),
+        "threads": min(desktop["threads"], 1 + math.ceil(population / 4)),
+        "aftermath": min(desktop["aftermath"], 1 + math.ceil(population / 4)),
+    }
+    return {"resident_count": actual_population, "desktop": desktop, "compact": compact}
+
+
+def _attention_timestamp(value: Mapping[str, Any]) -> float:
+    raw = value.get("updated_at") or value.get("created_at") or ""
+    try:
+        return _utc(datetime.fromisoformat(str(raw).replace("Z", "+00:00"))).timestamp()
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _attention_topic(value: Mapping[str, Any]) -> str:
+    presentation = value.get("presentation")
+    if isinstance(presentation, Mapping):
+        subject = str(presentation.get("subject") or "").split(" · ", 1)[0].strip()
+        if subject:
+            return subject.casefold()
+    return str(value.get("title") or value.get("id") or "story").casefold()
+
+
+def _attention_strength(value: Mapping[str, Any]) -> int:
+    level = str(value.get("level") or "moment")
+    score = {"moment": 18, "incident": 52, "thread": 40}.get(level, 0)
+    if value.get("status") == "awaiting_management":
+        score += 42
+    trouble = value.get("trouble_signal")
+    if isinstance(trouble, Mapping):
+        score += {"low": 4, "medium": 12, "high": 25}.get(
+            str(trouble.get("severity") or "medium"), 12,
+        )
+    if value.get("outcome"):
+        score += 5
+    return score
+
+
+def select_story_attention(values: Sequence[Mapping[str, Any]], limit: int, *,
+                           preserve_urgent: bool = False) -> list[dict[str, Any]]:
+    """Choose a deterministic, diverse story feed without hiding urgent items."""
+    candidates = [dict(value) for value in values]
+    requested = max(0, int(limit))
+    if requested == 0 or not candidates:
+        return []
+    urgent = [value for value in candidates if (
+        value.get("status") == "awaiting_management" or value.get("trouble_signal")
+    )] if preserve_urgent else []
+    urgent_ids = {str(value.get("id")) for value in urgent}
+    selected = sorted(
+        urgent, key=lambda value: (
+            _attention_strength(value), _attention_timestamp(value), str(value.get("id") or ""),
+        ), reverse=True,
+    )[:8]
+    remaining = [value for value in candidates if str(value.get("id")) not in urgent_ids]
+    topic_counts: dict[str, int] = {}
+    for value in selected:
+        topic = _attention_topic(value)
+        topic_counts[topic] = topic_counts.get(topic, 0) + 1
+    target = max(requested, len(selected))
+    while remaining and len(selected) < target:
+        choice = max(
+            remaining,
+            key=lambda value: (
+                _attention_strength(value) - topic_counts.get(_attention_topic(value), 0) * 24,
+                _attention_timestamp(value), str(value.get("id") or ""),
+            ),
+        )
+        remaining.remove(choice)
+        selected.append(choice)
+        topic = _attention_topic(choice)
+        topic_counts[topic] = topic_counts.get(topic, 0) + 1
+    return selected
 
 
 TOPIC_COPY: dict[str, tuple[str, str, str, str]] = {
@@ -87,35 +186,6 @@ MANAGEMENT_PROMPT_COPY: dict[str, tuple[str, str]] = {
     "friendly_competition": ("How should you help keep the challenge fair and enjoyable?", "你想怎样让这次较量保持公平和有趣？"),
 }
 
-# These are observable scene lines, not hidden thoughts or predicted outcomes.
-# Role 0/1 refers to the corresponding public participant; ``None`` is narration.
-TOPIC_BEAT_COPY: dict[str, tuple[tuple[int | None, str, str, str], ...]] = {
-    "shared_kitchen": ((0, "I was just about to use the kitchen.", "我正准备使用厨房。", "talk"),
-                       (1, "Looks like we arrived at the same time.", "看来我们是同时到的。", "listen")),
-    "bathroom_access": ((0, "I have been waiting for a turn.", "我已经等了一会儿。", "talk"),
-                        (1, "I did not realize someone was waiting.", "我不知道外面有人在等。", "listen")),
-    "shared_entertainment": ((0, "I had something in mind for the television.", "我本来想看一个节目。", "talk"),
-                             (1, "So did I. We need to choose.", "我也是。看来我们得商量一下。", "listen")),
-    "companionship": ((0, "Would you like some company?", "你想有人陪一会儿吗？", "talk"),
-                      (1, "I was not expecting that, but I am listening.", "我没想到你会来，不过我在听。", "listen")),
-    "missed_connection": ((0, "I hoped we could talk for a moment.", "我本来希望能和你聊一会儿。", "talk"),
-                          (1, "I am caught up in something right now.", "我现在正被手头的事情绊住。", "look_around")),
-    "dishwashing": ((1, "The dishes are still here.", "餐具还留在这里。", "talk"),
-                    (0, "I should help decide how they get handled.", "我应该一起说清楚该怎么收拾。", "listen")),
-    "unequal_care": ((0, "I feel like I have been carrying a lot lately.", "我感觉最近承担了很多。", "talk"),
-                     (1, "I need to understand what has felt uneven.", "我需要听明白哪里让你觉得不公平。", "listen")),
-    "privacy": ((1, "I needed some space just then.", "刚才我需要一点自己的空间。", "talk"),
-                (0, "I can see that a boundary was crossed.", "我明白刚才越过了一条界限。", "listen")),
-    "borrowed_property": ((1, "I wanted to be asked before it was borrowed.", "我希望东西被借走前能先问我。", "talk"),
-                          (0, "We need to talk about what happened.", "我们需要谈谈刚才发生的事。", "listen")),
-    "blocked_plan": ((0, "This was not how I expected the plan to go.", "事情没有按我预想的计划发展。", "look_around"),),
-    "food_shortage": ((0, "There is not enough here for the plan I had.", "这里的存货不够完成原来的计划。", "look_around"),),
-    "noise": ((1, "It is hard to keep going with this much noise.", "这么吵，我很难继续手上的事。", "talk"),
-              (0, "I did not realize it was disrupting you.", "我没意识到这会打扰你。", "listen")),
-    "friendly_competition": ((0, "Want to make this a friendly challenge?", "要不要来一场友好的较量？", "happy"),
-                             (1, "Deal—as long as we keep it fair.", "好啊——只要我们公平竞争。", "happy")),
-}
-
 LOCATION_ZH_COPY: dict[str, str] = {
     "central_station": "中央车站", "north_bus_terminal": "北区公交总站", "airport_express": "机场快线",
     "business_center": "商务中心", "innovation_hub": "创新中心", "design_studio": "运河设计工作室",
@@ -135,6 +205,7 @@ REACTION_COPY: dict[str, tuple[str, str]] = {
     "accept": ("accepted the support", "接受了这次帮助"),
     "accept_later": ("asked for time, but kept the door open", "希望晚一点再谈，但没有关上沟通的大门"),
     "refuse": ("chose not to accept the intervention", "选择不接受这次介入"),
+    "misunderstood": ("heard a different intention than you meant", "误解了你这次介入的用意"),
     "backfire": ("felt the intervention made the moment harder", "觉得这次介入让事情变得更难处理"),
 }
 
@@ -210,6 +281,16 @@ class LifeWorldService:
         self.db = db
         self.engine = LifeWorldEngine(timezone_name=timezone_name)
         self._lock = threading.RLock()
+
+    def _refresh_layout_contract(self) -> None:
+        active = self.db.get_world_layout()
+        layout = active.get("layout") if active else None
+        metadata = active.get("active_version") if active else None
+        version = str(metadata.get("id") if isinstance(metadata, Mapping) else "built-in")
+        self.engine.configure_shared_home(
+            compile_shared_home_runtime(layout), version,
+        )
+        self.engine.configure_city(compile_city_runtime(layout), version)
 
     @staticmethod
     def _slot_for_home(home_id: str) -> int | None:
@@ -290,6 +371,7 @@ class LifeWorldService:
         if not profile_map:
             raise ValueError("a life world requires at least one resident")
         with self._lock:
+            self._refresh_layout_contract()
             for _attempt in range(3):
                 stored = self.db.get_life_world_state(player_id)
                 expected_revision = int(stored.get("revision", 0)) if stored else 0
@@ -329,6 +411,12 @@ class LifeWorldService:
                         # remains visible until an unrelated timed transition.
                         or projected_household_ids != household_ids
                     )
+                    layout_migration_due = (
+                        str(stored.get("shared_home_layout_version") or "built-in")
+                        != self.engine.home_layout_version
+                        or str(stored.get("city_layout_version") or "built-in")
+                        != self.engine.city_layout_version
+                    )
                     transition = stored.get("next_transition_at")
                     transition_due = True
                     if transition:
@@ -336,11 +424,12 @@ class LifeWorldService:
                             transition_due = datetime.fromisoformat(str(transition).replace("Z", "+00:00")) <= moment
                         except ValueError:
                             transition_due = True
-                    if not (force_advance or profile_changed or shared_home_migration_due or transition_due):
+                    if not (force_advance or profile_changed or shared_home_migration_due
+                            or layout_migration_due or transition_due):
                         return stored
                     home_mapping = self._home_mapping(player_id, profile_entries, stored)
                     advance_at = moment
-                    if profile_changed or shared_home_migration_due:
+                    if profile_changed or shared_home_migration_due or layout_migration_due:
                         try:
                             stored_at = datetime.fromisoformat(
                                 str(stored.get("last_advanced_at") or "").replace("Z", "+00:00")
@@ -496,6 +585,51 @@ class LifeWorldService:
             "capacity": int(raw.get("capacity", 1)), "state": state,
         }
 
+    @staticmethod
+    def _trouble_recipients(record: Mapping[str, Any],
+                            participant_ids: Sequence[str]) -> tuple[str, ...]:
+        """Return only residents who persisted a choice to tell the player.
+
+        Records created before the disclosure contract retain their historical
+        behavior.  New records always contain ``disclosure`` even when nobody
+        elects to expose the Incident as a task-like marker.
+        """
+        disclosure = record.get("disclosure")
+        if not isinstance(disclosure, Mapping):
+            return tuple(str(value) for value in participant_ids)
+        allowed = set(str(value) for value in participant_ids)
+        return tuple(
+            npc_id for npc_id in (
+                str(value) for value in disclosure.get("player_visible_npc_ids", [])
+            ) if npc_id in allowed
+        )
+
+    def _recent_story_aftermath(self, stories: Sequence[Mapping[str, Any]],
+                                now: datetime) -> list[dict[str, Any]]:
+        """Project bounded, previous-day consequences for the return visit."""
+        today = self.engine.clock.game_date(now)
+        terminal = {
+            "resolved_autonomously", "resolved_with_management", "closed",
+        }
+        result: list[dict[str, Any]] = []
+        for raw in stories:
+            story = dict(raw)
+            if story.get("status") not in terminal or not story.get("outcome"):
+                continue
+            try:
+                created = datetime.fromisoformat(
+                    str(story.get("created_at") or "").replace("Z", "+00:00")
+                )
+            except (TypeError, ValueError):
+                continue
+            age = (today - self.engine.clock.game_date(_utc(created))).days
+            if not 1 <= age <= 7:
+                continue
+            result.append(story)
+            if len(result) == 8:
+                break
+        return result
+
     def city(self, player_id: str, profile_entries: Sequence[Mapping[str, Any]],
              *, now: datetime | None = None) -> dict[str, Any]:
         moment = _utc(now)
@@ -512,7 +646,8 @@ class LifeWorldService:
         trouble_by_npc: dict[str, dict[str, Any]] = {}
         for story in story_views:
             if story.get("trouble_signal") and story["status"] == "awaiting_management":
-                for npc_id in story["participant_ids"]:
+                record = (state.get("stories") or {}).get(story["id"], {})
+                for npc_id in self._trouble_recipients(record, story["participant_ids"]):
                     trouble_by_npc.setdefault(npc_id, story["trouble_signal"])
         for resident in public["residents"]:
             npc_id = resident["npc_id"]
@@ -597,6 +732,7 @@ class LifeWorldService:
                 "current_location_id": current_location_id, "position": position,
                 "is_home": is_internal_home_location or current_location_id == target["home"]["id"],
                 "household_id": resident.get("household_id"), "current_action": action,
+                "development": copy.deepcopy(resident.get("development")),
                 "visible_intent": intent_en, "visible_intent_zh": intent_zh,
                 "observable_state": observable["observable_state"],
                 "trouble_signal": trouble_by_npc.get(npc_id),
@@ -604,11 +740,19 @@ class LifeWorldService:
                 "current_activity": intent_en,
             })
             walking = raw_action.status == "traveling"
+            world_state = (
+                "walking_to_event" if walking
+                else "living" if raw_action.status in {
+                    "planned", "performing", "blocked", "retrying",
+                }
+                else "idle"
+            )
             target["world_action"] = {
-                "state": "walking_to_event" if walking else "idle",
+                "state": world_state,
                 "target_location_id": action_location_id,
                 "started_at": raw_action.planned_at.isoformat(),
                 "arrives_at": raw_action.arrives_at.isoformat() if raw_action.arrives_at else None,
+                "journey": copy.deepcopy(action.get("journey")),
                 "animation_cue": animation_cue("walk" if walking else raw_action.animation_cue),
                 "performance": performance_to_dict(
                     journey_performance("walk") if walking else ambient_performance(raw_action.animation_cue)
@@ -628,11 +772,28 @@ class LifeWorldService:
                 if resource.get("household_id") == household["id"]
             ]
             households.append(household)
-        moments = [story for story in story_views
-                   if story["level"] == "moment" and story["presentable"]]
-        incidents = [story for story in story_views if story["level"] == "incident"
-                     and story["status"] not in {"resolved_autonomously", "resolved_with_management", "closed"}]
-        threads = self._thread_views(state, profile_map)
+        all_moments = [story for story in story_views
+                       if story["level"] == "moment" and story["presentable"]]
+        all_incidents = [story for story in story_views if story["level"] == "incident"
+                         and story["status"] not in {"resolved_autonomously", "resolved_with_management", "closed"}]
+        all_threads = self._thread_views(state, profile_map)
+        all_aftermath = self._recent_story_aftermath(story_views, moment)
+        attention = story_attention_budget(len(public["residents"]))
+        desktop_budget = attention["desktop"]
+        incidents = select_story_attention(
+            all_incidents, desktop_budget["incidents"], preserve_urgent=True,
+        )
+        moments = select_story_attention(all_moments, desktop_budget["moments"])
+        threads = select_story_attention(all_threads, desktop_budget["threads"])
+        recent_aftermath = select_story_attention(
+            all_aftermath, desktop_budget["aftermath"],
+        )
+        attention["suppressed"] = {
+            "incidents": max(0, len(all_incidents) - len(incidents)),
+            "moments": max(0, len(all_moments) - len(moments)),
+            "threads": max(0, len(all_threads) - len(threads)),
+            "aftermath": max(0, len(all_aftermath) - len(recent_aftermath)),
+        }
         relationship_views = []
         for relationship in public.get("relationships", []):
             value = copy.deepcopy(relationship)
@@ -644,11 +805,13 @@ class LifeWorldService:
         period = self.engine.clock.decision_window(moment).period
         base.update({
             "server_time": moment.isoformat(), "world_version": public["revision"],
+            "city_layout_version": public.get("city_layout_version", "built-in"),
             "next_transition_at": public.get("next_transition_at"),
             "rules_version": public["rules_version"],
             "time_slot": "evening" if period == "night" else period,
-            "households": households, "observable_moments": moments[:12],
-            "open_incidents": incidents[:12], "story_threads": threads[:20],
+            "households": households, "observable_moments": moments,
+            "open_incidents": incidents, "story_threads": threads,
+            "recent_aftermath": recent_aftermath, "attention_budget": attention,
             "relationships": relationship_views,
             # The former daily-event system remains queryable behind its own
             # endpoints but is not allowed to drive the v2 world twice.
@@ -733,7 +896,7 @@ class LifeWorldService:
         for pair in self.engine.public_snapshot(state)["relationships"]:
             if npc_id in pair["participant_ids"]:
                 relationships.append(pair)
-        return {
+        return project_public_life_context({
             "current_action": {"type": action.action_type, "status": action.status,
                                "phase": life_action_phase(action.status),
                                "visible_intent": observable["visible_intent"],
@@ -742,12 +905,15 @@ class LifeWorldService:
                                "observable_state": observable["observable_state"],
                                "location_id": action.location_id,
                                "target_npc_id": action.target_npc_id,
+                               "transition_reason": action.transition_reason,
+                               "transitioned_at": (action.transitioned_at.isoformat()
+                                                   if action.transitioned_at else None),
                                "interruptibility": ("private" if observable["visible_context"].get("visibility") == "private"
                                                     else "contextual" if action.interruptible else "locked"),
                                "animation_cue": action.animation_cue},
             "recent_life_stories": stories, "npc_relationships": relationships,
             "household_id": resident["household_id"],
-        }
+        })
 
     @staticmethod
     def _cast_name(participant_ids: Sequence[str],
@@ -985,11 +1151,13 @@ class LifeWorldService:
             result_copy = {
                 "accepted": ("accepted your support", "接受了你的帮助"),
                 "mixed": ("responded differently to your support", "对你的帮助作出了不同回应"),
+                "misunderstood": ("misunderstood what you were trying to do", "误解了你想提供的帮助"),
                 "refused": ("chose not to follow your suggestion", "选择不采纳你的建议"),
                 "backfired": ("felt your involvement made the situation harder", "觉得你的介入让局面变得更难处理"),
             }.get(result, ("responded to your involvement", "对你的介入作出了回应"))
             outcome_tone = {"accepted": "positive", "mixed": "mixed",
-                            "refused": "negative", "backfired": "negative"}.get(result, "neutral")
+                            "misunderstood": "uncertain", "refused": "negative",
+                            "backfired": "negative"}.get(result, "neutral")
             aftermath = f"{cast_en} {result_copy[0]}: {action_view['label']}."
             aftermath_zh = f"{cast_zh}{result_copy[1]}：{action_view['label_zh']}。"
         else:
@@ -1015,31 +1183,74 @@ class LifeWorldService:
         }
 
     @staticmethod
-    def _presentation_beats(topic: str, participant_ids: Sequence[str],
-                            summary: str, summary_zh: str,
-                            outcome: Mapping[str, Any] | None) -> list[dict[str, Any]]:
-        beats = []
-        for role, text, text_zh, cue in TOPIC_BEAT_COPY.get(topic, ((None, summary, summary_zh, "talk"),)):
-            if role is not None and role >= len(participant_ids):
-                continue
-            beats.append({
-                "speaker_id": participant_ids[role] if role is not None else None,
-                "text": text, "translation_zh": text_zh,
-                "animation_cue": cue, "phase": "situation",
-            })
+    def _interaction_presentation(record: Mapping[str, Any], *, topic: str,
+                                  participant_ids: Sequence[str],
+                                  profiles: Mapping[str, Mapping[str, Any]],
+                                  relationships: Mapping[Any, Any],
+                                  can_intervene: bool,
+                                  outcome: Mapping[str, Any] | None) -> dict[str, Any]:
+        """Return a safe staged scene, rebuilding only legacy records.
+
+        New stories persist their authored scene beside the collision.  The
+        compatibility path below lets pre-upgrade worlds gain the richer view,
+        while subsequent reads of new stories remain byte-for-byte stable even
+        if a resident's editable profile later changes.
+        """
+        raw_scene = record.get("interaction")
+        if not isinstance(raw_scene, Mapping):
+            resolution = dict(record.get("resolution") or {})
+            resolution.setdefault("requires_intervention", can_intervene)
+            raw_scene = build_interaction_scene(
+                collision=dict(record.get("collision") or {
+                    "id": str((record.get("story") or {}).get("id") or "legacy-story"),
+                    "scenario_id": "", "topic": topic,
+                    "participant_ids": list(participant_ids),
+                }),
+                resolution=resolution, profiles=profiles,
+                relationships=relationships,
+                intervention_available=can_intervene,
+            )
+        public = public_interaction_scene(
+            raw_scene, participant_ids=participant_ids,
+            can_intervene=can_intervene,
+        )
+        if public is None:
+            # A malformed legacy/custom record must still have a playable,
+            # bilingual scene without allowing arbitrary persisted fields into
+            # the public contract.
+            fallback = build_interaction_scene(
+                collision={"id": str((record.get("story") or {}).get("id") or "fallback-story"),
+                           "scenario_id": "", "topic": topic,
+                           "participant_ids": list(participant_ids)},
+                resolution={"requires_intervention": can_intervene},
+                profiles=profiles, relationships=relationships,
+                intervention_available=can_intervene,
+            )
+            public = public_interaction_scene(
+                fallback, participant_ids=participant_ids,
+                can_intervene=can_intervene,
+            ) or {"version": 1, "stages": [], "beats": []}
         if outcome:
             tone = str(outcome.get("tone") or next(
                 (str(value.get("tone")) for value in outcome.get("consequences", [])
                  if value.get("kind") == "relationship"), "neutral",
             ))
-            beats.append({
+            aftermath = {
+                "id": stable_id("interaction-aftermath", (record.get("story") or {}).get("id"), tone),
                 "speaker_id": None,
                 "text": str(outcome["aftermath"]),
                 "translation_zh": str(outcome["aftermath_zh"]),
                 "animation_cue": "happy" if tone == "positive" else "sad" if tone == "negative" else "look_around",
-                "phase": "aftermath",
+                "emotion": "warm" if tone == "positive" else "tense" if tone == "negative" else "reflective",
+                "phase": "aftermath", "duration_ms": 3600,
+            }
+            public["stages"].append({
+                "id": "aftermath", "label": "What remained", "label_zh": "留下的变化",
+                "duration_ms": aftermath["duration_ms"], "can_intervene_after": False,
+                "beats": [aftermath],
             })
-        return beats
+            public["beats"].append(aftermath)
+        return public
 
     @staticmethod
     def _is_story_presentable(story: Mapping[str, Any], now: datetime) -> bool:
@@ -1103,6 +1314,11 @@ class LifeWorldService:
                              or ("observed" if story.get("observed_at") and status == "open" else status))
             actions = [str(value) for value in story.get("intervention_actions", [])]
             outcome = self._outcome_view(state, record, story, profiles, cast_en, cast_zh, topic)
+            interaction = self._interaction_presentation(
+                record, topic=topic, participant_ids=participant_ids,
+                profiles=profiles, relationships=state.get("relationships") or {},
+                can_intervene=public_status == "awaiting_management", outcome=outcome,
+            )
             trouble = None
             if story.get("trouble_signal"):
                 band = str((story.get("visible_facts") or {}).get("severity_band") or "medium")
@@ -1133,10 +1349,10 @@ class LifeWorldService:
                                )[1],
                                "actions": [self._intervention_view(action) for action in actions]},
                 "presentation": {
+                    **interaction,
                     "subject": f"{TOPIC_COPY.get(topic, (title, title_zh, '', ''))[0]} · {location_copy['label']}",
                     "subject_zh": f"{TOPIC_COPY.get(topic, (title, title_zh, '', ''))[1]} · {location_copy['label_zh']}",
                     "location": location_copy,
-                    "beats": self._presentation_beats(topic, participant_ids, summary, summary_zh, outcome),
                 },
                 "outcome": outcome,
                 "participant_reactions": list(outcome.get("participant_reactions", [])) if outcome else [],

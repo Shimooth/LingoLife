@@ -21,7 +21,35 @@ export type WorldLayoutDocument={
  }
  interior:{rooms:WorldLayoutRoom[]}
 }
-export type WorldLayoutResponse={layout:WorldLayoutDocument;updated_at?:string|null}
+export type WorldLayoutValidationIssue={code:string;path:string;message:string}
+export type WorldLayoutValidation={
+ valid:boolean
+ issues:WorldLayoutValidationIssue[]
+ report?:{
+  road_tiles:number;road_edges:number;sky_road_exits:number;buildings:number;decorations:number
+  connected_rooms:number;room_connections:number;shared_home_actions:number;private_sleep_slots:number
+ }
+}
+export type WorldLayoutVersion={
+ id:string;hash:string;note:string;author:string;is_default:boolean;is_active:boolean
+ validation:WorldLayoutValidation;created_at:string;activated_at?:string|null
+}
+export type WorldLayoutDraft={
+ layout:WorldLayoutDocument;revision:number;hash?:string|null;author?:string|null
+ validation:WorldLayoutValidation;created_at?:string|null;updated_at?:string|null
+}
+export type WorldLayoutAudit={
+ id:number;action:string;version_id?:string|null;previous_version_id?:string|null
+ note:string;author:string;created_at:string
+}
+export type WorldLayoutResponse={
+ layout:WorldLayoutDocument;updated_at?:string|null
+ active_version?:Omit<WorldLayoutVersion,'is_active'|'activated_at'>
+ activated_at?:string|null;activated_by?:string;activation_note?:string
+}
+export type WorldLayoutAdminResponse=WorldLayoutResponse&{
+ draft:WorldLayoutDraft;versions:WorldLayoutVersion[];audit:WorldLayoutAudit[]
+}
 export type WorldLayoutCityLayer=keyof WorldLayoutDocument['city']
 
 export type LayoutAssetDefinition={

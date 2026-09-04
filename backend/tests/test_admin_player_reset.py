@@ -45,6 +45,18 @@ def _client(tmp_path) -> TestClient:
 def _profile(name: str) -> dict:
     profile = deepcopy(DEFAULT_NPC_PROFILE)
     profile["name"] = name
+    marker = sum(ord(character) for character in name.casefold())
+    roles = ["organizer", "caretaker", "mediator", "cook", "fixer", "free_spirit"]
+    chores = ["cooking", "dishes", "cleaning", "shopping", "repairs", "laundry"]
+    profile.update({
+        "occupation": f"{name} specialist",
+        "personality": ["thoughtful", f"trait-{name.casefold()}"],
+        "interests": ["art", f"interest-{name.casefold()}"],
+        "habits": [f"{name} evening routine"],
+        "householdRole": roles[marker % len(roles)],
+        "chorePreferences": [chores[marker % len(chores)]],
+        "privateSpacePreference": ["low", "balanced", "high"][marker % 3],
+    })
     return profile
 
 
@@ -59,6 +71,12 @@ def _register_and_populate(client: TestClient, username: str = "onboarding-test"
     assert registered.status_code == 201, registered.text
     token = registered.json()["session_token"]
     headers = {"Authorization": f"Bearer {token}"}
+    acknowledged = client.post(
+        "/api/v1/onboarding/intro/acknowledge",
+        headers=headers,
+        json={"intro_version": 1},
+    )
+    assert acknowledged.status_code == 200, acknowledged.text
     onboarding = client.post("/api/v1/onboarding/complete", headers=headers, json={
         "household_name": "Test House",
         "residents": [_profile("Ava"), _profile("Bo")],
@@ -149,14 +167,18 @@ def test_admin_reset_restarts_onboarding_but_preserves_account_access_and_audit(
     assert payload["reset"] is True
     assert payload["user"] == {"id": account["user_id"], "username": "onboarding-test"}
     assert payload["onboarding"] == {
-        "version": 1,
+        "version": 2,
         "completed": False,
+        "setup_status": "not_started",
+        "setup_key": None,
         "min_residents": 2,
         "max_residents": 8,
         "resident_count": 0,
         "user_created_count": 0,
         "remaining_slots": 8,
         "household_name": "Our Home",
+        "intro_version": None,
+        "intro_acknowledged_at": None,
         "completed_at": None,
         "updated_at": None,
     }
@@ -198,6 +220,12 @@ def test_admin_reset_restarts_onboarding_but_preserves_account_access_and_audit(
     assert client.post("/api/v1/auth/login", json={
         "username": "onboarding-test", "password": "unchanged-password",
     }).status_code == 200
+    acknowledged = client.post(
+        "/api/v1/onboarding/intro/acknowledge",
+        headers=account["headers"],
+        json={"intro_version": 1},
+    )
+    assert acknowledged.status_code == 200, acknowledged.text
     restarted = client.post("/api/v1/onboarding/complete", headers=account["headers"], json={
         "household_name": "A New Beginning",
         "residents": [_profile("Cy"), _profile("Di")],
@@ -260,7 +288,9 @@ def test_admin_reset_requires_admin_origin_and_matching_username(tmp_path):
     )
     assert forbidden.status_code == 403
     assert forbidden.json()["error"]["code"] == "TEST_ACCOUNT_REQUIRED"
-    assert _count(db, "npc_profiles", "player_id", ordinary_user["player_id"]) == 1
+    # A read-only resident listing must not materialize legacy Emma for a new
+    # account or create progress that an admin reset could accidentally erase.
+    assert _count(db, "npc_profiles", "player_id", ordinary_user["player_id"]) == 0
 
 
 def test_reset_fails_closed_and_rolls_back_for_an_unclassified_player_table(tmp_path):

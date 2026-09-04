@@ -13,6 +13,7 @@ import pytest
 from lingolife.app import DEFAULT_NPC_PROFILE, create_app
 from lingolife.config import Settings
 from lingolife.db import Database
+from lingolife.life_service import LifeWorldService
 
 
 def _client(tmp_path, *, life=True) -> TestClient:
@@ -35,40 +36,77 @@ def _auth(client: TestClient, username: str = "onboarding-user") -> dict[str, st
     return {"Authorization": "Bearer " + response.json()["session_token"]}
 
 
+def _ack(client: TestClient, headers: dict[str, str]) -> None:
+    response = client.post(
+        "/api/v1/onboarding/intro/acknowledge", headers=headers, json={"intro_version": 1},
+    )
+    assert response.status_code == 200, response.text
+
+
 def _profile(name: str) -> dict:
     value = deepcopy(DEFAULT_NPC_PROFILE)
     value["name"] = name
+    value["occupation"] = f"{name.strip()} specialist"
+    value["personality"] = ["thoughtful", name.strip().casefold()]
+    value["interests"] = ["art", f"{name.strip()} hobby"]
+    index = sum(ord(character) for character in name.strip().casefold())
+    roles = ["organizer", "caretaker", "mediator", "cook", "fixer", "free_spirit"]
+    chores = ["cooking", "dishes", "cleaning", "shopping", "repairs", "laundry"]
+    value["householdRole"] = roles[index % len(roles)]
+    value["chorePreferences"] = [chores[index % len(chores)]]
+    value["privateSpacePreference"] = ["low", "balanced", "high"][index % 3]
+    value["habits"] = [f"{name.strip()} evening routine"]
     return value
 
 
-def test_default_emma_does_not_complete_onboarding_and_two_created_residents_do(tmp_path):
+def test_new_account_reads_are_non_mutating_and_only_batch_setup_opens_world(tmp_path):
     client = _client(tmp_path)
     headers = _auth(client)
 
     initial = client.get("/api/v1/onboarding", headers=headers).json()
     assert initial == {
-        "version": 1, "completed": False, "min_residents": 2, "max_residents": 8,
+        "version": 2, "completed": False,
+        "setup_status": "not_started", "setup_key": None,
+        "min_residents": 2, "max_residents": 8,
         "resident_count": 0, "user_created_count": 0, "remaining_slots": 8,
+        "intro_version": None, "intro_acknowledged_at": None,
         "household_name": "Our Home", "completed_at": None, "updated_at": None,
     }
+    _ack(client, headers)
 
-    # The legacy list route may still materialize Emma for old clients, but she
-    # is not treated as a player-created onboarding resident.
+    # Compatibility reads remain available but must not materialize Emma or
+    # provide a write path around the authoritative batch saga.
     listing = client.get("/api/v1/npcs", headers=headers).json()
     assert listing["limit"] == 8
-    assert [entry["id"] for entry in listing["npcs"]] == ["emma"]
+    assert listing["npcs"] == []
     assert listing["onboarding"]["completed"] is False
     assert listing["onboarding"]["user_created_count"] == 0
+    assert client.get("/api/v1/npc/profile", headers=headers).status_code == 200
+    assert client.get("/api/v1/npcs", headers=headers).json()["npcs"] == []
 
-    first = client.post("/api/v1/npcs", headers=headers, json=_profile("Ava"))
-    assert first.status_code == 201, first.text
-    assert first.json()["onboarding"]["completed"] is False
-    second = client.post("/api/v1/npcs", headers=headers, json=_profile("Bo"))
-    assert second.status_code == 201, second.text
-    assert second.json()["onboarding"]["completed"] is True
+    for method, path in (
+        ("POST", "/api/v1/npcs"),
+        ("PUT", "/api/v1/npcs/not-created"),
+        ("PUT", "/api/v1/npc/profile"),
+    ):
+        bypass = client.request(method, path, headers=headers, json=_profile("Ava"))
+        assert bypass.status_code == 409
+        assert bypass.json()["error"]["code"] == "WORLD_NOT_READY"
+    assert client.get("/api/v1/onboarding", headers=headers).json()["resident_count"] == 0
+
+    completed = client.post("/api/v1/onboarding/complete", headers=headers, json={
+        "residents": [_profile("Ava"), _profile("Bo")],
+    })
+    assert completed.status_code == 201, completed.text
+    assert completed.json()["onboarding"]["completed"] is True
+    legacy_alias = client.put(
+        "/api/v1/npc/profile", headers=headers, json=_profile("Emma"),
+    )
+    assert legacy_alias.status_code == 404
+    assert legacy_alias.json()["error"]["code"] == "NPC_NOT_FOUND"
 
     world = client.get("/api/v1/world", headers=headers).json()
-    assert len(world["npcs"]) == 3
+    assert len(world["npcs"]) == 2
     assert len(world["households"]) == 1
     household = world["households"][0]
     assert {member["npc_id"] for member in household["members"]} == {
@@ -76,6 +114,25 @@ def test_default_emma_does_not_complete_onboarding_and_two_created_residents_do(
     }
     assert len({resident["household_id"] for resident in world["npcs"]}) == 1
     assert len({resident["home"]["id"] for resident in world["npcs"]}) == 1
+
+
+def test_resident_count_cannot_complete_onboarding_outside_the_saga(tmp_path):
+    db = Database(f"sqlite:///{tmp_path / 'count-bypass.db'}")
+    db.ensure_player("fresh-player")
+    db.acknowledge_onboarding_intro("fresh-player", 1)
+    for npc_id, name in (("npc-ava", "Ava"), ("npc-bo", "Bo")):
+        db.create_npc_profile(
+            "fresh-player",
+            npc_id,
+            _profile(name),
+            f"Hi, I'm {name}.",
+            f"嗨，我是{name}。",
+        )
+
+    refreshed = db.refresh_onboarding("fresh-player")
+    assert refreshed["resident_count"] == 2
+    assert refreshed["completed"] is False
+    assert refreshed["setup_status"] == "not_started"
 
 
 def test_v3_grandfathers_an_existing_single_emma_but_not_accounts_created_after_migration(tmp_path):
@@ -104,6 +161,8 @@ def test_v3_grandfathers_an_existing_single_emma_but_not_accounts_created_after_
     assert legacy["resident_count"] == 1
     assert legacy["user_created_count"] == 0
     assert legacy["completed_at"]
+    assert legacy["intro_version"] == 1
+    assert legacy["intro_acknowledged_at"] == legacy["completed_at"]
 
     db.ensure_player("post-v3-player")
     fresh = db.onboarding_state("post-v3-player")
@@ -114,6 +173,7 @@ def test_v3_grandfathers_an_existing_single_emma_but_not_accounts_created_after_
 def test_batch_onboarding_atomically_creates_up_to_eight_without_legacy_emma(tmp_path):
     client = _client(tmp_path)
     headers = _auth(client, "full-cast")
+    _ack(client, headers)
     residents = [_profile(f"Resident {index}") for index in range(1, 9)]
 
     response = client.post("/api/v1/onboarding/complete", headers=headers, json={
@@ -141,6 +201,7 @@ def test_batch_onboarding_atomically_creates_up_to_eight_without_legacy_emma(tmp
 def test_onboarding_batch_validation_does_not_partially_create_residents(tmp_path):
     client = _client(tmp_path)
     headers = _auth(client, "atomic-cast")
+    _ack(client, headers)
     invalid = [_profile("Valid"), _profile("Also Valid")]
     invalid[1]["avatar"]["skin"] = "not-a-color"
 
@@ -154,6 +215,7 @@ def test_onboarding_batch_validation_does_not_partially_create_residents(tmp_pat
 def test_onboarding_names_are_unique_after_whitespace_and_case_normalization(tmp_path):
     client = _client(tmp_path)
     headers = _auth(client, "unique-cast")
+    _ack(client, headers)
     residents = [_profile("Ava"), _profile("  ava  ")]
 
     response = client.post("/api/v1/onboarding/complete", headers=headers, json={
@@ -167,13 +229,26 @@ def test_onboarding_names_are_unique_after_whitespace_and_case_normalization(tmp
 def test_onboarding_transaction_rechecks_completion_and_rolls_back_every_resident(tmp_path):
     db = Database(f"sqlite:///{tmp_path / 'atomic-authority.db'}")
     db.ensure_player("player-1")
+    db.acknowledge_onboarding_intro("player-1", 1)
     residents = [
         {"id": "npc-ava", "profile": _profile("Ava")},
         {"id": "npc-bo", "profile": _profile("Bo")},
     ]
-    assert len(db.create_onboarding_residents("player-1", residents, "Home")) == 2
+    first = db.create_onboarding_residents("player-1", residents, "Home")
+    assert len(first) == 2
+    staged = db.onboarding_state("player-1")
+    assert staged["setup_status"] == "initializing"
+    assert staged["completed"] is False
 
-    with pytest.raises(ValueError, match="ONBOARDING_ALREADY_COMPLETED"):
+    # A replay reuses the first transaction's resident IDs and rows.
+    replay = db.create_onboarding_residents("player-1", [
+        {"id": "ignored-ava", "profile": _profile("Ava")},
+        {"id": "ignored-bo", "profile": _profile("Bo")},
+    ], "Home")
+    assert replay == first
+    assert len(db.messages("player-1", 20, "npc-ava")) == 1
+
+    with pytest.raises(ValueError, match="ONBOARDING_SETUP_IN_PROGRESS"):
         db.create_onboarding_residents("player-1", [
             {"id": "npc-cy", "profile": _profile("Cy")},
             {"id": "npc-di", "profile": _profile("Di")},
@@ -181,10 +256,21 @@ def test_onboarding_transaction_rechecks_completion_and_rolls_back_every_residen
     assert {entry["id"] for entry in db.list_npc_profiles("player-1")} == {
         "npc-ava", "npc-bo",
     }
+    db.ensure_social_edges("player-1", ["npc-ava", "npc-bo"])
+    db.finalize_onboarding_setup(
+        "player-1", staged["setup_key"], require_life_world=False,
+    )
+    assert db.onboarding_state("player-1")["completed"] is True
+    with pytest.raises(ValueError, match="ONBOARDING_ALREADY_COMPLETED"):
+        db.create_onboarding_residents("player-1", [
+            {"id": "npc-cy", "profile": _profile("Cy")},
+            {"id": "npc-di", "profile": _profile("Di")},
+        ], "Another Home")
 
     # The public API validates profiles first, but the transaction itself must
     # still be all-or-nothing if an unexpected persistence-time failure occurs.
     db.ensure_player("player-2")
+    db.acknowledge_onboarding_intro("player-2", 1)
     with pytest.raises(ValueError, match="RESERVED_NPC_ID"):
         db.create_onboarding_residents("player-2", [
             {"id": "npc-valid", "profile": _profile("Valid")},
@@ -194,11 +280,12 @@ def test_onboarding_transaction_rechecks_completion_and_rolls_back_every_residen
     assert db.onboarding_state("player-2")["completed"] is False
 
 
-def test_concurrent_onboarding_requests_have_one_cross_connection_winner(tmp_path):
+def test_concurrent_different_onboarding_requests_have_one_staging_winner(tmp_path):
     path = tmp_path / "concurrent-onboarding.db"
     first = Database(f"sqlite:///{path}")
     second = Database(f"sqlite:///{path}")
     first.ensure_player("player-1")
+    first.acknowledge_onboarding_intro("player-1", 1)
     barrier = Barrier(2)
 
     def submit(db: Database, prefix: str):
@@ -218,33 +305,154 @@ def test_concurrent_onboarding_requests_have_one_cross_connection_winner(tmp_pat
             (first, "Alpha"), (second, "Beta"),
         )))
 
-    assert sorted(outcomes) == ["ONBOARDING_ALREADY_COMPLETED", "created"]
+    assert sorted(outcomes) == ["ONBOARDING_SETUP_IN_PROGRESS", "created"]
     assert len(first.list_npc_profiles("player-1")) == 2
-    assert first.onboarding_state("player-1")["completed"] is True
+    assert first.onboarding_state("player-1")["setup_status"] == "initializing"
+    assert first.onboarding_state("player-1")["completed"] is False
 
 
-def test_existing_and_individual_character_names_use_the_same_unique_constraint(tmp_path):
+def test_concurrent_same_setup_reuses_the_first_cast_and_greetings(tmp_path):
+    path = tmp_path / "concurrent-replay.db"
+    first = Database(f"sqlite:///{path}")
+    second = Database(f"sqlite:///{path}")
+    first.ensure_player("player-1")
+    first.acknowledge_onboarding_intro("player-1", 1)
+    barrier = Barrier(2)
+
+    def submit(db: Database, prefix: str):
+        barrier.wait()
+        return db.create_onboarding_residents("player-1", [
+            {"id": f"npc-{prefix}-1", "profile": _profile("Ava")},
+            {"id": f"npc-{prefix}-2", "profile": _profile("Bo")},
+        ], "Home")
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(lambda args: submit(*args), (
+            (first, "alpha"), (second, "beta"),
+        )))
+
+    assert outcomes[0] == outcomes[1]
+    assert len(first.list_npc_profiles("player-1")) == 2
+    assert first._connection.execute(
+        "SELECT count(*) FROM messages WHERE player_id='player-1'",
+    ).fetchone()[0] == 2
+    assert first.onboarding_state("player-1")["setup_status"] == "initializing"
+
+
+@pytest.mark.parametrize("failure_point", ["social", "city", "household", "finalize"])
+def test_setup_saga_recovers_from_each_projection_boundary_without_duplicates(
+    tmp_path, monkeypatch, failure_point,
+):
+    client = _client(tmp_path)
+    headers = _auth(client, f"saga-{failure_point}")
+    _ack(client, headers)
+    db = client.app.state.db
+    payload = {
+        "household_name": "Recovery Home",
+        "residents": [_profile("Ava"), _profile("Bo")],
+    }
+    calls = 0
+
+    if failure_point in {"social", "finalize"}:
+        attribute = (
+            "ensure_social_edges" if failure_point == "social"
+            else "finalize_onboarding_setup"
+        )
+        original = getattr(db, attribute)
+
+        def fail_db_once(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise RuntimeError(f"injected {failure_point} failure")
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(db, attribute, fail_db_once)
+    else:
+        attribute = "city" if failure_point == "city" else "rename_shared_household"
+        original = getattr(LifeWorldService, attribute)
+
+        def fail_world_once(self, *args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise RuntimeError(f"injected {failure_point} failure")
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(LifeWorldService, attribute, fail_world_once)
+
+    with pytest.raises(RuntimeError, match=f"injected {failure_point} failure"):
+        client.post("/api/v1/onboarding/complete", headers=headers, json=payload)
+
+    staged = client.get("/api/v1/onboarding", headers=headers).json()
+    assert staged["setup_status"] == "initializing"
+    assert staged["completed"] is False
+    assert staged["resident_count"] == 2
+    assert client.get("/api/v1/world", headers=headers).status_code == 409
+    counts_after_failure = {
+        table: db._connection.execute(
+            f"SELECT count(*) FROM {table} WHERE player_id=?", (db.authenticate(
+                headers["Authorization"][7:]
+            )["player_id"],),
+        ).fetchone()[0]
+        for table in ("npc_profiles", "npc_states", "messages")
+    }
+    assert counts_after_failure == {"npc_profiles": 2, "npc_states": 2, "messages": 2}
+
+    recovered = client.post("/api/v1/onboarding/complete", headers=headers, json=payload)
+    assert recovered.status_code == 201, recovered.text
+    assert recovered.json()["onboarding"]["setup_status"] == "completed"
+    assert recovered.json()["onboarding"]["completed"] is True
+    created_ids = [entry["id"] for entry in recovered.json()["created"]]
+
+    replay = client.post("/api/v1/onboarding/complete", headers=headers, json=payload)
+    assert replay.status_code == 201, replay.text
+    assert [entry["id"] for entry in replay.json()["created"]] == created_ids
+    player_id = db.authenticate(headers["Authorization"][7:])["player_id"]
+    assert {
+        table: db._connection.execute(
+            f"SELECT count(*) FROM {table} WHERE player_id=?", (player_id,),
+        ).fetchone()[0]
+        for table in ("npc_profiles", "npc_states", "messages")
+    } == counts_after_failure
+    assert db._connection.execute(
+        "SELECT count(*) FROM npc_social_edges WHERE player_id=?", (player_id,),
+    ).fetchone()[0] == 2
+    assert db._connection.execute(
+        "SELECT count(*) FROM life_world_states WHERE player_id=?", (player_id,),
+    ).fetchone()[0] == 1
+    assert db._connection.execute(
+        "SELECT count(*) FROM households WHERE player_id=?", (player_id,),
+    ).fetchone()[0] == 1
+    assert db._connection.execute(
+        "SELECT count(*) FROM household_members WHERE player_id=?", (player_id,),
+    ).fetchone()[0] == 2
+
+
+def test_batch_and_individual_character_names_use_the_same_unique_constraint(tmp_path):
     client = _client(tmp_path)
     headers = _auth(client, "unique-existing")
-    # The legacy listing creates Emma but does not complete onboarding.
-    client.get("/api/v1/npcs", headers=headers)
-
+    _ack(client, headers)
     batch = client.post("/api/v1/onboarding/complete", headers=headers, json={
         "household_name": "Our Home",
-        "residents": [_profile("Ｅｍｍａ"), _profile("Bo")],
+        "residents": [_profile("Ava"), _profile("Bo")],
     })
-    assert batch.status_code == 409
-    assert batch.json()["error"]["code"] == "NPC_NAME_TAKEN"
-    assert client.get("/api/v1/onboarding", headers=headers).json()["resident_count"] == 1
+    assert batch.status_code == 201, batch.text
 
-    created = client.post("/api/v1/npcs", headers=headers, json=_profile("Ava"))
+    duplicate_batch_name = client.post(
+        "/api/v1/npcs", headers=headers, json=_profile("  AVA "),
+    )
+    assert duplicate_batch_name.status_code == 409
+    assert duplicate_batch_name.json()["error"]["code"] == "NPC_NAME_TAKEN"
+
+    created = client.post("/api/v1/npcs", headers=headers, json=_profile("Cy"))
     assert created.status_code == 201
-    duplicate = client.post("/api/v1/npcs", headers=headers, json=_profile("  AVA "))
+    duplicate = client.post("/api/v1/npcs", headers=headers, json=_profile("  CY "))
     assert duplicate.status_code == 409
     assert duplicate.json()["error"]["code"] == "NPC_NAME_TAKEN"
 
     renamed = client.put(
-        f"/api/v1/npcs/{created.json()['id']}", headers=headers, json=_profile("Emma"),
+        f"/api/v1/npcs/{created.json()['id']}", headers=headers, json=_profile("Bo"),
     )
     assert renamed.status_code == 409
     assert renamed.json()["error"]["code"] == "NPC_NAME_TAKEN"

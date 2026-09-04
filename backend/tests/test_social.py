@@ -212,6 +212,11 @@ def test_city_and_world_lazy_generate_observable_social_interactions(tmp_path):
         "username": "social-user", "invite_code": code, "password": "x",
     }).json()
     headers = {"Authorization": "Bearer " + registered["session_token"]}
+    player_id = client.app.state.db.authenticate(registered["session_token"])["player_id"]
+    client.app.state.db.get_or_create_npc_profile(
+        player_id, "emma", DEFAULT_NPC_PROFILE,
+    )
+    client.app.state.db.refresh_onboarding(player_id, force_complete=True)
     second = {**DEFAULT_NPC_PROFILE, "name": "Milo", "interests": ["art", "music"],
               "avatar": dict(DEFAULT_NPC_PROFILE["avatar"])}
     assert client.post("/api/v1/npcs", headers=headers, json=second).status_code == 201
@@ -239,7 +244,6 @@ def test_city_and_world_lazy_generate_observable_social_interactions(tmp_path):
 
     observe_endpoint = f"/api/v1/social-events/{listing[0]['id']}/observe"
     assert client.post(observe_endpoint, headers=headers).status_code == 409
-    player_id = client.app.state.db.authenticate(registered["session_token"])["player_id"]
     move_journey_into_observation_window(client.app.state.db, player_id, listing[0])
     waiting_city = client.get("/api/v1/city", headers=headers).json()
     waiting_rows = [resident for resident in waiting_city["npcs"] if resident["id"] in participant_ids]
@@ -264,10 +268,12 @@ def test_management_intervention_api_is_owned_scoped_and_idempotent(tmp_path):
         "username": "manager-user", "invite_code": code, "password": "x",
     }).json()
     headers = {"Authorization": "Bearer " + registered["session_token"]}
+    player_id = db.authenticate(registered["session_token"])["player_id"]
+    db.get_or_create_npc_profile(player_id, "emma", DEFAULT_NPC_PROFILE)
+    db.refresh_onboarding(player_id, force_complete=True)
     second = {**DEFAULT_NPC_PROFILE, "name": "June", "interests": ["cooking"],
               "personality": ["sensitive", "quiet"], "avatar": dict(DEFAULT_NPC_PROFILE["avatar"])}
     npc_id = client.post("/api/v1/npcs", headers=headers, json=second).json()["id"]
-    player_id = db.authenticate(registered["session_token"])["player_id"]
     db.ensure_social_edges(player_id, ["emma", npc_id])
     db.save_social_edge(player_id, "emma", npc_id, tension=70)
     db.save_social_edge(player_id, npc_id, "emma", tension=70)

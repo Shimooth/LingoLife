@@ -5,6 +5,7 @@ import sqlite3
 from lingolife.db import Database
 from lingolife.events import ActiveEvent, EventHistory
 from lingolife.learning import LearningState, SkillRecord
+from lingolife.profile_contract import normalize_profile_contract
 
 
 def database(tmp_path) -> Database:
@@ -30,13 +31,15 @@ def test_schema_incrementally_migrates_an_existing_demo_database(tmp_path):
 def test_profile_default_is_created_once_and_customization_round_trips(tmp_path):
     db = database(tmp_path)
     default = {"name": "Emma", "traits": ["kind"], "appearance": {"hair": "波浪长发"}}
+    normalized_default = normalize_profile_contract(default)
     assert db.get_npc_profile("p1", "emma") is None
-    assert db.get_or_create_npc_profile("p1", "emma", default) == default
+    assert db.get_or_create_npc_profile("p1", "emma", default) == normalized_default
     # A changed application default must not erase a player's saved character.
-    assert db.get_or_create_npc_profile("p1", "emma", {"name": "Other"}) == default
+    assert db.get_or_create_npc_profile("p1", "emma", {"name": "Other"}) == normalized_default
     customized = {**default, "traits": ["creative", "curious"]}
-    assert db.save_npc_profile("p1", "emma", customized) == customized
-    assert db.get_npc_profile("p1", "emma") == customized
+    normalized_customized = normalize_profile_contract(customized)
+    assert db.save_npc_profile("p1", "emma", customized) == normalized_customized
+    assert db.get_npc_profile("p1", "emma") == normalized_customized
 
 
 def test_memories_are_scoped_ranked_filtered_and_deletable(tmp_path):

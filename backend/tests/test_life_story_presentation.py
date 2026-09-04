@@ -105,8 +105,15 @@ def test_friendship_conflict_and_romance_candidates_have_specific_bilingual_play
     assert friend_view["presentation"]["location"] == {
         "id": "moonlight_cafe", "label": "Moonlight Café", "label_zh": "月光咖啡馆",
     }
-    assert [beat["speaker_id"] for beat in friend_view["presentation"]["beats"]] == ["ava", "bo"]
-    assert all(beat["text"] and beat["translation_zh"] for beat in friend_view["presentation"]["beats"])
+    scene = friend_view["presentation"]
+    assert [stage["id"] for stage in scene["stages"]] == [
+        "setup", "exchange", "reaction", "closure",
+    ]
+    assert len(scene["beats"]) >= 5
+    assert {beat["speaker_id"] for beat in scene["beats"]} == {"ava", "bo"}
+    assert all(beat["text"] and beat["translation_zh"] for beat in scene["beats"])
+    assert all(beat["duration_ms"] >= 900 and beat["animation_cue"]
+               for beat in scene["beats"])
 
     conflict_view = views["story-conflict"]
     assert conflict_view["title_zh"] == "没有先问就借走了"

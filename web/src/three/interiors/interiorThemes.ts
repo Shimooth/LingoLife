@@ -52,7 +52,7 @@ export const INTERIOR_THEME_COPY:Record<InteriorTheme,{zh:string;en:string}>={
  home_lounge:{zh:'客厅',en:'Living room'},
  home_kitchen:{zh:'厨房',en:'Kitchen'},
  home_bathroom:{zh:'浴室',en:'Bathroom'},
- home_bedroom:{zh:'卧室',en:'Bedroom'},
+ home_bedroom:{zh:'私人卧室区',en:'Private bedroom wing'},
  cafe:{zh:'店内',en:'Inside the venue'},
  library:{zh:'书店与阅览空间',en:'Book and reading space'},
  shop:{zh:'商店内部',en:'Inside the shop'},

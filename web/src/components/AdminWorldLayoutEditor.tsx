@@ -3,7 +3,7 @@ import {adminApi,ApiError} from '../api'
 import {
  cloneWorldLayout,isWorldLayoutDocument,layoutAssetName,layoutVector,WORLD_LAYOUT_CITY_ASSETS,WORLD_LAYOUT_INTERIOR_ASSETS,
  type LayoutAssetDefinition,type WorldLayoutBuilding,type WorldLayoutCityLayer,type WorldLayoutDocument,
- type WorldLayoutInteriorPlacement,type WorldLayoutPlacement,type WorldLayoutResponse,
+ type WorldLayoutAdminResponse,type WorldLayoutInteriorPlacement,type WorldLayoutPlacement,type WorldLayoutValidation,
 } from '../worldLayout'
 import {AdminLayoutPreview3D} from './AdminLayoutPreview3D'
 import './AdminWorldLayoutEditor.css'
@@ -84,20 +84,21 @@ function AssetPalette({assets,onAdd}:{assets:readonly LayoutAssetDefinition[];on
 }
 
 export function AdminWorldLayoutEditor(){
- const [response,setResponse]=useState<WorldLayoutResponse|null>(null),[draft,setDraft]=useState<WorldLayoutDocument|null>(null)
+ const [response,setResponse]=useState<WorldLayoutAdminResponse|null>(null),[draft,setDraft]=useState<WorldLayoutDocument|null>(null)
  const [mode,setMode]=useState<Mode>('city'),[layer,setLayer]=useState<WorldLayoutCityLayer>('buildings'),[roomId,setRoomId]=useState('')
  const [selectedId,setSelectedId]=useState(''),[selectedLayer,setSelectedLayer]=useState<WorldLayoutCityLayer>()
  const [busy,setBusy]=useState(false),[notice,setNotice]=useState('正在读取已发布布局…'),[error,setError]=useState('')
+ const [validation,setValidation]=useState<WorldLayoutValidation|null>(null),[publishNote,setPublishNote]=useState('调整城市与共享住宅布局')
  const fileInput=useRef<HTMLInputElement>(null)
  const load=useCallback(async()=>{
   setBusy(true);setError('')
-  try{const value=await adminApi.worldLayout();setResponse(value);setDraft(cloneWorldLayout(value.layout));setRoomId(value.layout.interior.rooms[0]?.id??'');setSelectedId('');setSelectedLayer(undefined);setNotice(value.updated_at?`已载入发布版本 · ${new Date(value.updated_at).toLocaleString('zh-CN')}`:'已载入默认布局')}
+  try{const value=await adminApi.worldLayout();setResponse(value);setDraft(cloneWorldLayout(value.draft.layout));setValidation(value.draft.validation);setRoomId(value.draft.layout.interior.rooms[0]?.id??'');setSelectedId('');setSelectedLayer(undefined);setNotice(value.draft.revision?`已载入服务器草稿 r${value.draft.revision}`:value.updated_at?`已载入发布版本 · ${new Date(value.updated_at).toLocaleString('zh-CN')}`:'已载入默认布局')}
   catch(cause){setError(cause instanceof ApiError?cause.message:'无法读取布局')}
   finally{setBusy(false)}
  },[])
  useEffect(()=>{void load()},[load])
 
- const dirty=Boolean(draft&&response&&JSON.stringify(draft)!==JSON.stringify(response.layout))
+ const dirty=Boolean(draft&&response&&JSON.stringify(draft)!==JSON.stringify(response.draft.layout))
  const room=draft?.interior.rooms.find(item=>item.id===roomId)??draft?.interior.rooms[0]
  const boardItems=useMemo<BoardItem[]>(()=>{
   if(!draft)return []
@@ -176,17 +177,44 @@ export function AdminWorldLayoutEditor(){
   }else next.city[cityLayer].push(copy as WorldLayoutBuilding)
   setDraft(next);setSelectedId(copy.id)
  }
- const save=async()=>{
-  if(!draft)return
+ const saveDraft=async()=>{
+  if(!draft||!response)return null
   setBusy(true);setError('')
-  try{const saved=await adminApi.saveWorldLayout(draft);setResponse(saved);setDraft(cloneWorldLayout(saved.layout));setNotice(`布局已发布 · ${saved.updated_at?new Date(saved.updated_at).toLocaleString('zh-CN'):'刚刚'}`)}
-  catch(cause){setError(cause instanceof ApiError?cause.message:'布局未能保存，请检查坐标和资产')}
+  try{const saved=await adminApi.saveWorldLayoutDraft(draft,response.draft.revision);setResponse(current=>current?{...current,draft:saved}:current);setDraft(cloneWorldLayout(saved.layout));setValidation(saved.validation);setNotice(`草稿已保存为 r${saved.revision} · 尚未影响玩家世界`);return saved}
+  catch(cause){setError(cause instanceof ApiError?cause.message:'草稿未能保存');return null}
+  finally{setBusy(false)}
+ }
+ const validate=async()=>{
+  if(!draft)return null
+  setBusy(true);setError('')
+  try{const result=await adminApi.validateWorldLayout(draft);setValidation(result);setNotice(result.valid?'校验通过，可以发布':'校验未通过，请按问题清单修正');return result}
+  catch(cause){setError(cause instanceof ApiError?cause.message:'无法校验布局');return null}
+  finally{setBusy(false)}
+ }
+ const publish=async()=>{
+  if(!draft||!response)return
+  if(!publishNote.trim()){setError('请填写本次发布说明');return}
+  setBusy(true);setError('')
+  try{
+   let revision=response.draft.revision
+   if(dirty){const saved=await adminApi.saveWorldLayoutDraft(draft,revision);revision=saved.revision;setDraft(cloneWorldLayout(saved.layout));setResponse(current=>current?{...current,draft:saved}:current)}
+   const checked=await adminApi.validateWorldLayout(draft);setValidation(checked)
+   if(!checked.valid){setNotice('发布已阻止：布局未通过拓扑校验');return}
+   const value=await adminApi.publishWorldLayout(revision,publishNote.trim());setResponse(value);setDraft(cloneWorldLayout(value.draft.layout));setValidation(value.draft.validation);setNotice(`发布完成 · ${value.active_version?.id.slice(0,19)??'新版本'}`)
+  }catch(cause){setError(cause instanceof ApiError?cause.message:'布局未能发布')}
+  finally{setBusy(false)}
+ }
+ const activate=async(versionId:string)=>{
+  if(!window.confirm('激活这个历史版本？当前动态世界事实不会被改动。'))return
+  setBusy(true);setError('')
+  try{const value=await adminApi.activateWorldLayout(versionId,'从管理端回滚到历史布局');setResponse(value);setNotice('历史版本已激活；NPC、关系、消息与故事事实保持不变')}
+  catch(cause){setError(cause instanceof ApiError?cause.message:'无法激活历史版本')}
   finally{setBusy(false)}
  }
  const reset=async()=>{
-  if(!window.confirm('恢复项目默认城市和住宅布局？当前已发布布局会被替换。'))return
+  if(!window.confirm('发布项目默认城市和住宅为新版本？历史版本仍可回滚。'))return
   setBusy(true);setError('')
-  try{const value=await adminApi.resetWorldLayout();setResponse(value);setDraft(cloneWorldLayout(value.layout));setRoomId(value.layout.interior.rooms[0]?.id??'');setMode('city');setLayer('buildings');setSelectedId('');setSelectedLayer(undefined);setNotice('已恢复并发布默认布局')}
+  try{await adminApi.resetWorldLayout();await load();setMode('city');setLayer('buildings');setNotice('已发布并激活默认布局，历史版本仍然保留')}
   catch(cause){setError(cause instanceof ApiError?cause.message:'无法恢复默认布局')}
   finally{setBusy(false)}
  }
@@ -202,11 +230,13 @@ export function AdminWorldLayoutEditor(){
   catch{setError('无法导入：请选择 LingoLife 世界布局 JSON')}
  }
 
- if(!draft)return <section className="admin-panel admin-world-layout"><div className="admin-layout-loading"><i/><p>{error||notice}</p>{error&&<button type="button" onClick={()=>void load()}>重试</button>}</div></section>
+ if(!draft||!response)return <section className="admin-panel admin-world-layout"><div className="admin-layout-loading"><i/><p>{error||notice}</p>{error&&<button type="button" onClick={()=>void load()}>重试</button>}</div></section>
  const previewItems=mode==='city'?boardItems.map(item=>item.placement):room?.placements??[]
  return <section className="admin-panel admin-world-layout">
-  <header className="admin-layout-header"><div><p className="eyebrow">WORLD AUTHORING</p><h2>城市与共享住宅编辑器</h2><p>使用项目现有 GLTF 资产编辑全局发布布局。玩家只能观察与管理居民，不能改动这份世界配置。</p></div><div className="admin-layout-actions"><button type="button" onClick={exportJson}>导出 JSON</button><button type="button" onClick={()=>fileInput.current?.click()}>导入草稿</button><button type="button" className="is-danger" disabled={busy} onClick={()=>void reset()}>恢复默认</button><button type="button" className="is-primary" disabled={busy||!dirty} onClick={()=>void save()}>{busy?'正在处理…':dirty?'发布布局':'已发布'}</button><input ref={fileInput} hidden type="file" accept="application/json,.json" onChange={event=>void importJson(event)}/></div></header>
-  <div className="admin-layout-status"><span className={dirty?'is-dirty':'is-clean'}>{dirty?'● 有未发布修改':'✓ 与服务器同步'}</span><p>{error||notice}</p></div>
+  <header className="admin-layout-header"><div><p className="eyebrow">WORLD AUTHORING</p><h2>城市与共享住宅编辑器</h2><p>草稿保存在服务器并使用修订号防止互相覆盖。只有通过完整拓扑校验的不可变版本才能进入玩家世界。</p></div><div className="admin-layout-actions"><button type="button" onClick={exportJson}>导出 JSON</button><button type="button" onClick={()=>fileInput.current?.click()}>导入草稿</button><button type="button" disabled={busy||!dirty} onClick={()=>void saveDraft()}>保存草稿</button><button type="button" disabled={busy} onClick={()=>void validate()}>校验布局</button><button type="button" className="is-danger" disabled={busy} onClick={()=>void reset()}>发布默认布局</button><button type="button" className="is-primary" disabled={busy||(!dirty&&response.draft.revision<1)} onClick={()=>void publish()}>{busy?'正在处理…':'发布新版本'}</button><input ref={fileInput} hidden type="file" accept="application/json,.json" onChange={event=>void importJson(event)}/></div></header>
+  <div className="admin-layout-status"><span className={dirty?'is-dirty':validation?.valid?'is-clean':'is-invalid'}>{dirty?'● 有本地修改':validation?.valid?'✓ 草稿校验通过':'! 草稿待修正'}</span><p>{error||notice}</p></div>
+  <div className="admin-layout-publish"><label>发布说明<input value={publishNote} maxLength={240} onChange={event=>setPublishNote(event.target.value)} placeholder="说明本次道路、建筑或室内调整"/></label><small>当前草稿 r{response.draft.revision} · 活跃版本 {response.active_version?.id.slice(0,19)??'内置默认'}</small></div>
+  {validation&&!validation.valid&&<section className="admin-layout-validation" aria-live="polite"><b>校验问题（{validation.issues.length}）</b><ul>{validation.issues.slice(0,20).map((issue,index)=><li key={`${issue.code}:${issue.path}:${index}`}><code>{issue.path}</code><span>{issue.message}</span></li>)}</ul>{validation.issues.length>20&&<p>另有 {validation.issues.length-20} 个问题，请导出 JSON 后检查。</p>}</section>}
   <nav className="admin-layout-mode" aria-label="编辑区域"><button type="button" className={mode==='city'?'is-active':''} onClick={()=>{setMode('city');setSelectedId('');setSelectedLayer(undefined)}}>☁ 城市地图</button><button type="button" className={mode==='interior'?'is-active':''} onClick={()=>{setMode('interior');setSelectedId('');setSelectedLayer(undefined)}}>⌂ 共享住宅室内</button></nav>
   {mode==='city'?<nav className="admin-layout-layers" aria-label="城市图层">{LAYERS.map(value=><button type="button" key={value} className={layer===value?'is-active':''} onClick={()=>{setLayer(value);setSelectedLayer(undefined);setSelectedId('')}}><span>{LAYER_COPY[value].icon}</span><b>{LAYER_COPY[value].label}</b><small>{draft.city[value].length}</small></button>)}</nav>:<nav className="admin-layout-rooms" aria-label="住宅房间">{draft.interior.rooms.map(value=><button type="button" key={value.id} className={room?.id===value.id?'is-active':''} onClick={()=>{setRoomId(value.id);setSelectedId('')}}><b>{value.name}</b><small>{value.placements.length} 件物品</small></button>)}</nav>}
   <div className="admin-layout-workspace">
@@ -220,6 +250,7 @@ export function AdminWorldLayoutEditor(){
     <div className="admin-layout-transform"><button type="button" onClick={()=>replaceSelected(value=>({...value,rotation:{...value.rotation,y:value.rotation.y-Math.PI/2}}))}>↶ 左转 90°</button><button type="button" onClick={()=>replaceSelected(value=>({...value,rotation:{...value.rotation,y:value.rotation.y+Math.PI/2}}))}>↷ 右转 90°</button><button type="button" onClick={duplicateSelected}>⧉ 复制</button><button type="button" className="is-danger" onClick={removeSelected}>× 删除</button></div>
    </>:<p>选择一个资产后可精确调整位置、朝向和缩放。</p>}</section>
   </div>
+  <section className="admin-layout-history"><header><div><p className="eyebrow">VERSION HISTORY</p><h3>发布历史与回滚</h3></div><p>版本内容按 SHA-256 哈希去重且发布后不可修改；激活旧版本只切换布局指针。</p></header>{response.versions.length?<div className="admin-layout-history__list">{response.versions.map(version=><article key={version.id} className={version.is_active?'is-active':''}><div><b>{version.is_active?'当前版本':'历史版本'}</b><code>{version.hash.slice(0,12)}</code></div><p>{version.note}</p><small>{version.author} · {new Date(version.created_at).toLocaleString('zh-CN')}</small>{!version.is_active&&<button type="button" disabled={busy} onClick={()=>void activate(version.id)}>激活 / 回滚</button>}</article>)}</div>:<p className="admin-layout-history__empty">尚无已发布版本；当前玩家看到项目内置默认布局。</p>}</section>
  </section>
 }
 

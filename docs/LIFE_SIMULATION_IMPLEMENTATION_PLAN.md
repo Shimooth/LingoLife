@@ -1,11 +1,12 @@
 # LingoLife 生活模拟改造技术实施方案
 
-- 版本：0.6
+- 版本：0.7
 - 创建日期：2026-08-26
 - 方案确认：2026-08-28
 - 首轮实现检查点：2026-08-28
 - 产品拓扑决定：2026-09-03
 - 首版实现审计：2026-09-03
+- 垂直切片复核：2026-09-04
 - 目的：将当前“每日社交事件 + AI 对话”运行时迁移为“持续生活行为 → 行为碰撞 → Moment / Incident / Story Thread”，并作为家里与公司两套开发环境的跨会话交接依据。
 - 设计依据：
   - [`../LingoLife GDD.md`](../LingoLife%20GDD.md)
@@ -76,31 +77,36 @@
 - DeepSeek 只负责英语表达与理解，不决定世界事实；外部模型、聊天响应、缓存重放和普通 Agent 面板都经过安全投影；
 - 英语学习链路保持兼容，本轮没有扩建学习内容、等级曲线或 UI。
 
-### 2.2 2026-09-03 产品决定、首版实现与剩余差额
+### 2.2 2026-09-04 当前可运行事实
 
-以下首个可运行切片已经进入当前工作树，并通过聚焦回归：
+以下内容已经进入当前工作树，并有聚焦自动证据：
 
-- 新账号登录后先读取 onboarding 状态，React 展示观察者/管理者介绍和 2～8 人建组界面，complete 成功前不挂载玩家城市主流程；
-- 前端从 12 个不重复原型中生成核心公开档案，支持增删、逐人/整组重抽、逐字段编辑和 2～8 人客户端校验；后端 Pydantic/数据库边界重新校验整组 payload 与账号内标准化姓名唯一，并在一个 SQLite 事务中创建全部角色和完成状态；
-- LifeWorldService 把同一玩家的全部现存居民归入一个稳定 Household/Home/Residence，并在加载旧多住宅世界时保留居民、关系和已有 Household 状态后合并；
-- 城市只生成一个 shared-home 建筑；共享住宅布局含客厅、厨房、浴室、卧室四个房间，角色对话和 Household/家庭事件可以读取该布局；
-- 管理端已有城市与共享住宅 placement 编辑、2D 拖拽、3D 预览、JSON 导入导出和发布/reset；玩家端只有 published layout 只读 API；
-- 服务端 schema 使用批准资产白名单、禁止额外字段，并校验基础 ID、变换、地点引用、室内边界和必需房间；布局 payload 不含 NPC 动态状态。
+- 新账号必须先持久确认介绍，再一次提交 2～8 名居民；统一服务端 `WorldSetupGate` 会阻止未完成账号调用 world、city、room、stories、households、agent 和 chat。整组写入使用可恢复 setup saga，social edges、LifeWorld、Household 和最终完成标志之间的故障可以用相同请求恢复，不重复角色或问候；
+- 12 个不重复原型已经包含喜恶、怪癖、习惯、边界、Household 角色、家务偏好和私人空间偏好。前后端都校验字段完整、名字唯一和阵容在人格、兴趣、日程、家务与社交方式上的差异；服务端编译六个人格轴与七种行为倾向；
+- 首次建组的亲属关系以阵容索引成对提交，服务端拒绝组外、自指、重复、非法或非互反角色，再物化为双方一致的稳定 NPC ID；共同历史 Hook 使用受限类型、语气、参与者、长度和每人上限，可在 Onboarding/CharacterStudio 编辑并持久进入 Persona。`avatar_contract.py` 对 model、发型、五官、肤色、服装、裤子、配饰、住宅背景和材质色全部执行批准枚举，同时保留当前素材与已知旧别名；
+- Daily Plan 已从旧三槽位目标升级为持久 block：工作/学习、睡眠窗口和双方一致的已接受邀约。NPC 同时持有多个有生命周期的 Desire、一个主 Commitment 和一个排队意图；压抑、替代、过期、中断及迟到/疲劳/失约会记录原因和余波；
+- 每名 active 居民稳定绑定同一个 Household/Residence、一个 `private_room_id`、一个私密睡眠 anchor、个人物品和共享规则期待。单一 manifest 现定义共享客厅/厨房/浴室、连续走廊和 8 间带完整边界、门、床、灯及个人痕迹的独立卧室；2、4、8 人均通过唯一绑定、净空、资源占用、排队、碰撞与离线推进组合测试；
+- 八类室友摩擦和四类友好 Moment 都有独立内容证据。垃圾负载、私人/共享食物所有权和真实私人物品借用可以从权威 Life Action 事实自然产生；主观 memory seed 会有界影响后续同主题 response；
+- 碰撞现场保存 setup / exchange / reaction / closure 四阶段、至少五个双语 beat；规则 response、Persona 和关系阶段会改变台词、情绪与动画，之后修改档案不会改写已经发生的场景；
+- Trouble Signal 的披露策略综合事件强度、玩家信任、disclosure style、自尊、隐私边界和可信室友。NPC 可以告诉玩家、只告诉另一名居民或保持隐藏；决定持久化后刷新不重抽；已结算故事可在之后 1～7 个游戏日通过 `recent_aftermath` 回访；
+- 管理结果除立即接受、稍后接受、礼貌拒绝和反效果外，已有独立 `misunderstood` 分支；它拥有不同的 outcome、关系变化、主观记忆和双语余波，多参与者仍可形成 mixed；
+- `development.py` 将已完成 Life Action 与已结算 Story/Thread 转为同一幂等成长 Evidence。它缓慢、有界地推进目标、已声明习惯、信心、关系策略及少量有历史依据的人格轴变化；重复证据不重算、ID 内容冲突失败关闭，公开 DTO 隐藏证据 ledger；
+- DeepSeek 的 `TurnAnalysis` 只返回语义、语言证据、记忆候选和动画提示。关系、情绪和 XP 由规则层计算；私密行为、受限记忆、隐藏关系和内部 ID 在 API 与第三方 Prompt 两层过滤；
+- 城市/住宅作者工具使用 62 项机器可读批准资产元数据，支持服务器 CAS 草稿、纯校验、内容哈希不可变版本、active 指针、审计、历史激活和真正回滚。校验覆盖路网、天空出口、完整占地、建筑压路、装饰挡路、房间/门路径、fixture/resource/action anchor 和 2/4/8 睡眠容量；
+- 已发布住宅布局会把 fixture 平移/旋转编译进 action anchor，并把额外批准 sofa/stove/shower 编译为电视/厨房/浴室容量；缩容保留在途租约和队列。active 城市布局也会编译真实建筑锚点、building family、道路图和地点机会：移动建筑改变保存的道路 route/journey duration，替换不兼容建筑 family 会关闭对应 reading/dining 等机会资源；换版保留在途旧 journey、关系和故事事实；
+- 公开故事使用随 2/4/8 人次线性扩张的 desktop/compact 注意力预算；选择器综合故事强度、时效和主题重复，始终保留紧急 Incident，并把 suppressed 数交给 UI 解释较弱线索为何收起；
+- schema v5 会为旧账号建立 `single-household-v1` 持久盘点和 SHA-256 事实清单。超过 8 人的账号在管理员显式选择 2～8 名 active 前不能模拟；其余居民归档但不删除，重建共享住宅后再次复核所有旧角色仍保留；
+- 3D 地图与住宅已在 1440×900 和 390×844 的 8 人真实 Chrome/WebGL 会话中验证：状态 dock 无溢出、follow 稳定、8 个私人卧室标签可见，NPC interaction 共 5 beats（双方 3/2），控制台无异常。这是可运行 smoke/interaction 证据，不等于独立美术的最终材质、遮挡和低端 GPU 性能验收。
 
-以下仍是目标契约与当前首版之间的明确差额：
+仍需与“整个长期 GDD 完成”明确区分的差额：
 
-- onboarding ready gate 目前由玩家端主流程执行，世界 API 尚未形成统一的服务端未完成状态拒绝策略；
-- 整组角色与 onboarding completion 在同一 SQLite 事务，但初始 social edge、LifeWorld/Household 建立和住宅改名发生在该事务之后；需要补可恢复 saga/补偿或等价的故障注入证明，避免接口失败后留下 completed 但初始化响应中断的状态；
-- 当前原型只覆盖 NpcProfile 核心字段；喜恶、怪癖、习惯、家务倾向、Household 角色、共同历史 Hook 和阵容级差异评分尚未进入完整可编辑/可持久合同；
-- schema v3 之前已经存在的单 Emma 账号会被明确 grandfather 为完成状态，以免旧用户被锁定；新账号不得继承该例外，旧账号仍应收到补足第二名居民的提示；
-- 旧世界合并当前是服务加载时的可重入 JSON 快照协调，没有独立迁移报告、校验和、显式回滚，也没有异常 8 人以上账号的 active/archive 审核流程；
-- 布局只有单个可覆盖的 published row 和恢复代码默认值的 reset；服务端草稿、不可变历史版本、作者/变更说明、激活、真正回滚和审计尚未实现；
-- 路网接口连通、完整占地碰撞、房间/门可达、资源锚点、站位、容量及运行中租约/动作迁移尚未进入发布校验；首版已经覆盖城市边界、业务地点/shared-home 完整性和道路/建筑中心点重合；
-- 当前管理端共用一个管理员会话且编辑器直接加载，尚未拆分布局作者角色和按需 3D 分包；
-- 一套共享住宅已经有 authored placement 闭环，但正式品质的灯光、构图、材质、门/路径、动作接触和移动端验收仍需继续打磨。
-- 当前 Household member 投影没有为实际居民分配 `private_room_id`，默认布局也只有一个 bedroom/单人床视觉；“每人拥有自己的房间”和 2/4/8 人床位容量仍是目标验收，不是首版现状。
+- 新八卧室翼仍是现有低多边形资产的程序化组合；虽已通过桌面/移动 Chrome smoke，终局材质/遮挡打磨、低端 GPU 性能、面部 Morph、坐/躺/进食/手持物件的骨骼重定向与 IK 仍未完成；
+- 城市运行语义已覆盖建筑锚点、building family、道路最短路、journey duration 和首组地点机会；任意新资源/建筑能力、动态营业/施工和真正城市扩张尚未统一泛化。作者权限仍共用管理员会话，3D 编辑器尚未按需分包；
+- 自适应注意力合同已经落地，但 8 人长时间真人观察仍需校准阈值、重复感和移动端信息密度；
+- Life Action/Story/Thread 已统一推动目标、习惯、信心和关系策略；更复杂的秘密传播、三角关系、传闻、小团体、完整职业日历及群体成长仍属后续；
+- 英语知识点、文字反馈和浏览器语音入口继续保持兼容，但听/说/读/写独立能力、语音测评和阅读/调解 evidence 未进入本轮。
 
-现有 Life Action、关系、故事、学习和 3D 基线继续保留。此次决定是拓扑、首次体验和作者工作流的增量迁移，不授权清空数据库或把旧角色重新生成为新角色。
+以上都是增量迁移，不授权清空数据库或重新生成既有角色。完整逐项判定见 [`GDD_ACCEPTANCE_MATRIX.md`](GDD_ACCEPTANCE_MATRIX.md)。
 
 ---
 
@@ -189,7 +195,7 @@ Rule-owned settlement
 World API → 3D presentation / optional dialogue
 ```
 
-目标架构中，管理端另有不进入 Tick 的 `LayoutAuthoringService`：读取批准资产目录，保存城市/共享住宅草稿，执行拓扑与资源锚点验证，并以不可变版本发布。模拟只读取已发布版本的语义地点、路径和资源定义；作者服务没有修改 NPC 动态表和故事结算的权限。当前首版暂由 FastAPI app/Database 上的 world-layout 方法承载单 published manifest，尚未拆出该服务或不可变版本仓储。
+管理端的不进入 Tick 的布局作者边界目前由 FastAPI app、Database、`layout_validation.py` 和 `layout_runtime.py` 协作实现：读取批准资产目录，CAS 保存城市/共享住宅草稿，执行拓扑与资源锚点验证，并以不可变内容哈希版本发布。模拟只读取 active 版本；住宅 fixture 的相对 action anchor 和首组三类资源容量会被编译到权威世界。active 城市版本也已编译建筑锚点、building family 和道路图，用路网距离决定 journey duration，并用建筑类型与地点语义的交集开关首批行为机会。切换布局时保留已在途 journey 的旧路线以及关系/故事事实。作者 payload 始终不能修改 NPC 动态状态或故事结算。该边界尚未抽成独立服务/权限角色，任意新资源/建筑能力、动态营业/施工及真正城市扩张也尚未泛化。
 
 ### 4.1 模块边界
 
@@ -197,18 +203,22 @@ World API → 3D presentation / optional dialogue
 
 - `backend/lingolife/life.py`：Desire、Commitment、Life Action 和离线推进；
 - `backend/lingolife/life_world.py`：世界推进内核、Household/资源协调和关系转折；
-- `backend/lingolife/life_service.py`：事务加载、持久化投影和玩家安全 DTO；
+- `backend/lingolife/life_service.py`：事务加载、持久化投影、玩家安全 DTO 和自适应故事注意力预算；
 - `backend/lingolife/collisions.py`：行为碰撞与规则模板；
 - `backend/lingolife/stories.py`：Moment、Incident、Thread 和干预；
+- `backend/lingolife/interaction.py`：把已结算碰撞编译成可重放的多阶段双语现场；
+- `backend/lingolife/disclosure.py`：Trouble Signal、向可信居民倾诉和隐藏问题的披露策略；
 - `backend/lingolife/relationships.py`：关系证据、方向性心理边和多频道状态；
+- `backend/lingolife/profile_contract.py` 与 `avatar_contract.py`：公开角色合同、稳定旧档补全、阵容差异校验及 Avatar 全子部件/材质白名单；
+- `backend/lingolife/development.py`：把已完成 Life Action 与已结算 Story/Thread 统一为幂等、缓慢有界的成长 Evidence；
+- `backend/lingolife/layout_validation.py` 与 `layout_runtime.py`：布局拓扑验证，住宅资源以及城市建筑/路网/机会语义编译；
+- `backend/lingolife/migration_audit.py`：旧账号事实盘点、迁移校验和与报告；
+- `backend/lingolife/chat_rules.py` 与 `chat_journal.py`：玩家对话规则结算及持久提交/恢复；
 - `backend/content/life_actions.json`：行为模板；
 - `backend/content/life_scenarios.json`：碰撞与响应模板；
-- `world setup` 模块：首次介绍状态、阵容默认生成、整组校验与原子创建；
-- `layout authoring` 模块：批准资产目录、城市/住宅布局草稿、验证、发布与回滚；
-- `backend/tests/test_life.py`；
-- `backend/tests/test_household_topology.py`；
-- `backend/tests/test_collisions.py`；
-- `backend/tests/test_stories.py`。
+- `app.py` / `db.py` 的 world setup 边界：首次介绍状态、阵容 staging、可恢复投影与 ready gate；
+- `app.py` / `db.py` 的 layout authoring 边界：批准资产目录、城市/住宅布局草稿、验证、发布与回滚；
+- `backend/tests/test_onboarding_social_contract.py`、`test_story_attention.py`、`test_development.py`、`test_shared_home_layout.py`、`test_layout_runtime_simulation.py` 以及既有 GDD/life/Agent/interaction/disclosure/privacy/layout/migration/chat 测试：本轮直接验收证据。
 
 现有 `social.py` 在迁移期保留。新引擎稳定后，四个旧社交模板转换为 collision/story 模板，再逐步移除“一天一个社交事件”的生成入口。
 
@@ -288,15 +298,15 @@ Residence 与 Household 保持语义分离，但当前拓扑固定为一对一�
 5. 异常的 8 人以上账号设置 `world_setup_status=needs_roster_review`，不删除任何角色；管理员辅助选择 2～8 名 active，其余归档并停止模拟；
 6. 迁移完成前后写入计数、校验和和迁移版本，失败时整体回滚。
 
-当前首版只完成了这套迁移的运行时核心：选择旧世界中成员最多的 Household 作为稳定 canonical anchor，把全部现存居民、Home/Residence 引用和 housemate 结构关系协调到该处，并保留居民、方向性关系、Household 状态与可迁移的 aftermath 引用。它在世界加载时可重入执行，但还没有 single-household-v1 报告、校验和、显式回滚、旧坐标历史字段或超限 active/archive 审核；这些仍按上述目标补齐。
+schema v5 已把该流程接到生产数据库初始化和管理端：首次打开旧库时只盘点一次，保存迁移 current state、逐步 report、受保护事实表的行数/逐行摘要与总 SHA-256，以及完整性问题；0～1 人进入 onboarding，2～8 人可进入共享住宅协调，超过 8 人进入 `needs_roster_review` 并停止正式模拟。管理员必须显式选择 2～8 名 active，其他居民只归档、不删除；LifeWorld 只读取 active cast，重建共享 Household 后再次写入复核报告。盘点、选择和报告在同一 SQLite 事务中，故障会回滚，重复 request key 不会重复执行。仍未保存每个旧 home 坐标的独立历史明细，也没有面向管理员的一键“反向恢复多个活跃住宅”；回滚策略仍是数据库备份或经过单独验证的反向迁移，而不是删除新表。
 
 #### 5.3.1 World setup 状态
 
-`player_onboarding` 以 `player_id` 为主键，`state_json` 首轮保存版本、`completed` 和 `household_name`，并单独记录 `completed_at`/`updated_at`。API 结合现有角色数返回 `min_residents=2`、`max_residents=8` 和剩余名额。未完成时当前玩家端不读取正式世界；服务端统一 ready gate 仍待补齐。创建整组 Persona 与完成标志必须在一个事务中提交。后续如增加介绍版本、旧单人账号提示或超限 roster review，应继续增量扩展 `state_json`，不破坏 v1。
+`player_onboarding` 以 `player_id` 为主键，`state_json` 保存合同版本、intro version/确认时间、`setup_status`、setup key、阵容指纹、`completed` 和 `household_name`，并单独记录 `completed_at`/`updated_at`。API 返回 `min_residents=2`、`max_residents=8`、剩余名额与迁移状态。正式世界 API 统一调用服务端 ready gate；创建整组 Persona 后进入 `initializing`，可恢复 saga 顺序补齐 social edges、LifeWorld/Household、住宅名和最终完成标志，四个注入故障边界均证明重放不会重复角色、问候或世界投影。schema v3 前兼容账号和 schema v5 roster migration 使用显式状态，不把例外扩散给新注册账号。
 
 #### 5.3.2 布局版本
 
-首轮 `world_layout_configs` 使用 `scope='published'` 保存一个同时包含城市和共享住宅的版本化 JSON manifest；未保存时使用代码内置默认布局。Pydantic schema 中的常量集合就是首轮批准资产目录，payload 只能包含白名单资产 ID 和受约束变换，不能包含任意 URL、Prompt、脚本、NPC 动态状态或事件结果。正式频繁上线编辑前，再从单 published row 增量升级为草稿、不可变历史版本、作者、父版本、校验报告和激活记录。
+schema v4 保留旧 `world_layout_configs` 供增量迁移，同时新增全局 CAS 草稿、按规范 JSON SHA-256 寻址的不可变历史版本、singleton active 指针和审计记录。未发布时仍使用代码内置默认布局；旧 published row 会迁移成首个不可变版本。Pydantic schema 与 `world-asset-catalog.json` 共同约束白名单资产、变换和语义，payload 不能包含任意 URL、Prompt、脚本、NPC 动态状态或事件结果。重复发布相同内容只激活既有版本，不改写其原始作者、说明与时间。
 
 ### 5.4 新表 `household_resources`
 
@@ -330,7 +340,7 @@ CREATE TABLE npc_desires (
 );
 ```
 
-状态：`candidate`、`committed`、`suppressed`、`expired`、`cancelled`。每名 NPC 仅保留当前和近期重要 Desire，普通候选不长期存储。
+运行时状态包括 `candidate`、`committed`、`deferred`、`suppressed`、`substituted`、`fulfilled`、`expired` 和 `cancelled`。每名 NPC 在权威世界中保留有界 Desire stack；重要 Desire 同步到投影，压抑/替代/过期造成的情绪痕迹进入 aftermath，不把内部强度公开给玩家。
 
 ### 5.6 新表 `npc_life_actions`
 
@@ -486,10 +496,11 @@ stable_number(
 ### 7.0 Onboarding API
 
 - `GET /api/v1/onboarding`：返回完成状态、居民数量、允许范围和剩余名额；注册、登录和 `auth/me` 也可以内嵌同一状态，减少错误闪入城市；
-- `POST /api/v1/onboarding/complete`：接收 `household_name` 与 2～8 份角色档案；当前服务端用 NpcProfile/Pydantic 和 SQLite 事务重新校验人数、字段、Avatar 格式、年龄范围、账号名额，以及 NFKC/空白/casefold 后的账号内姓名唯一，并原子创建居民。完整边界互斥和阵容级差异校验仍需补齐；
+- `POST /api/v1/onboarding/intro/acknowledge`：持久保存受支持的 intro version；未确认介绍不能提交阵容；
+- `POST /api/v1/onboarding/complete`：接收 `household_name`、2～8 份角色档案、按阵容索引表示的 `family_bonds` 与受限 `shared_history_hooks`。服务端用 NpcProfile、完整公开字段规范化、阵容差异报告和 SQLite saga 重新校验人数、字段、年龄/恋爱边界、账号名额及 NFKC/空白/casefold 后的账号内姓名唯一。亲属必须同阵容、无自指、类型合法且双向角色互逆；共同历史的类型、语气、参与者、长度与每人数量都有上限；Avatar 的 model、发型、五官、肤色、衣裤、配饰、家居背景与材质色必须来自服务端批准枚举。角色批次先原子 staging，再以确定性 NPC ID 物化双方关系/共同历史，可恢复地建立 social edges、LifeWorld/Household 并 finalize；
 - 已完成 onboarding 的账号重复 complete 返回明确冲突，不重新生成世界。0～1、9 人以上或任一角色无效时整体拒绝。
 
-首轮前端从版本化、批准的完整预设池随机抽取不重复原型，提供增删、逐人/整组重抽和核心公开字段编辑；本地随机只用于确认前的候选草稿，不是权威世界随机，也不得生成隐藏关系数值或已结算事实。后端不信任前端默认值，只持久化通过 schema 与业务校验的最终整组合同。后续若需要跨设备恢复未完成草稿，再把生成 seed、预设版本和草稿持久化，不阻塞本轮主流程。
+首轮前端从版本化、批准的完整预设池随机抽取不重复原型，提供增删、逐人/整组重抽、双向亲属与共同历史编辑，角色工作室也能继续修改自己视角的共同历史；已物化的客观亲属在单人编辑时只读，避免制造单向事实。Avatar 选项与材质色使用和服务端同源的有限调色板，并保留已知旧角色别名。本地随机只用于确认前的候选草稿，不是权威世界随机，也不得生成隐藏关系数值或已结算事实。后端不信任前端默认值，只持久化通过 schema 与业务校验的最终整组合同。后续若需要跨设备恢复未完成草稿，再把生成 seed、预设版本和草稿持久化，不阻塞本轮主流程。
 
 ### 7.1 扩展 `GET /api/v1/world`
 
@@ -529,6 +540,7 @@ stable_number(
 ```
 
 迁移期保留 `social_interactions` 和 `world_action`，由适配器从新状态生成。
+当前安全投影还会在居民上返回定性 `development`，在旅行行为上返回可公开 `journey`，并在顶层返回 `city_layout_version`、`recent_aftermath`、`attention_budget` 与已折叠线索数。成长投影不暴露私有 Evidence ledger，旅行投影不暴露建筑内部资源 ID。
 
 ### 7.2 `GET /api/v1/life-stories`
 
@@ -546,11 +558,13 @@ stable_number(
 {"action": "mediate", "idempotency_key": "..."}
 ```
 
-响应包含每名参与者的独立反应、共同结果、可见余波和仍开放的 Thread。服务器校验动作是否仍允许。
+响应包含每名参与者的独立反应、共同结果、可见余波和仍开放的 Thread。服务器校验动作是否仍允许。可能分支为立即接受、稍后接受、礼貌拒绝、误解、反效果或多参与者 mixed；`misunderstood` 不是 refusal/backfire 换名，它有独立因子、结果、标签、主观记忆和双语余波。
 
-### 7.5 `POST /api/v1/npcs/{id}/interactions/conversation`
+### 7.5 玩家对话与 NPC–NPC 现场表达
 
-服务端先检查 `current_action.interruptibility`，再决定进入会话、延后交谈或拒绝打断。`GET /room` 只读取会话场景，不再暗中停止生活动作。
+当前玩家对话继续使用 `POST /api/v1/chat` 和 `/chat/stream`，没有另增重复的 conversation 路由。服务端把 Life Action、可披露 Story、Persona、关系阶段、相关记忆与学习前沿投影给表达层；私密行为只暴露 `private_time`。模型只返回受约束语义和语言证据，规则层计算数值。对话响应与消息、学习、关系/runtime、目标、Persona、记忆、摘要、旧事件 transition 和 LifeWorld interaction 通过持久 chat journal 提交与恢复。数据库自有副作用与 journal checkpoint 在同一事务提交；LifeWorld 使用 `interaction_id = Idempotency-Key` 幂等应用后再 checkpoint。同一玩家不同 key 也串行，避免统计/学习的 last-write-wins；相同 key 但 NPC 或消息不同会返回冲突。legacy `chat_requests` 可首次收养并固定 payload fingerprint，不能验证其更早的原始请求正文。
+
+NPC–NPC 碰撞不为每个 Tick 调用模型。规则 response 被编译并持久化为 setup / exchange / reaction / closure 四阶段双语场景，前端按 beat 时长渐进演出。普通 chat 仍会在 NPC 处于私密/不可打断行为时给出安全回应；如果产品要让“开始聊天”本身也可延迟或拒绝，还需要增加明确的 conversation admission 状态机，不能只依赖 Prompt。
 
 ### 7.6 Household API
 
@@ -564,11 +578,15 @@ stable_number(
 ### 7.7 管理端布局作者 API
 
 - `GET /api/v1/world-layout`：玩家端只读取得当前发布布局；
-- `GET /api/v1/admin/world-layout`：作者读取当前布局；
-- `PUT /api/v1/admin/world-layout`：保存经过 Pydantic 资产白名单、字段范围、ID 和基础房间要求校验的城市/共享住宅布局；
-- `POST /api/v1/admin/world-layout/reset`：恢复代码内置的已验证默认布局。
+- `GET /api/v1/admin/world-layout`：作者读取 active、服务端草稿、版本历史与审计；
+- `GET/PUT /api/v1/admin/world-layout/draft`：读取或以 revision CAS 保存草稿，并返回拓扑问题；
+- `POST /api/v1/admin/world-layout/validate`：显式执行与发布相同的纯拓扑校验；
+- `POST /api/v1/admin/world-layout/publish`：按草稿 revision 二次校验并发布不可变版本；
+- `GET /api/v1/admin/world-layout/versions` 与 `POST .../versions/{id}/activate`：读取历史及重新激活旧版本完成回滚；
+- `PUT /api/v1/admin/world-layout`：旧客户端兼容入口，同样必须完整校验后发布，不再原地覆盖；
+- `POST /api/v1/admin/world-layout/reset`：校验、发布并激活代码默认布局，历史不删除。
 
-首轮使用一个 published scope 快速形成可用闭环。正式允许频繁线上发布前，必须补齐独立草稿、完整道路/碰撞/锚点校验、不可变历史版本、变更说明、审计和一键回滚；不能把 `reset` 当作历史版本系统。作者 API 不接收 NPC 动态字段，也不能获得 NPC/故事仓储的任意写能力。
+全部写接口使用既有管理员 HttpOnly Cookie 与严格 Origin；作者 API 不接收 NPC 动态字段。发布、失败、激活和回滚的动态事实表指纹测试证明该路径不会写 NPC/故事仓储。正式多人运营前仍需把布局作者拆成独立角色，并补发布时资源租约/运行中动作迁移。
 
 ---
 
@@ -577,8 +595,9 @@ stable_number(
 ### 8.0 首次介绍与建组
 
 - 登录后先读取 `onboarding`，不是无条件加载世界 Canvas；
-- 未完成状态先在客户端展示玩家身份、NPC 自主性、有限干预和英语用途；当前后端只持久化整体 onboarding completion，尚未单独记录 intro 版本或确认时间；
+- 未完成状态先在客户端展示玩家身份、NPC 自主性、有限干预和英语用途；后端持久保存 intro version/确认时间，并在正式世界 API 统一复核；
 - 建组维护 2～8 人阵容，展示前端批准原型生成的核心角色卡、3D 预览和逐人编辑；
+- 亲属用阵容内双向对应的受限角色编辑，共同历史 Hook 可选参与者/类型/语气并输入受限摘要；Avatar 只显示服务端合同批准的有限选项；
 - 客户端可以为尚未提交的预设草稿使用本地随机抽样，但不得随机补写隐藏 Persona 数值、NPC–NPC 关系或世界结果；确认前统一显示整组校验错误，服务端仍须做最终校验；
 - complete 成功后才预加载城市和单套住宅资源，通过云层动画进入主流程；
 - 返回账号与已完成迁移账号直接进入既有加载流程。
@@ -587,7 +606,7 @@ stable_number(
 
 修改：
 
-- `web/src/types.ts`：新增 LifeAction、TroubleSignal、Household、Moment、Incident、StoryThread；
+- `web/src/types.ts`：新增 LifeAction/Journey、TroubleSignal、Household、Moment、Incident、StoryThread、FamilyRelation、SharedHistoryHook、Development 与 AttentionBudget；
 - `web/src/api.ts`：新增 stories/households/observe/intervene；
 - `web/src/App.tsx`：世界刷新以 current_action 为主要居民状态，旧 world_action 仅作兼容。
 
@@ -597,6 +616,7 @@ stable_number(
 
 - 状态从统一 `idle` 改为具体动作；
 - current_action 决定位置、路径、动画和持续时间；
+- traveling 的路线与时长来自 active 布局编译后的权威 road journey，换版不让已在途角色瞬移；
 - 资源碰撞参与者允许在 Household 内靠近；
 - Life Action 完成后刷新世界，但客户端不得自行结算；
 - 跟随模式继续只控制摄像机。
@@ -609,7 +629,7 @@ stable_number(
 - `TroubleBubble.tsx`：只显示可披露烦恼；
 - `MomentToast.tsx`：可选的轻量生活片段提示；
 - `IncidentEncounter.tsx`：现场信息与上下文动作；
-- `StoryThreadsPanel.tsx`：显示连续故事和余波，不显示待办数量；
+- `StoryThreadsPanel.tsx`：显示连续故事和余波，依 desktop/compact 与 2/4/8 人注意力预算折叠弱线索，紧急 Incident 始终保留，不显示待办数量；
 - `HouseholdInspector.tsx`：成员、房间和共享资源状态。
 
 Household 入口固定指向唯一共享住宅。城市不再为每名居民重复显示住宅标记；居民列表和住宅面板需要在 2～8 人时仍可读。
@@ -624,7 +644,7 @@ Household 入口固定指向唯一共享住宅。城市不再为每名居民重�
 
 管理端按需加载两个编辑模式：城市和共享住宅。资产面板只显示批准目录；层级/属性面板编辑受约束变换与语义信息；校验问题可定位到对象；预览、发布与回滚明确分离。UI 必须持续标注“作者草稿不影响玩家”和当前 published version，任何会破坏路网、房间可达性、资源锚点或运行中动作安全的草稿都不能发布。
 
-当前首版已经提供城市/共享住宅模式、批准资产面板、2D 拖拽与数值变换、3D 预览、JSON 导入导出和覆盖 published manifest 的发布按钮；它随 Admin 页面直接加载，未拆独立作者角色。UI 中的“未发布修改”只是浏览器内编辑态，reset 只是恢复默认布局。按需分包、服务端草稿、问题定位、不可变版本、真正回滚以及完整拓扑/资源校验仍按上一段目标实现。
+当前管理端已提供城市/共享住宅模式、批准资产面板、2D 拖拽与数值变换、3D 预览、JSON 导入导出、服务端草稿 revision、结构化问题清单、发布说明、不可变版本历史和激活/回滚。服务端已经检查道路接头、完整占地、房间图、门路径、资源/行为 anchor，在住宅布局变更后安全协调资源容量与在途 lease，也已把 active 城市的建筑锚点/family、道路图、路程时长和首批地点行为机会接入模拟。它仍随 Admin 页面直接加载且未拆独立作者角色；按需 3D 分包、可视化碰撞轮廓、发布前租约影响预览，以及任意建筑能力/动态营业/施工的泛化仍是生产硬化项。
 
 ---
 
@@ -707,7 +727,7 @@ Household 入口固定指向唯一共享住宅。城市不再为每名居民重�
 - [x] runtime-v2 needs；
 - [x] Desire 生成、评分和压抑；
 - [x] Commitment 与 Life Action 状态机；
-- [x] 独居与多人 Household fixture；
+- [x] 旧拓扑下的独居/多人 Household fixture（Phase 6 后正式主流程已收束为单一共享住宅）；
 - [x] 厨房、电视、浴室资源；
 - [x] 预约、占用、等待和释放；
 - [x] 事件驱动离线推进；
@@ -741,7 +761,7 @@ Household 入口固定指向唯一共享住宅。城市不再为每名居民重�
 - [x] Trouble Signal；
 - [x] 上下文管理动作；
 - [x] 每名参与者独立 acceptance；
-- [x] accepted later / refuse / backfire / mixed；
+- [x] accepted later / refuse / misunderstood / backfire / mixed；
 - [x] 玩家 UI 移除固定最佳答案暗示。
 
 验收：同一调解动作跨不同情境不保证正向结果；家庭矛盾可跨日复发和解决。
@@ -764,43 +784,47 @@ Household 入口固定指向唯一共享住宅。城市不再为每名居民重�
 
 ### Phase 6：首次建组与单一共享住宅迁移
 
-状态：**进行中（首个可运行切片已通过聚焦回归）**
+状态：**已完成（规则、数据与当前视觉纵切）**
 
-- [x] `player_onboarding`、介绍 UI 和玩家端城市 ready gate；
-- [ ] 服务端统一 ready gate、独立 intro 版本/确认状态；
-- [x] 2～8 人核心预设抽取、12 个不重复原型、增删与逐人/整组重抽；
-- [ ] 喜恶/怪癖/习惯/家务/Household 角色等完整合同与阵容差异评分；
-- [x] 核心字段编辑、客户端全阵容校验和 SQLite 原子 complete；
-- [ ] onboarding 角色事务与初始 social edge/LifeWorld/Household 建立之间的故障恢复或等价原子边界；
-- [x] 服务端账号内标准化姓名唯一校验，并覆盖建组、新增与重命名入口；
-- [ ] 完整边界互斥与阵容级最终校验；
-- [x] LifeWorld 运行时 canonical Household/Residence 与全部现存 NPC 单一成员拓扑；
-- [ ] 旧账号 `single-household-v1` 可重入迁移、报告和回滚；
-- [x] 旧多住宅 JSON 世界在加载时可重入合并并保留居民、关系、Household 状态和可迁移余波；
-- [ ] 新账号 0～1 人服务端门禁、旧单 Emma 补足提示与 8 人以上异常账号的非破坏 active/archive 审核；
-- [x] 城市地图移除每角色独立住宅，只显示 shared-home；
-- [ ] 2、4、8 人资源、碰撞、离线推进和移动端 UI 回归。
+- [x] `player_onboarding`、三步介绍 UI、独立 intro version/确认状态；
+- [x] world/city/room/stories/households/social/agent/chat 的统一服务端 ready gate；
+- [x] 2～8 人、12 个不重复完整公开原型、增删、逐人/整组重抽与编辑；
+- [x] 喜恶、怪癖、习惯、生活边界、Household 角色、家务偏好和私人空间偏好；
+- [x] 前后端阵容差异评分，六人格轴与七行为倾向编译；
+- [x] 服务端名字、年龄、恋爱边界、字段范围，以及 Avatar model/发型/五官/肤色/衣裤/配饰/家居背景/材质色批准枚举校验；
+- [x] 亲属同阵容、无自指、合法类型及双向互逆；受限共同历史 Hook 可编辑、持久化并进入 Persona；
+- [x] staging → social edge → LifeWorld/Household → rename → finalize 的可恢复 setup saga 与并发/故障注入测试；
+- [x] canonical Household/Residence、稳定 private room/sleep anchor、personal inventory 和 shared rule expectations；
+- [x] schema v5 `single-household-v1` 盘点、SHA 审计、事务回滚、非法 fixture 隔离和可重入报告；
+- [x] 超过 8 人在管理员明确选择前停止模拟，未选择居民归档但不删除，active-only world 重建后复核；
+- [x] 2、4、8 人资源占用、排队、碰撞、离线推进与无独立住宅回退；
+- [x] 2/4/8 人桌面及移动端状态 dock、跟随和室内真实浏览器回归。
 
-当前已证实：新玩家 UI 在 complete 前不挂载城市；2～8 人原子创建；账号内标准化姓名在建组/新增/重命名及并发边界保持唯一；同一玩家世界只投影一个 Household/Home/Residence；8 人后拒绝新增；旧多住宅核心事实可保留合并。最终验收仍要求服务端门禁、完整角色合同、异常迁移报告，以及 2/4/8 人端到端资源与移动端回归。角色差异应产生不同关系轨迹，不要求随机预写不同心理边起点。
+这里的“规则/数据纵切完成”不等于 Agent 长期设计全部完成。首次建组合同已有 2/4/8 人、非法亲属、非法 Avatar 及持久化/刷新的直接自动证据；剩余长期工作主要是更深的群体历史/秘密传播、职业日历和八人长时真人体验校准，不是再放宽当前契约。
 
 ### Phase 7：管理端布局作者与单套正式室内
 
-状态：**进行中（基础编辑与发布闭环已实现）**
+状态：**已完成（首轮作者、运行语义与正式室内纵切）；生产级扩展另列长期清单**
 
 - [x] 前后端批准资产路径白名单、严格 payload schema 和基础运行时资产目录；
-- [ ] 许可证、包围盒、占地、LOD、可用场景和语义能力的统一机器可读元数据；
+- [x] 许可证、包围盒、占地、LOD、可用场景和语义能力的统一机器可读元数据；
 - [x] 管理端城市/住宅 placement 编辑、2D 拖拽、数值变换、3D 预览与 JSON 导入导出；
 - [ ] 编辑器按需 3D 分包和更完整的层级/问题定位；
-- [ ] 草稿、验证、不可变发布版本、激活和回滚；
+- [x] 服务端 CAS 草稿、统一验证、不可变内容哈希版本、active 指针、历史激活和真正回滚；
 - [x] 资产、额外字段、ID、变换、城市边界、业务地点/shared-home 完整性、道路/建筑中心点重合、室内边界和固定四房非空校验；
-- [ ] 城市道路/占地/行程校验与共享住宅房间/路径/资源锚点校验；
-- [ ] 布局发布的资源租约迁移、动作完成/中断/重规划协调；
-- [ ] 一套共享住宅的灯光、构图、材质、房间转换、动作接触与移动端质量打磨；
+- [x] 城市道路连通/接头/出口、完整占地与共享住宅房间/路径/资源/action anchor/2-4-8 人校验；
+- [x] fixture-relative action anchor 与额外 sofa/stove/shower 容量编译；缩容保留在途租约及队列；
+- [x] active 城市的建筑锚点/family、道路图和最短路线编译；路程距离决定 journey duration，首批 family×location 语义开关 reading/dining 等行为机会，换版保留在途旧 journey；
+- [ ] 任意新资源/建筑能力、动态营业/施工、真正城市扩张与通用行为机会的完整泛化；
+- [x] 一套共享住宅的 shell、墙地面、门窗、功能分区、照明、家具、生活细节和响应式构图；
+- [x] 同一 Residence 内最多 8 间完整边界、墙、门、床、灯与个人痕迹的真实独立卧室；稳定唯一 slot，2/4/8 人门口/床侧净空，共享客厅/厨房/浴室由连续走廊连通；
+- [x] 1440×900 与 390×844 真实 Chrome/WebGL smoke：8 人 dock 无溢出、follow 稳定、8 个卧室标签可见、5-beat NPC 互动且无 console exception；
+- [ ] 新卧室翼的最终材质/遮挡打磨、低端 GPU 性能、面部 Morph 与坐/躺/进食/手持物件重定向/IK；
 - [x] 既有管理员 Cookie、Origin 防护、未授权拒绝及 payload 不接受 NPC 动态字段的安全测试；
-- [ ] 独立布局作者权限、发布审计和“不得写 NPC 动态仓储”的架构隔离测试；
+- [ ] 独立布局作者权限；发布审计和“不得写 NPC 动态仓储”的表指纹隔离测试已完成；
 - [x] 玩家端旧 `?mapEditor=1` 入口移除，正式编辑职责归入管理端。
 
-当前已证实：管理员可用批准资产编辑、预览、覆盖发布和 reset 城市/住宅；非法 schema 不会覆盖已发布配置；普通玩家只有只读 published API。最终验收仍要求独立草稿、不可变历史/回滚、完整拓扑与锚点校验、作者审计，以及发布时运行中动作安全迁移；reset 不算版本回滚。
+当前已证实：管理员可用批准资产编辑、保存服务器草稿、预览校验、发布、查看历史和激活/回滚城市/住宅；非法 schema 或拓扑不会覆盖 active；普通玩家只有只读 active API；发布/回滚不修改关系或故事，并保留住宅在途 lease 与城市在途 journey。真实八卧室已有后端/静态守卫和真实 Chrome smoke 证据。剩余硬缺口是城市能力的通用/动态泛化、独立布局作者权限、按需 3D 分包，以及最终美术/低端 GPU 和精确角色物件接触。
 
 ### Phase 8：后续空间与群体扩展
 
@@ -951,47 +975,49 @@ npm run dev
 ### 当前检查点
 
 ```text
-日期与环境：2026-09-03 / 本地
-分支与提交：main / 首版实现与文档修改待提交
-阶段与步骤：Phase 6～7 / 首个可运行切片完成，进入权威校验与生产 authoring 硬化
+日期与环境：2026-09-04 / 本地
+分支与提交：main / 当前工作树待集成，未提交、未部署
+阶段与步骤：Phase 6～7 当前纵切完成；生产级美术、性能、权限与通用城市扩展进入长期清单
 已完成：
-- 玩家端首次介绍、2～8 人建组、12 个不重复核心预设、逐人/整组重抽、核心字段编辑和城市 UI gate
-- onboarding 状态/API、2～8 人 Pydantic 边界、整组 SQLite 原子创建和 8 人新增上限
-- LifeWorldService 单 Household/Home/Residence 不变量、旧多住宅世界可重入合并与 shared-home 城市投影
-- 一份包含城市与共享住宅四房的 published layout contract、玩家只读 API 与默认布局
-- 管理端城市/住宅 placement 编辑、2D 拖拽、3D 预览、JSON 导入导出、覆盖发布/reset
-- 资产白名单、严格字段、基础 ID/变换/房间校验以及管理员 Cookie/Origin 防护
-- 文档区分已实现首版、目标合同和生产发布前硬化，不把 reset 误称为版本回滚
+- 持久 intro、统一服务端 ready gate、2～8 人完整公开合同/阵容差异与可恢复 setup saga
+- 首次建组的同阵容/无自指/合法/双向亲属，受限可编辑共同历史，Avatar 全子部件/材质服务端白名单与旧角色兼容
+- Daily Plan blocks、Desire stack/queued Commitment、原因化行为转换及计划中断/后果
+- 单一 Household/Residence、8 间有墙门/床/灯/个人痕迹的真实独立卧室、稳定唯一绑定、personal inventory/shared expectations 和 2/4/8 组合验收
+- 八类室友摩擦、四类友好 Moment、垃圾/食物/借物自然事实链和三日 Thread 修复
+- NPC–NPC 四阶段、至少五个双语 beat；Persona/关系/response 驱动的表达与动画
+- Trouble Signal 披露/可信室友/隐藏决策、私密行为和记忆的 API/Prompt 双层投影、次日 aftermath
+- 管理结果含独立 misunderstood；已完成 Action 与已结算 Story/Thread 统一生成幂等、缓慢有界的目标/习惯/信心/关系策略成长 Evidence
+- DeepSeek 只返回受约束语义/学习证据，关系/情绪/XP 由规则结算；chat 使用持久 journal 恢复副作用
+- 管理端 CAS 草稿、62 项资产目录、完整拓扑校验、不可变版本、active/rollback 与动态事实隔离
+- active 住宅布局把 fixture anchor 和 sofa/stove/shower 容量编译进模拟；缩容保留在途 lease
+- active 城市布局编译建筑锚点/family、道路图、路程时长和首批地点机会；版本迁移保留在途 journey 及社交/故事事实
+- 2/4/8 人 desktop/compact 自适应注意力预算，按强度/时效/重复折叠弱线索但永远保留紧急 Incident
+- schema v5 迁移 current/report/SHA、超限 roster review、归档不删除、active-only 模拟及重建复核
+- 1440×900 与 390×844 的 8 人真实 Chrome/WebGL 检查：dock 无溢出、follow 稳定、8 个卧室标签可见、NPC interaction 5 beats（双方 3/2）且无 console exception
 验证：
-- backend/.venv/bin/pytest -q backend/tests/test_onboarding_and_layout_api.py backend/tests/test_household_topology.py → 22 passed
-- npm --prefix web run check:onboarding → passed（12 个不同预设、2～8 人）
-- npm --prefix web run check:life-simulation → passed
-- git diff --check -- '*.md' → passed（见提交前最终复跑）
+- `cd backend && .venv/bin/pytest -q` → 434 passed（最终集成快照）
+- `test_onboarding_social_contract.py` → 30 passed；首次建组相关组 → 63 passed（9.18s）
+- `test_story_attention.py` → 3 passed；`test_development.py` → 7 passed；`test_shared_home_layout.py` → 8 passed；`test_layout_runtime_simulation.py` → 9 passed
+- `test_stories.py::test_misunderstood_is_distinct_from_refusal_and_backfire` 与 `test_life_world.py::test_contextually_wrong_management_can_be_misunderstood_without_backfiring` → passed
+- Web `npm run typecheck` / `npm run lint` / `npm run build` → passed；lint 包含 `check-shared-home.mjs` 等守卫
+- 真实 Chrome：1440×900 与 390×844，8 人 dock/follow/8 bedroom labels/5-beat NPC interaction → passed，console 无异常
 未完成或已知问题：
-- 世界 API 尚无统一服务端 onboarding gate
-- onboarding 角色/完成标志提交后才初始化 LifeWorld 与改名，跨步骤故障恢复尚无注入测试
-- 当前 NpcProfile 原型缺少喜恶、怪癖、习惯、家务倾向、Household 角色、共同历史 Hook 和阵容差异评分
-- schema v3 前单 Emma 账号被明确 grandfather，可继续进入但尚无补足第二人的提示
-- 旧世界合并没有迁移报告/校验和/显式回滚，超限账号没有 active/archive 审核
-- 布局仅单 published row；没有服务端草稿、不可变历史、真正回滚、独立作者角色和审计
-- 道路/碰撞/路径/资源锚点/租约迁移校验与单套室内正式品质打磨尚未完成
-- Household member 尚未分配 private_room_id，单 bedroom/床视觉不能宣称 2～8 人各有独立房间
+- 新八卧室已通过桌面/移动 smoke，但最终材质/遮挡打磨、低端 GPU 性能、面部 Morph 和精确物件接触未完成
+- 城市已有首批布局驱动运行语义，但任意资源/建筑能力、动态营业/施工和真正扩张未泛化；布局作者仍共用管理员角色
+- 注意力预算已随人数/视口自适应，但仍需长时八人真人校准阈值、重复感和移动信息密度
+- 成长 Evidence 已统一首轮行为/故事；更复杂的职业日历、秘密传播、三角关系、小团体和群体成长仍属长期 GDD
+- 共同历史已进入 Persona，但对更广泛故事选择、披露和群体记忆的作用仍需扩展
+- 听说读写独立能力、语音测评、阅读/调解 evidence 仍按产品决定暂缓
 下一步：
-- 优先补服务端 ready gate，再扩充完整 Agent 默认合同；并行设计 layout v2 的草稿/历史/拓扑校验，不阻塞首版试玩
+- 优先对新八卧室翼做更严格的材质/遮挡与低端 GPU 性能验收，并进行八人长时注意力/故事重复度真人试玩
+- 再用正式需求驱动城市能力泛化、秘密/小团体/职业日历，而不把首批纵切扩大声称为整份长期 GDD 完成
 涉及文件：
-- LingoLife GDD.md
-- NPC Agent 系统设计文档.md
-- docs/3D_ARCHITECTURE.md
+- docs/GDD_ACCEPTANCE_MATRIX.md
 - docs/LIFE_SIMULATION_IMPLEMENTATION_PLAN.md
-- docs/MAP_AUTHORING.md
-- backend/lingolife/app.py
-- backend/lingolife/db.py
-- backend/lingolife/life_service.py
-- backend/lingolife/life_world.py
-- backend/lingolife/models.py
-- backend/lingolife/layouts.py
-- web/src/components/OnboardingFlow.tsx
-- web/src/components/AdminWorldLayoutEditor.tsx
+- backend/lingolife/{app,db,life,life_world,life_service,collisions,stories,interaction,disclosure,profile_contract,avatar_contract,development,layout_validation,layout_runtime,migration_audit,chat_journal,chat_rules}.py
+- backend/tests/test_{onboarding_social_contract,story_attention,development,shared_home_layout,layout_runtime_simulation,gdd_vertical_slice,agent_planning,phase6_agent_contract,life_interactions,disclosure_integration,privacy_projection,layout_validation,layout_publication,migration_audit}.py
+- web/src/components/{OnboardingFlow,CharacterStudio,LifeStoryEncounter,StoryThreadsPanel,HouseholdInteriorPreview,AdminWorldLayoutEditor,AdminRosterMigrationPanel}.tsx
+- web/src/three/{world,interiors}/
 ```
 
 ```text

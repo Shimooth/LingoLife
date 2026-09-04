@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from lingolife.collisions import (
     COLLISION_KINDS,
     CollisionEngine,
@@ -11,6 +13,7 @@ from lingolife.collisions import (
     load_collision_catalog,
     resolve_collision_autonomously,
 )
+from lingolife.collisions import _response_score
 from lingolife.life import (
     LifeAction,
     default_household_resources,
@@ -65,6 +68,72 @@ def test_resource_queue_becomes_a_stable_person_resource_collision():
     assert collision.participant_ids == ("emma", "alex")
     assert collision.facts["queue_depth"] == 1
     assert collision.thread_key
+
+
+@pytest.mark.parametrize(
+    ("scenario_id", "triggers", "resource_kind", "expected"),
+    (
+        (
+            "kitchen_capacity_collision", ("resource_capacity", "kitchen_busy"),
+            "kitchen", {"negotiate", "cook_together", "argue"},
+        ),
+        (
+            "bathroom_wait_collision", ("resource_capacity", "bathroom_wait"),
+            "bathroom", {"wait", "offer_quick_turn", "snap_at_other"},
+        ),
+        (
+            "television_preference_collision", ("program_preference", "resource_capacity"),
+            "television", {"choose_together", "yield_remote", "grab_remote"},
+        ),
+    ),
+)
+def test_each_shared_resource_has_three_persona_or_relationship_driven_reactions(
+    scenario_id, triggers, resource_kind, expected,
+):
+    """The fact is fixed; only the resident/relationship context changes."""
+    collision = build_collision(
+        kind="person_resource", triggers=triggers,
+        participant_ids=("a", "b"), action_ids=("action-a", "action-b"),
+        occurred_at=NOW, source_key=f"fixed-{scenario_id}",
+        location_id="h:shared-room", resource_kind=resource_kind,
+        resource_id=f"h:{resource_kind}",
+        facts={"household_id": "h", "queue_depth": 1},
+    )
+    assert collision is not None and collision.scenario_id == scenario_id
+    contexts = {
+        "patient": ({
+            "axes": {"warmth": 45, "assertiveness": 10,
+                     "emotional_stability": 100, "openness": 50},
+            "emotion": {"stress": 0}, "behavior": {"conflict_style": "measured"},
+            "householdRole": "mediator", "pride": 40,
+        }, {"trust": 95, "affinity": 50, "tension": 0, "resentment": 0}),
+        "warm": ({
+            "axes": {"warmth": 100, "assertiveness": 25,
+                     "emotional_stability": 70, "openness": 70},
+            "emotion": {"stress": 5}, "behavior": {"conflict_style": "warm"},
+            "householdRole": "caretaker", "pride": 30,
+        }, {"trust": 80, "affinity": 100, "tension": 0, "resentment": 0}),
+        "hostile": ({
+            "axes": {"warmth": 0, "assertiveness": 100,
+                     "emotional_stability": 0, "openness": 20},
+            "emotion": {"stress": 100}, "behavior": {"conflict_style": "direct"},
+            "householdRole": "free_spirit", "pride": 100,
+        }, {"trust": 0, "affinity": 0, "tension": 100, "resentment": 100}),
+    }
+    responses = set()
+    relationship_changes = []
+    for profile, edge in contexts.values():
+        resolution = resolve_collision_autonomously(
+            collision,
+            profiles={"a": profile, "b": profile},
+            relationships={("a", "b"): edge, ("b", "a"): edge},
+            settled_at=NOW,
+        )
+        responses.add(resolution.response_by_participant["a"])
+        relationship_changes.append(resolution.relationship_changes)
+
+    assert responses == expected
+    assert len({str(value) for value in relationship_changes}) == 3
 
 
 def test_busy_target_and_available_target_produce_different_person_collisions():
@@ -177,6 +246,40 @@ def test_responsibility_boundary_and_environment_facts_are_detected_together():
     }
 
 
+def test_trash_private_food_and_shared_food_facts_reach_distinct_rule_scenarios():
+    snapshot = CollisionSnapshot(
+        "household-food-and-trash", NOW,
+        responsibilities=({
+            "id": "trash-1", "kind": "trash", "created_by": "alex",
+            "expected_npc_id": "emma", "participant_ids": ["alex", "emma"],
+            "trigger": "trash_bin_full", "household_id": "h",
+            "location_id": "h:kitchen",
+        },),
+        boundary_events=({
+            "id": "private-food-1", "kind": "private_food", "actor_id": "alex",
+            "affected_id": "emma", "participant_ids": ["emma", "alex"],
+            "trigger": "private_food_taken", "household_id": "h",
+            "location_id": "h:kitchen", "consent": "not_given",
+        },),
+        social_events=({
+            "id": "shared-food-1", "kind": "shared_food", "actor_id": "alex",
+            "affected_id": "emma", "participant_ids": ["emma", "alex"],
+            "trigger": "shared_food", "household_id": "h",
+            "location_id": "h:kitchen",
+        },),
+    )
+
+    collisions = detect_collisions(snapshot)
+
+    assert {value.scenario_id for value in collisions} == {
+        "trash_duty_responsibility",
+        "private_food_taken_boundary",
+        "shared_food_moment",
+    }
+    assert all(len(value.participant_ids) == 2 for value in collisions)
+    assert all(len(value.response_candidates) >= 3 for value in collisions)
+
+
 def test_autonomous_resolution_is_deterministic_directional_and_rule_owned():
     catalog = load_collision_catalog()
     collision = build_collision(
@@ -210,6 +313,30 @@ def test_autonomous_resolution_is_deterministic_directional_and_rule_owned():
     assert set(first.action_instructions) == {"clean-1", "idle-1"}
     assert len(first.memory_seeds) == 2
     assert first.id.startswith("resolution-")
+
+
+def test_subjective_memory_biases_but_does_not_lock_a_future_response():
+    catalog = load_collision_catalog()
+    collision = build_collision(
+        kind="person_responsibility", triggers=("care_imbalance",),
+        participant_ids=("emma", "alex"), action_ids=("clean-1", "idle-1"),
+        occurred_at=NOW, source_key="remembered-care", location_id="h:kitchen",
+        facts={"household_id": "h", "recurrence_count": 2}, catalog=catalog,
+    )
+    assert collision is not None
+    response = catalog.scenarios[collision.scenario_id].responses[0]
+    neutral = {"axes": {"warmth": 50, "assertiveness": 50,
+                         "emotional_stability": 50, "openness": 50}}
+    remembered = {**neutral, "memory_context": [{
+        "npc_id": "emma", "other_npc_id": "alex", "topic": collision.topic,
+        "response_id": response.id, "response_style": response.style,
+    }]}
+    base = _response_score(response, "emma", collision, neutral, {})
+    influenced = _response_score(response, "emma", collision, remembered, {})
+    assert influenced == base + 8
+    # The bonus is bounded: a strong current relationship/personality signal
+    # can still select another response through the softmax rule.
+    assert influenced - base < 10
 
 
 def test_high_severity_collision_opens_intervention_eligibility():

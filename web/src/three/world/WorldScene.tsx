@@ -1,6 +1,6 @@
 import {Html,Instances,Instance,OrbitControls,useCursor,useGLTF} from '@react-three/drei'
 import {useFrame,useThree,type ThreeEvent} from '@react-three/fiber'
-import {Component,Suspense,useEffect,useMemo,useRef,useState,type ComponentRef,type MutableRefObject,type ReactNode} from 'react'
+import {Component,Suspense,useEffect,useLayoutEffect,useMemo,useRef,useState,type ComponentRef,type MutableRefObject,type ReactNode} from 'react'
 import * as THREE from 'three'
 import {defaultAvatar} from '../../avatar'
 import type {CityCharacter,CityLandmark} from '../../components/CityMap'
@@ -11,8 +11,9 @@ import {
  buildingModelFor,hashString,worldPosition,
  type BuildingLot,type CityBuildingPlacement,type KayKitBuildingModel,type KayKitPropModel,type KayKitRoadModel,type RoadTilePlacement,type TimeSlot,type WorldPoint,
 } from './worldData'
-import {cameraDampingAlpha,cameraPoseSettled,topViewOffset} from './worldCamera'
+import {cameraDampingAlpha,cameraPoseSettled,followCameraZoom,followViewOffset,topViewOffset} from './worldCamera'
 import {buildPedestrianRoute,buildPedestrianRouteForRoads,samplePedestrianRoute,type PedestrianRoute} from './worldNavigation'
+import {residentSidewalkOffset,uniformBuildingScale} from './worldTransforms'
 import type {WorldLayoutBuilding,WorldLayoutDocument,WorldLayoutPlacement} from '../../worldLayout'
 
 type Quality='low'|'high'
@@ -55,6 +56,9 @@ const BUILDING_HEIGHT:Record<KayKitBuildingModel,number>={
  building_E:2.35,building_F:2.35,building_G:2.98,building_H:3.05,
 }
 
+const CITY_CHARACTER_MODEL_SCALE=.175
+const LEGACY_CHARACTER_MODEL_SCALE=.21
+
 const ALL_WORLD_MODELS:readonly KayKitModel[]=[
  ...BUILDING_MODELS.residential,...BUILDING_MODELS.commercial,...BUILDING_MODELS.public,
  ...KAYKIT_ROAD_MODELS,...KAYKIT_PROP_MODELS,
@@ -90,6 +94,19 @@ function AssetInstances({model,items,castShadow=false,receiveShadow=false}:{mode
  if(!items.length)return null
  return <Instances geometry={geometry} material={material} limit={items.length} castShadow={castShadow} receiveShadow={receiveShadow} frustumCulled>
   {items.map(item=><Instance key={item.id} position={item.position} rotation={[0,item.rotation,0]} scale={item.scale}/>) }
+ </Instances>
+}
+
+/**
+ * Buildings keep an identity model transform. Position, rotation and one
+ * scalar live on a stable parent group, so selection and camera changes cannot
+ * stretch an instance or trigger a view-dependent transform.
+ */
+function StableBuildingInstances({model,items,castShadow=false,receiveShadow=false}:{model:KayKitBuildingModel;items:readonly InstancePlacement[];castShadow?:boolean;receiveShadow?:boolean}){
+ const {geometry,material}=useKayKitMesh(model)
+ if(!items.length)return null
+ return <Instances geometry={geometry} material={material} limit={items.length} castShadow={castShadow} receiveShadow={receiveShadow} frustumCulled>
+  {items.map(item=><group key={item.id} position={item.position} rotation={[0,item.rotation,0]} scale={item.scale}><Instance scale={1}/></group>)}
  </Instances>
 }
 
@@ -169,6 +186,10 @@ function CameraRig({focus,focusVersion,followedCharacterId,followCameraOffset,fo
   if(!semanticChange&&manuallyControlled.current){moving.current=false;return}
   const following=Boolean(followedCharacterId)
   const actor=followedCharacterId?actors.current.get(followedCharacterId):undefined
+  // A stale/external follow id must not send the camera through the city
+  // origin while its actor is unavailable. CharacterMarker registers in a
+  // layout effect, so a valid resident is normally ready before this effect.
+  if(following&&!actor){moving.current=false;return}
   const target=new THREE.Vector3(...(focus??[0,0,-1.5]))
   if(actor){actor.getWorldPosition(target);target.add(followLookOffset.current)}
   desiredTarget.current.copy(target)
@@ -188,9 +209,7 @@ function CameraRig({focus,focusVersion,followedCharacterId,followCameraOffset,fo
    ?Math.min(size.width/(viewMode==='top'?42:40),size.height/(viewMode==='top'?46:48))
    :Math.min(size.width/(viewMode==='top'?52:56),size.height/(viewMode==='top'?35:33))*.96
   const focusFit=Math.min(52,Math.max(30,size.height/17))
-  const followFit=portrait
-   ?Math.min(108,Math.max(98,size.width/3.75))
-   :Math.min(118,Math.max(104,size.height/6.35))
+  const followFit=followCameraZoom(size.width)
   desiredZoom.current=following?followFit:focused?(viewMode==='top'?Math.min(30,focusFit):focusFit):overviewFit
   moving.current=true
   if(reducedMotion){
@@ -236,7 +255,7 @@ function CameraRig({focus,focusVersion,followedCharacterId,followCameraOffset,fo
  })
 
  const cancelProgrammaticMove=()=>{if(!followedCharacterId){manuallyControlled.current=true;moving.current=false}}
- return <OrbitControls ref={controls} makeDefault enableDamping dampingFactor={reducedMotion?1:.08} minZoom={5} maxZoom={120} minPolarAngle={viewMode==='top' ? .01 : .5} maxPolarAngle={1.22} enablePan={!followedCharacterId} enableRotate={!followedCharacterId} enableZoom={!followedCharacterId} screenSpacePanning maxDistance={110} minDistance={2} onStart={cancelProgrammaticMove}/>
+ return <OrbitControls ref={controls} makeDefault enableDamping={!followedCharacterId&&!reducedMotion} dampingFactor={.08} minZoom={5} maxZoom={120} minPolarAngle={viewMode==='top' ? .01 : .5} maxPolarAngle={1.22} enablePan={!followedCharacterId} enableRotate={!followedCharacterId} enableZoom={!followedCharacterId} screenSpacePanning maxDistance={110} minDistance={2} onStart={cancelProgrammaticMove}/>
 }
 
 // A manufactured, chamfered city deck reads as one district in a much larger
@@ -408,7 +427,7 @@ function resolveCityLayout(landmarks:readonly CityLandmark[],characters:readonly
   const landmarkLots=new Map<string,BuildingLot>(),homeLots=new Map<string,BuildingLot>()
   const landmarkPlacements=landmarks.map(landmark=>{
    const entry=byLocation.get(landmark.id)
-   if(entry){landmarkLots.set(landmark.id,entry.lot);return {landmark,lot:entry.lot,model:entry.model,position:[entry.placement.position.x,entry.placement.position.y,entry.placement.position.z] as WorldPoint,rotation:entry.placement.rotation.y,scale:entry.placement.scale.x}}
+   if(entry){landmarkLots.set(landmark.id,entry.lot);return {landmark,lot:entry.lot,model:entry.model,position:[entry.placement.position.x,entry.placement.position.y,entry.placement.position.z] as WorldPoint,rotation:entry.placement.rotation.y,scale:uniformBuildingScale(entry.placement.scale)}}
    const fallbackModel=buildingModelFor(landmark.kind,landmark.id),lot=claimNearestLot(available,targetPosition(landmark),`landmark:${landmark.id}`)
    landmarkLots.set(landmark.id,lot);return {landmark,lot,model:fallbackModel,position:[lot.position[0],.369,lot.position[1]] as WorldPoint,rotation:lot.rotation,scale:1.16}
   })
@@ -418,10 +437,10 @@ function resolveCityLayout(landmarks:readonly CityLandmark[],characters:readonly
    const lot=entry?.lot??claimNearestLot(available,targetPosition(primary.home),'shared-home','residential')
    characters.forEach(character=>homeLots.set(character.id,lot))
    const model=entry?.model??'building_A',position=entry?[entry.placement.position.x,entry.placement.position.y,entry.placement.position.z] as WorldPoint:[lot.position[0],.369,lot.position[1]] as WorldPoint
-   homePlacements=[{character:primary,residents:characters,lot,model,position,rotation:entry?.placement.rotation.y??lot.rotation,scale:entry?.placement.scale.x??1.14}]
+   homePlacements=[{character:primary,residents:characters,lot,model,position,rotation:entry?.placement.rotation.y??lot.rotation,scale:entry?uniformBuildingScale(entry.placement.scale):1.14}]
   }
   const usedIds=new Set([...byLocation.values()].map(item=>item.placement.id));if(shared)usedIds.add(shared.placement.id)
-  const fillerBuildings=valid.filter(item=>!usedIds.has(item.placement.id)).map(item=>({id:item.placement.id,family:buildingFamilyForModel(item.model),model:item.model,position:[item.placement.position.x,item.placement.position.z] as [number,number],rotation:item.placement.rotation.y,scale:item.placement.scale.x,y:item.placement.position.y}))
+  const fillerBuildings=valid.filter(item=>!usedIds.has(item.placement.id)).map(item=>({id:item.placement.id,family:buildingFamilyForModel(item.model),model:item.model,position:[item.placement.position.x,item.placement.position.z] as [number,number],rotation:item.placement.rotation.y,scale:uniformBuildingScale(item.placement.scale),y:item.placement.position.y}))
   const occupiedPositions=[...landmarkPlacements.map(item=>item.lot.position),...homePlacements.map(item=>item.lot.position),...fillerBuildings.map(item=>item.position)] as [number,number][]
   return {landmarkPlacements,homePlacements,fillerBuildings,landmarkLots,homeLots,occupiedPositions}
  }
@@ -484,14 +503,14 @@ function resolveCityLayout(landmarks:readonly CityLandmark[],characters:readonly
 function CityFabric({buildings,quality}:{buildings:readonly FabricBuildingPlacement[];quality:Quality}){
  return <group>
   <AssetInstances model="base" receiveShadow items={buildings.map(building=>({id:`lot-${building.id}`,position:[building.position[0],.238,building.position[1]],rotation:building.rotation,scale:ROAD_TILE_SCALE}))}/>
-  {([...BUILDING_MODELS.residential,...BUILDING_MODELS.commercial,...BUILDING_MODELS.public] as KayKitBuildingModel[]).map(model=><AssetInstances key={model} model={model} castShadow={quality==='high'} receiveShadow items={buildings.filter(building=>building.model===model).map(building=>({id:building.id,position:[building.position[0],building.y??.369,building.position[1]],rotation:building.rotation,scale:building.scale}))}/>) }
+  {([...BUILDING_MODELS.residential,...BUILDING_MODELS.commercial,...BUILDING_MODELS.public] as KayKitBuildingModel[]).map(model=><StableBuildingInstances key={model} model={model} castShadow={quality==='high'} receiveShadow items={buildings.filter(building=>building.model===model).map(building=>({id:building.id,position:[building.position[0],building.y??.369,building.position[1]],rotation:building.rotation,scale:building.scale}))}/>) }
  </group>
 }
 
 function ResidentialHomes({homes,quality,language,onSelect}:{homes:readonly HomePlacement[];quality:Quality;language:'zh'|'en';onSelect:(home:HomePlacement)=>void}){
  return <group>
   <AssetInstances model="base" receiveShadow items={homes.map(home=>({id:`home-lot-${home.character.id}`,position:[home.position[0],.238,home.position[2]],rotation:home.rotation,scale:ROAD_TILE_SCALE}))}/>
-  {BUILDING_MODELS.residential.map(model=><AssetInstances key={model} model={model} castShadow={quality==='high'} receiveShadow items={homes.filter(home=>home.model===model).map(home=>({id:`home-${home.character.id}`,position:home.position,rotation:home.rotation,scale:home.scale}))}/>) }
+  {BUILDING_MODELS.residential.map(model=><StableBuildingInstances key={model} model={model} castShadow={quality==='high'} receiveShadow items={homes.filter(home=>home.model===model).map(home=>({id:`home-${home.character.id}`,position:home.position,rotation:home.rotation,scale:home.scale}))}/>) }
   {homes.map(home=><Html key={`home-label-${home.character.id}`} center position={[home.position[0],home.position[1]+BUILDING_HEIGHT[home.model]*home.scale+.58,home.position[2]]} zIndexRange={[24,2]}>
    <button type="button" className="world3d-home" onClick={event=>{event.stopPropagation();onSelect(home)}} aria-label={language==='zh'?'共享住宅':'Shared home'}><span aria-hidden>⌂</span>{language==='zh'?'共享住宅':'Shared home'}<small>{language==='zh'?`${home.residents.length} 位居民`:`${home.residents.length} residents`}</small></button>
   </Html>)}
@@ -535,18 +554,17 @@ function Trees({quality,occupiedPositions,authored}:{quality:Quality;occupiedPos
  </group>
 }
 
-function LandmarkModelInstances({model,items,selectedId,quality,onHover,onSelect}:{model:KayKitBuildingModel;items:readonly LandmarkPlacement[];selectedId?:string;quality:Quality;onHover:(id?:string)=>void;onSelect:(landmark:CityLandmark)=>void}){
+function LandmarkModelInstances({model,items,quality,onHover,onSelect}:{model:KayKitBuildingModel;items:readonly LandmarkPlacement[];quality:Quality;onHover:(id?:string)=>void;onSelect:(landmark:CityLandmark)=>void}){
  const {geometry,material}=useKayKitMesh(model)
  return <Instances geometry={geometry} material={material} limit={items.length} castShadow={quality==='high'} receiveShadow>
-  {items.map(item=><Instance
-   key={item.landmark.id}
-   position={item.position}
-   rotation={[0,item.rotation,0]}
-   scale={item.landmark.id===selectedId?item.scale*1.07:item.scale}
-   onClick={(event:ThreeEvent<MouseEvent>)=>{event.stopPropagation();onSelect(item.landmark)}}
-   onPointerOver={event=>{event.stopPropagation();onHover(item.landmark.id)}}
-   onPointerOut={()=>onHover(undefined)}
-  />)}
+  {items.map(item=><group key={item.landmark.id} position={item.position} rotation={[0,item.rotation,0]} scale={item.scale}>
+   <Instance
+    scale={1}
+    onClick={(event:ThreeEvent<MouseEvent>)=>{event.stopPropagation();onSelect(item.landmark)}}
+    onPointerOver={event=>{event.stopPropagation();onHover(item.landmark.id)}}
+    onPointerOut={()=>onHover(undefined)}
+   />
+  </group>)}
  </Instances>
 }
 
@@ -555,7 +573,7 @@ function LandmarkBuildings({placements,selectedId,hoveredId,language,night,quali
   <AssetInstances model="base" receiveShadow items={placements.map(item=>({id:`landmark-lot-${item.landmark.id}`,position:[item.position[0],.238,item.position[2]],rotation:item.rotation,scale:ROAD_TILE_SCALE}))}/>
   {([...BUILDING_MODELS.residential,...BUILDING_MODELS.commercial,...BUILDING_MODELS.public] as KayKitBuildingModel[]).map(model=>{
    const items=placements.filter(item=>item.model===model)
-   return items.length?<LandmarkModelInstances key={model} model={model} items={items} selectedId={selectedId} quality={quality} onHover={onHover} onSelect={onSelect}/>:null
+   return items.length?<LandmarkModelInstances key={model} model={model} items={items} quality={quality} onHover={onHover} onSelect={onSelect}/>:null
   })}
   {placements.map(item=>{
    const visible=item.landmark.id===selectedId||item.landmark.id===hoveredId
@@ -583,12 +601,11 @@ const waitingFacing=(lot:BuildingLot,participantIndex:number)=>{
  return Math.atan2(direction[0],direction[1])
 }
 
-const characterStandingPosition=(character:CityCharacter,lot?:BuildingLot):WorldPoint=>{
- const characterHash=hashString(character.id)
+const characterStandingPosition=(character:CityCharacter,lot?:BuildingLot,parcelIndex=0,parcelCount=1):WorldPoint=>{
  const fallback=worldPosition(character.location.x,character.location.y,.375)
  if(!lot)return fallback
  const action=character.worldAction as DirectedWorldAction|undefined
- const lateral=action?.state==='waiting_at_event'?(action.participant_index ? .7 : -.7):((characterHash%5)-2)*.13
+ const lateral=action?.state==='waiting_at_event'?(action.participant_index ? .7 : -.7):residentSidewalkOffset(parcelIndex,parcelCount)
  const forward:[number,number]=[Math.sin(lot.rotation),Math.cos(lot.rotation)]
  const side:[number,number]=[Math.cos(lot.rotation),-Math.sin(lot.rotation)]
  return [
@@ -598,7 +615,7 @@ const characterStandingPosition=(character:CityCharacter,lot?:BuildingLot):World
  ]
 }
 
-function CharacterMarker({character,lot,route,active,actors,serverTime,reducedMotion,language,onClick,onEvent,onTrouble,onJourneyElapsed}:{character:CityCharacter;lot?:BuildingLot;route?:PedestrianRoute;active:boolean;actors:ActorRegistry;serverTime?:string;reducedMotion:boolean;language:'zh'|'en';onClick:()=>void;onEvent:(eventId:string)=>void;onTrouble?:()=>void;onJourneyElapsed?:()=>void}){
+function CharacterMarker({character,lot,parcelIndex,parcelCount,route,active,actors,serverTime,reducedMotion,language,onClick,onEvent,onTrouble,onJourneyElapsed}:{character:CityCharacter;lot?:BuildingLot;parcelIndex:number;parcelCount:number;route?:PedestrianRoute;active:boolean;actors:ActorRegistry;serverTime?:string;reducedMotion:boolean;language:'zh'|'en';onClick:()=>void;onEvent:(eventId:string)=>void;onTrouble?:()=>void;onJourneyElapsed?:()=>void}){
  const [hovered,setHovered]=useState(false)
  useCursor(hovered)
  const actor=useRef<THREE.Group>(null)
@@ -606,7 +623,7 @@ function CharacterMarker({character,lot,route,active,actors,serverTime,reducedMo
  const action=character.worldAction as DirectedWorldAction|undefined
  // Rotation points from a parcel to its nearest road. Residents stand on that
  // pavement, so moving a building to a legal parcel also moves its resident.
- const position=characterStandingPosition(character,lot)
+ const position=characterStandingPosition(character,lot,parcelIndex,parcelCount)
  const serverSkew=useMemo(()=>{const parsed=Date.parse(serverTime||'');return Number.isFinite(parsed)?parsed-Date.now():0},[serverTime])
  const startedAt=Date.parse(action?.started_at||''),arrivesAt=Date.parse(action?.arrives_at||'')
  const alreadyArrived=action?.state==='walking_to_event'&&Number.isFinite(arrivesAt)&&Date.now()+serverSkew>=arrivesAt
@@ -614,7 +631,7 @@ function CharacterMarker({character,lot,route,active,actors,serverTime,reducedMo
  const [visualState,setVisualState]=useState(desiredState)
  const arrivalNotified=useRef('')
  useEffect(()=>setVisualState(desiredState),[desiredState])
- useEffect(()=>{
+ useLayoutEffect(()=>{
   const current=actor.current
   if(!current)return
   const registry=actors.current
@@ -647,7 +664,7 @@ function CharacterMarker({character,lot,route,active,actors,serverTime,reducedMo
  })
  const avatar=character.avatar??defaultAvatar
  const cityAsset=avatar.model?.startsWith('city-')??false
- const characterScale=cityAsset?(active ? .28 : hovered ? .22 : .175):(active ? .34 : hovered ? .27 : .21)
+ const characterScale=cityAsset?CITY_CHARACTER_MODEL_SCALE:LEGACY_CHARACTER_MODEL_SCALE
  const color=`hsl(${characterHash%360} 62% 63%)`
  const moving=visualState==='walking_to_event'
  const waiting=visualState==='waiting_at_event'
@@ -678,7 +695,7 @@ function CharacterMarker({character,lot,route,active,actors,serverTime,reducedMo
   {active&&<mesh position-y={.01} rotation-x={-Math.PI/2}>
    <circleGeometry args={[.47,36]}/><meshBasicMaterial color="#ff9a68" transparent opacity={.18} depthWrite={false} side={THREE.DoubleSide}/>
   </mesh>}
-  <mesh position-y={.012} rotation-x={-Math.PI/2} scale={active?1.25:1}>
+  <mesh position-y={.012} rotation-x={-Math.PI/2} scale={1}>
    <ringGeometry args={active?[.264,.376,36]:[.25,.34,32]}/><meshBasicMaterial color={active?'#ff8d5b':color} transparent opacity={active ? .94 : .62} depthWrite={false} side={THREE.DoubleSide}/>
   </mesh>
   {active&&<Html center position={[0,1.72,0]} zIndexRange={[40,10]}><CharacterEmote key={expression.key} expression={expression} language={language} size={28} className="world3d-character-follow-emote"/></Html>}
@@ -687,7 +704,7 @@ function CharacterMarker({character,lot,route,active,actors,serverTime,reducedMo
     <button type="button" className={`world3d-character-status has-expression is-${visualState} ${character.troubleSignal?'has-trouble':''}`} onPointerDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();if(character.troubleSignal&&onTrouble)onTrouble();else if(action?.event_id&&visualState!=='event_pending')onEvent(action.event_id);else onClick()}} aria-label={character.troubleSignal?troubleCopy:`${stateLabel} · ${expression.label[language]}`}><CharacterEmote key={expression.key} expression={expression} language={language} size={28} decorative/></button>
     <button type="button" className={`world3d-character world3d-character--model ${active?'is-active':''}`} onPointerDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();onClick()}} aria-label={`${language==='zh'?'跟随':'Follow '}${character.name}`}>
      <b>{character.name}</b>
-     {(hovered||active||moving||waiting||visualState==='living')&&<small>{moving||waiting?stateLabel:visualState==='living'?livingDetail||stateLabel:character.location.place||(language==='zh'?'正在城市中':'Around town')}</small>}
+     {(hovered||moving||waiting||visualState==='event_pending')&&<small>{moving||waiting||visualState==='event_pending'?stateLabel:livingDetail||character.location.place||(language==='zh'?'正在城市中':'Around town')}</small>}
     </button>
    </div>
   </Html>}
@@ -701,25 +718,24 @@ export function WorldScene({characters,landmarks,followedCharacterId,serverTime,
  const layout=useMemo(()=>resolveCityLayout(landmarks,characters,worldLayout?.city.buildings),[characters,landmarks,worldLayout?.city.buildings])
  const authoredRoads=useMemo<RoadTilePlacement[]>(()=>worldLayout?.city.roads.flatMap(item=>{const model=modelFromAsset(item.asset,KAYKIT_ROAD_MODELS);return model?[{id:item.id,model,position:[item.position.x,item.position.z],rotation:item.rotation.y,surface:'city'}]:[]})??[],[worldLayout?.city.roads])
  const characterLot=(character:CityCharacter)=>character.locationId?layout.landmarkLots.get(character.locationId):layout.homeLots.get(character.id)
- const characterNavigation=useMemo(()=>characters.slice(0,24).map(character=>{
-  const origin=character.locationId?layout.landmarkLots.get(character.locationId):layout.homeLots.get(character.id)
-  const target=character.worldAction?.target_location_id?layout.landmarkLots.get(character.worldAction.target_location_id):undefined
-  const participantIndex=character.worldAction?.participant_index??0
-  const route=character.worldAction?.state==='walking_to_event'&&origin&&target?(authoredRoads.length?buildPedestrianRouteForRoads(origin,target,authoredRoads,{seed:`${character.worldAction.event_id}:${character.id}`,startLateralOffset:participantIndex ? .28 : -.28,endLateralOffset:participantIndex ? .7 : -.7}):buildPedestrianRoute(origin,target,{seed:`${character.worldAction.event_id}:${character.id}`,startLateralOffset:participantIndex ? .28 : -.28,endLateralOffset:participantIndex ? .7 : -.7})):undefined
-  return {character,origin,route}
- }),[authoredRoads,characters,layout.homeLots,layout.landmarkLots])
+ const characterNavigation=useMemo(()=>{
+  const values=characters.slice(0,24).map(character=>({
+   character,origin:character.locationId?layout.landmarkLots.get(character.locationId):layout.homeLots.get(character.id),
+  }))
+  const parcelResidents=new Map<string,string[]>()
+  values.forEach(({character,origin})=>{if(origin)parcelResidents.set(origin.id,[...(parcelResidents.get(origin.id)??[]),character.id].sort())})
+  return values.map(({character,origin})=>{
+   const target=character.worldAction?.target_location_id?layout.landmarkLots.get(character.worldAction.target_location_id):undefined
+   const participantIndex=character.worldAction?.participant_index??0
+   const route=character.worldAction?.state==='walking_to_event'&&origin&&target?(authoredRoads.length?buildPedestrianRouteForRoads(origin,target,authoredRoads,{seed:`${character.worldAction.event_id}:${character.id}`,startLateralOffset:participantIndex ? .28 : -.28,endLateralOffset:participantIndex ? .7 : -.7}):buildPedestrianRoute(origin,target,{seed:`${character.worldAction.event_id}:${character.id}`,startLateralOffset:participantIndex ? .28 : -.28,endLateralOffset:participantIndex ? .7 : -.7})):undefined
+   const peers=origin?parcelResidents.get(origin.id)??[character.id]:[character.id]
+   return {character,origin,route,parcelIndex:Math.max(0,peers.indexOf(character.id)),parcelCount:peers.length}
+  })
+ },[authoredRoads,characters,layout.homeLots,layout.landmarkLots])
  const followedCharacter=characters.find(character=>character.id===followedCharacterId)
  const followedLot=followedCharacter?characterLot(followedCharacter):undefined
  const followedLotRotation=followedLot?.rotation
- const followCameraOffset=useMemo<WorldPoint>(()=>{
-  if(followedLotRotation===undefined)return [2.2,1.7,2.4]
-  const rotation=followedLotRotation
-  const forward:[number,number]=[Math.sin(rotation),Math.cos(rotation)]
-  const side:[number,number]=[Math.cos(rotation),-Math.sin(rotation)]
-  // Stay on the resident's road side of the parcel. A fixed city-wide angle can
-  // put an entire building between the camera and a resident on another facade.
-  return [forward[0]*1.8+side[0]*.6,1.7,forward[1]*1.8+side[1]*.6]
- },[followedLotRotation])
+ const followCameraOffset=useMemo<WorldPoint>(()=>[...followViewOffset(followedLotRotation)],[followedLotRotation])
  const resolvedFocus=useMemo(()=>{
   if(!focus)return null
   const selectedLot=selectedLandmarkId?layout.landmarkLots.get(selectedLandmarkId):undefined
@@ -744,7 +760,7 @@ export function WorldScene({characters,landmarks,followedCharacterId,serverTime,
   <StreetLife quality={quality} occupiedPositions={layout.occupiedPositions} authored={worldLayout?.city.props}/>
   <Trees quality={quality} occupiedPositions={layout.occupiedPositions} authored={worldLayout?.city.decorations}/>
   <LandmarkBuildings placements={layout.landmarkPlacements} selectedId={selectedLandmarkId} hoveredId={hoveredLandmarkId} language={language} night={night} quality={quality} onHover={setHoveredLandmarkId} onSelect={onLandmarkSelect}/>
-  {characterNavigation.map(({character,origin,route})=><CharacterMarker key={character.id} character={character} lot={origin} route={route} active={character.id===followedCharacterId} actors={actors} serverTime={serverTime} reducedMotion={reducedMotion} language={language} onClick={()=>onCharacterClick(character.id)} onEvent={onCharacterEvent} onTrouble={onCharacterTrouble?()=>onCharacterTrouble(character.id):undefined} onJourneyElapsed={onJourneyElapsed}/>)}
+  {characterNavigation.map(({character,origin,route,parcelIndex,parcelCount})=><CharacterMarker key={character.id} character={character} lot={origin} parcelIndex={parcelIndex} parcelCount={parcelCount} route={route} active={character.id===followedCharacterId} actors={actors} serverTime={serverTime} reducedMotion={reducedMotion} language={language} onClick={()=>onCharacterClick(character.id)} onEvent={onCharacterEvent} onTrouble={onCharacterTrouble?()=>onCharacterTrouble(character.id):undefined} onJourneyElapsed={onJourneyElapsed}/>)}
   <CameraRig focus={resolvedFocus} focusVersion={focusVersion} followedCharacterId={followedCharacterId} followCameraOffset={followCameraOffset} followWalking={followedCharacter?.worldAction?.state==='walking_to_event'} actors={actors} reducedMotion={reducedMotion} viewMode={viewMode}/>
  </>
 }

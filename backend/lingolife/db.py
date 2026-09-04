@@ -11,14 +11,37 @@ import unicodedata
 from pathlib import Path
 from cryptography.fernet import Fernet, InvalidToken
 
+from .chat_journal import (ChatRequestConflict, ChatTurnClaim,
+                           ChatTurnLeaseLost, request_fingerprint)
 from .events import ActiveEvent, EventHistory, event_to_dict
 from .learning import LearningState
 from .models import Stats
+from .migration_audit import (
+    MIGRATION_PROJECTION_TABLES,
+    MIGRATION_VERSION,
+    compare_player_fact_snapshots,
+    inspect_player_integrity,
+    player_fact_snapshot,
+    roster_review,
+)
+from .profile_contract import (
+    CURRENT_INTRO_VERSION,
+    ONBOARDING_STATE_VERSION,
+    normalize_profile_contract,
+)
 from .social import social_animation_cues, social_status
 
 
 class LifeWorldRevisionConflict(RuntimeError):
     """The authoritative life world changed after a caller read it."""
+
+
+class WorldLayoutDraftConflict(RuntimeError):
+    """The authoring draft changed after an editor loaded its revision."""
+
+    def __init__(self, current_revision: int):
+        self.current_revision = current_revision
+        super().__init__(f"world layout draft is at revision {current_revision}")
 
 
 class Database:
@@ -33,6 +56,7 @@ class Database:
         "npc_states",
         "messages",
         "chat_requests",
+        "chat_turn_journal",
         "npc_profiles",
         "npc_memories",
         "active_events",
@@ -60,6 +84,7 @@ class Database:
         "npc_relationship_bonds",
         "relationship_evidence",
         "player_onboarding",
+        "player_roster_migrations",
     )
 
     def __init__(self, url: str, invite_secret: str | None = None):
@@ -93,6 +118,16 @@ class Database:
             CREATE TABLE IF NOT EXISTS chat_requests (
               idempotency_key TEXT NOT NULL, player_id TEXT NOT NULL, response_json TEXT NOT NULL,
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(idempotency_key, player_id));
+            CREATE TABLE IF NOT EXISTS chat_turn_journal (
+              player_id TEXT NOT NULL,idempotency_key TEXT NOT NULL,npc_id TEXT NOT NULL,
+              message TEXT NOT NULL,request_hash TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'registered',owner_token TEXT,lease_expires_at TEXT,
+              response_json TEXT,effects_json TEXT,db_applied_at TEXT,life_applied_at TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(player_id,idempotency_key));
+            CREATE INDEX IF NOT EXISTS idx_chat_turn_journal_status
+              ON chat_turn_journal(status,lease_expires_at);
             CREATE TABLE IF NOT EXISTS users (
               id TEXT PRIMARY KEY, username TEXT NOT NULL COLLATE NOCASE UNIQUE,
               player_id TEXT NOT NULL UNIQUE, password_hash TEXT,
@@ -270,9 +305,50 @@ class Database:
               player_id TEXT PRIMARY KEY,state_json TEXT NOT NULL DEFAULT '{}',
               completed_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+            CREATE TABLE IF NOT EXISTS player_roster_migrations (
+              player_id TEXT PRIMARY KEY,migration_version TEXT NOT NULL,
+              status TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1,
+              active_npc_ids_json TEXT NOT NULL DEFAULT '[]',
+              archived_npc_ids_json TEXT NOT NULL DEFAULT '[]',
+              baseline_snapshot_json TEXT NOT NULL,latest_snapshot_json TEXT NOT NULL,
+              review_json TEXT NOT NULL,integrity_json TEXT NOT NULL,
+              completed_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+            CREATE INDEX IF NOT EXISTS idx_roster_migrations_status
+              ON player_roster_migrations(status,updated_at);
+            CREATE TABLE IF NOT EXISTS roster_migration_reports (
+              id TEXT PRIMARY KEY,player_id TEXT NOT NULL,migration_version TEXT NOT NULL,
+              action TEXT NOT NULL,status TEXT NOT NULL,revision INTEGER NOT NULL,
+              actor TEXT NOT NULL,note TEXT NOT NULL DEFAULT '',request_key TEXT,
+              before_snapshot_json TEXT NOT NULL,after_snapshot_json TEXT NOT NULL,
+              comparison_json TEXT NOT NULL,review_json TEXT NOT NULL,
+              integrity_json TEXT NOT NULL,error_code TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(player_id,request_key));
+            CREATE INDEX IF NOT EXISTS idx_roster_reports_owner
+              ON roster_migration_reports(player_id,created_at,id);
             CREATE TABLE IF NOT EXISTS world_layout_configs (
               scope TEXT PRIMARY KEY,layout_json TEXT NOT NULL,
               updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+            CREATE TABLE IF NOT EXISTS world_layout_drafts (
+              scope TEXT PRIMARY KEY CHECK(scope='global'),layout_json TEXT NOT NULL,
+              layout_hash TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 0,
+              author TEXT NOT NULL,validation_json TEXT NOT NULL DEFAULT '{}',
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+            CREATE TABLE IF NOT EXISTS world_layout_versions (
+              id TEXT PRIMARY KEY,layout_hash TEXT NOT NULL UNIQUE,layout_json TEXT NOT NULL,
+              note TEXT NOT NULL,author TEXT NOT NULL,is_default INTEGER NOT NULL DEFAULT 0,
+              validation_json TEXT NOT NULL DEFAULT '{}',
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+            CREATE TABLE IF NOT EXISTS world_layout_active (
+              scope TEXT PRIMARY KEY CHECK(scope='global'),version_id TEXT NOT NULL,
+              activated_by TEXT NOT NULL,activation_note TEXT NOT NULL,
+              activated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+            CREATE TABLE IF NOT EXISTS world_layout_audit (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,action TEXT NOT NULL,
+              version_id TEXT,previous_version_id TEXT,note TEXT NOT NULL,
+              author TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
             """)
             self._connection.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version,description) VALUES (2,'life simulation v2 additive schema')"
@@ -294,6 +370,60 @@ class Database:
                     "INSERT OR IGNORE INTO schema_migrations(version,description) "
                     "VALUES (3,'shared household onboarding and published world layout')"
                 )
+            if not self._connection.execute(
+                "SELECT 1 FROM schema_migrations WHERE version=4"
+            ).fetchone():
+                legacy_layout = self._connection.execute(
+                    "SELECT layout_json FROM world_layout_configs WHERE scope='published'"
+                ).fetchone()
+                if legacy_layout:
+                    try:
+                        normalized = self._json(json.loads(legacy_layout["layout_json"]))
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        normalized = legacy_layout["layout_json"]
+                    layout_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+                    version_id = f"layout-{layout_hash}"
+                    self._connection.execute(
+                        """INSERT OR IGNORE INTO world_layout_versions(
+                             id,layout_hash,layout_json,note,author,validation_json)
+                           VALUES (?,?,?,?,?,?)""",
+                        (version_id, layout_hash, normalized, "迁移旧版已发布布局",
+                         "migration-v4", self._json({"migrated": True})),
+                    )
+                    self._connection.execute(
+                        """INSERT INTO world_layout_active(
+                             scope,version_id,activated_by,activation_note)
+                           VALUES ('global',?,?,?)
+                           ON CONFLICT(scope) DO UPDATE SET
+                             version_id=excluded.version_id,
+                             activated_by=excluded.activated_by,
+                             activation_note=excluded.activation_note,
+                             activated_at=CURRENT_TIMESTAMP""",
+                        (version_id, "migration-v4", "迁移旧版已发布布局"),
+                    )
+                self._connection.execute(
+                    "INSERT OR IGNORE INTO schema_migrations(version,description) "
+                    "VALUES (4,'immutable world layout authoring and publication')"
+                )
+            # The intro contract lives inside the existing JSON state.  Backfill
+            # completed v3 rows in place without a schema migration or a new
+            # compatibility rule; their original completion timestamp is the
+            # most accurate acknowledgement time available.
+            for onboarding_row in self._connection.execute(
+                "SELECT player_id,state_json,completed_at FROM player_onboarding"
+            ).fetchall():
+                stored = json.loads(onboarding_row["state_json"] or "{}")
+                changed = stored.get("version") != ONBOARDING_STATE_VERSION
+                stored["version"] = ONBOARDING_STATE_VERSION
+                if onboarding_row["completed_at"] and not stored.get("intro_acknowledged_at"):
+                    stored["intro_version"] = CURRENT_INTRO_VERSION
+                    stored["intro_acknowledged_at"] = onboarding_row["completed_at"]
+                    changed = True
+                if changed:
+                    self._connection.execute(
+                        "UPDATE player_onboarding SET state_json=? WHERE player_id=?",
+                        (self._json(stored), onboarding_row["player_id"]),
+                    )
             columns = {row[1] for row in self._connection.execute("PRAGMA table_info(messages)")}
             if "npc_id" not in columns:
                 self._connection.execute("ALTER TABLE messages ADD COLUMN npc_id TEXT NOT NULL DEFAULT 'emma'")
@@ -378,6 +508,28 @@ class Database:
                 )
             except sqlite3.OperationalError:
                 pass  # Minimal SQLite builds can still use weighted recency retrieval.
+            if not self._connection.execute(
+                "SELECT 1 FROM schema_migrations WHERE version=5"
+            ).fetchone():
+                # Inventory every account that predates this migration boundary.
+                # A broken player save must not prevent the server from starting;
+                # it is recorded as blocked for explicit administrator repair.
+                legacy_players = self._connection.execute(
+                    "SELECT id FROM players ORDER BY created_at,id"
+                ).fetchall()
+                for legacy_player in legacy_players:
+                    self._inventory_roster_migration(
+                        str(legacy_player["id"]), actor="migration-v5",
+                        note="首次盘点旧账号并迁移到单一共享住宅规则",
+                    )
+                self._connection.execute(
+                    "INSERT OR IGNORE INTO schema_migrations(version,description) "
+                    "VALUES (5,'audited single-household roster migration')"
+                )
+            self._connection.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version,description) "
+                "VALUES (6,'durable idempotent chat turn journal')"
+            )
 
     @staticmethod
     def token_hash(value: str) -> str:
@@ -545,10 +697,413 @@ class Database:
 
     def users(self, query: str = "") -> list[dict]:
         rows = self._connection.execute(
-            "SELECT id,username,disabled,daily_quota,bonus_credits,created_at,last_active_at FROM users WHERE username LIKE ? ORDER BY created_at DESC LIMIT 200",
+            "SELECT id,username,player_id,disabled,daily_quota,bonus_credits,created_at,last_active_at FROM users WHERE username LIKE ? ORDER BY created_at DESC LIMIT 200",
             (f"%{query}%",),
         ).fetchall()
-        return [{**dict(r), "quota": self.quota(r["id"])} for r in rows]
+        result = []
+        for row in rows:
+            migration = self.roster_migration(str(row["player_id"]))
+            compact_migration = None if migration is None else {
+                "migration_version": migration["migration_version"],
+                "status": migration["status"], "revision": migration["revision"],
+                "active_resident_count": len(migration["active_npc_ids"]),
+                "archived_resident_count": len(migration["archived_npc_ids"]),
+                "total_resident_count": len(migration["candidates"]),
+            }
+            result.append({**dict(row), "quota": self.quota(row["id"]),
+                           "roster_migration": compact_migration})
+        return result
+
+    # Audited legacy roster migration --------------------------------------
+
+    @staticmethod
+    def _decode_roster_migration(row: sqlite3.Row | None) -> dict | None:
+        if row is None:
+            return None
+        return {
+            "player_id": str(row["player_id"]),
+            "migration_version": str(row["migration_version"]),
+            "status": str(row["status"]),
+            "revision": int(row["revision"]),
+            "active_npc_ids": json.loads(row["active_npc_ids_json"] or "[]"),
+            "archived_npc_ids": json.loads(row["archived_npc_ids_json"] or "[]"),
+            "baseline_snapshot": json.loads(row["baseline_snapshot_json"]),
+            "latest_snapshot": json.loads(row["latest_snapshot_json"]),
+            "review": json.loads(row["review_json"]),
+            "integrity": json.loads(row["integrity_json"]),
+            "completed_at": row["completed_at"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def _write_roster_migration_report(
+        self, *, player_id: str, action: str, status: str, revision: int,
+        actor: str, note: str, before: dict, after: dict, comparison: dict,
+        review: dict, integrity: dict, request_key: str | None = None,
+        error_code: str | None = None,
+    ) -> None:
+        self._connection.execute(
+            """INSERT INTO roster_migration_reports(
+                 id,player_id,migration_version,action,status,revision,actor,note,
+                 request_key,before_snapshot_json,after_snapshot_json,
+                 comparison_json,review_json,integrity_json,error_code)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                "roster-audit-" + uuid.uuid4().hex, player_id, MIGRATION_VERSION,
+                action, status, revision, actor.strip()[:80] or "system",
+                note.strip()[:240], request_key,
+                self._json(before), self._json(after), self._json(comparison),
+                self._json(review), self._json(integrity), error_code,
+            ),
+        )
+
+    def _inventory_roster_migration(
+        self, player_id: str, *, actor: str, note: str,
+    ) -> dict:
+        existing = self._connection.execute(
+            "SELECT * FROM player_roster_migrations WHERE player_id=?", (player_id,),
+        ).fetchone()
+        if existing:
+            return self._decode_roster_migration(existing)  # type: ignore[return-value]
+
+        before = player_fact_snapshot(self._connection, player_id)
+        review = roster_review(before)
+        try:
+            integrity = inspect_player_integrity(self._connection, player_id)
+        except Exception as error:  # A malformed legacy fixture is isolated to its owner.
+            integrity = {
+                "valid": False,
+                "issues": [{"code": "AUDIT_READ_FAILED", "detail": type(error).__name__}],
+            }
+        if not integrity["valid"]:
+            status = "blocked_invalid_fixture"
+            active_ids: list[str] = []
+        elif review["status"] == "eligible":
+            status = "ready"
+            active_ids = list(review["preserved_npc_ids"])
+        else:
+            status = str(review["status"])
+            active_ids = list(review["preserved_npc_ids"]) if status == "needs_onboarding" else []
+        archived_ids: list[str] = []
+        after = player_fact_snapshot(self._connection, player_id)
+        comparison = compare_player_fact_snapshots(before, after)
+        completed = status == "ready" and comparison["verified"]
+        self._connection.execute(
+            """INSERT INTO player_roster_migrations(
+                 player_id,migration_version,status,revision,active_npc_ids_json,
+                 archived_npc_ids_json,baseline_snapshot_json,latest_snapshot_json,
+                 review_json,integrity_json,completed_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END)""",
+            (
+                player_id, MIGRATION_VERSION, status, 1, self._json(active_ids),
+                self._json(archived_ids), self._json(before), self._json(after),
+                self._json(review), self._json(integrity), int(completed),
+            ),
+        )
+        self._write_roster_migration_report(
+            player_id=player_id, action="inventory", status=status, revision=1,
+            actor=actor, note=note, before=before, after=after,
+            comparison=comparison, review=review, integrity=integrity,
+            request_key=f"inventory:{MIGRATION_VERSION}",
+            error_code=None if integrity["valid"] else "INVALID_LEGACY_FIXTURE",
+        )
+        row = self._connection.execute(
+            "SELECT * FROM player_roster_migrations WHERE player_id=?", (player_id,),
+        ).fetchone()
+        return self._decode_roster_migration(row)  # type: ignore[return-value]
+
+    def inventory_roster_migration(
+        self, player_id: str, *, actor: str = "admin", note: str = "手动盘点旧账号",
+    ) -> dict:
+        """Idempotently inventory one pre-v5 account without changing game facts."""
+        return self._life_transaction(
+            lambda: self._inventory_roster_migration(player_id, actor=actor, note=note)
+        )
+
+    def roster_migration(self, player_id: str) -> dict | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM player_roster_migrations WHERE player_id=?", (player_id,),
+            ).fetchone()
+            value = self._decode_roster_migration(row)
+            if value is None:
+                return None
+            report_count = int(self._connection.execute(
+                "SELECT count(*) FROM roster_migration_reports WHERE player_id=?", (player_id,),
+            ).fetchone()[0])
+            profile_rows = self._connection.execute(
+                "SELECT npc_id,profile_json FROM npc_profiles WHERE player_id=? ORDER BY created_at,npc_id",
+                (player_id,),
+            ).fetchall()
+        active = set(value["active_npc_ids"])
+        archived = set(value["archived_npc_ids"])
+        value["report_count"] = report_count
+        candidates = []
+        for profile_row in profile_rows:
+            npc_id = str(profile_row["npc_id"])
+            try:
+                profile_value = json.loads(profile_row["profile_json"] or "{}")
+                name = str(profile_value.get("name") or npc_id) if isinstance(profile_value, dict) else npc_id
+            except (TypeError, ValueError, json.JSONDecodeError):
+                name = npc_id
+            candidates.append({
+                "id": npc_id, "name": name,
+                "active": npc_id in active, "archived": npc_id in archived,
+            })
+        value["candidates"] = candidates
+        return value
+
+    def roster_migration_for_user(self, user_id: str) -> dict | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT player_id,username FROM users WHERE id=?", (user_id,),
+            ).fetchone()
+        if not row:
+            return None
+        value = self.roster_migration(str(row["player_id"]))
+        if value:
+            value["user_id"] = user_id
+            value["username"] = row["username"]
+            value["reports"] = self.roster_migration_reports(str(row["player_id"]))
+        return value
+
+    def roster_migration_reports_for_user(self, user_id: str) -> dict | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT player_id,username FROM users WHERE id=?", (user_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "user_id": user_id, "username": row["username"],
+            "player_id": row["player_id"],
+            "reports": self.roster_migration_reports(str(row["player_id"])),
+        }
+
+    def list_roster_migrations(self, status: str | None = None) -> list[dict]:
+        parameters: tuple[object, ...] = ()
+        predicate = ""
+        if status:
+            predicate = "WHERE migrations.status=?"
+            parameters = (status,)
+        with self._lock:
+            rows = self._connection.execute(
+                f"""SELECT migrations.player_id,users.id AS user_id,users.username
+                    FROM player_roster_migrations migrations
+                    LEFT JOIN users ON users.player_id=migrations.player_id
+                    {predicate}
+                    ORDER BY CASE migrations.status
+                      WHEN 'needs_roster_review' THEN 0
+                      WHEN 'blocked_invalid_fixture' THEN 1 ELSE 2 END,
+                      migrations.updated_at DESC,migrations.player_id""",
+                parameters,
+            ).fetchall()
+        result = []
+        for row in rows:
+            value = self.roster_migration(str(row["player_id"]))
+            if value:
+                value["user_id"] = row["user_id"]
+                value["username"] = row["username"]
+                result.append(value)
+        return result
+
+    def roster_migration_reports(self, player_id: str, limit: int = 100) -> list[dict]:
+        with self._lock:
+            rows = self._connection.execute(
+                """SELECT * FROM roster_migration_reports WHERE player_id=?
+                   ORDER BY rowid DESC LIMIT ?""",
+                (player_id, max(1, min(500, int(limit)))),
+            ).fetchall()
+        return [
+            {
+                "id": row["id"], "player_id": row["player_id"],
+                "migration_version": row["migration_version"], "action": row["action"],
+                "status": row["status"], "revision": int(row["revision"]),
+                "actor": row["actor"], "note": row["note"],
+                "request_key": row["request_key"],
+                "before_snapshot": json.loads(row["before_snapshot_json"]),
+                "after_snapshot": json.loads(row["after_snapshot_json"]),
+                "comparison": json.loads(row["comparison_json"]),
+                "review": json.loads(row["review_json"]),
+                "integrity": json.loads(row["integrity_json"]),
+                "error_code": row["error_code"], "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    def select_active_roster(
+        self, user_id: str, active_npc_ids: list[str], *, expected_revision: int,
+        confirm_username: str, actor: str = "admin", note: str = "管理员确认模拟阵容",
+        request_key: str | None = None,
+    ) -> dict:
+        """Select 2-8 simulated residents and archive the rest without deletion."""
+        requested = sorted(str(value) for value in active_npc_ids)
+        if len(requested) != len(set(requested)):
+            raise ValueError("DUPLICATE_NPC_ID")
+        if not 2 <= len(requested) <= 8:
+            raise ValueError("ACTIVE_ROSTER_SIZE")
+
+        def write():
+            user = self._connection.execute(
+                "SELECT id,username,player_id FROM users WHERE id=?", (user_id,),
+            ).fetchone()
+            if not user:
+                raise ValueError("USER_NOT_FOUND")
+            if self._username_confirmation_key(confirm_username) != self._username_confirmation_key(
+                user["username"]
+            ):
+                raise ValueError("USERNAME_CONFIRMATION_MISMATCH")
+            current_row = self._connection.execute(
+                "SELECT * FROM player_roster_migrations WHERE player_id=?", (user["player_id"],),
+            ).fetchone()
+            if not current_row:
+                raise ValueError("ROSTER_MIGRATION_NOT_FOUND")
+            current = self._decode_roster_migration(current_row)
+            assert current is not None
+            if current["status"] in {"blocked_invalid_fixture", "blocked_verification_failed"}:
+                raise ValueError("INVALID_LEGACY_FIXTURE")
+            if current["status"] == "ready" and requested == sorted(current["active_npc_ids"]):
+                return {**current, "idempotent_replay": True}
+            if request_key and self._connection.execute(
+                "SELECT 1 FROM roster_migration_reports WHERE player_id=? AND request_key=?",
+                (user["player_id"], f"selection:{request_key}"),
+            ).fetchone():
+                raise ValueError("ROSTER_REQUEST_CONFLICT")
+            if int(current["revision"]) != int(expected_revision):
+                raise ValueError("ROSTER_REVISION_CONFLICT")
+            all_ids = sorted(current["baseline_snapshot"]["preserved_npc_ids"])
+            if not set(requested) <= set(all_ids):
+                raise ValueError("UNKNOWN_NPC_ID")
+            archived = sorted(set(all_ids) - set(requested))
+            before = player_fact_snapshot(self._connection, str(user["player_id"]))
+            integrity = inspect_player_integrity(self._connection, str(user["player_id"]))
+            if not integrity["valid"]:
+                raise ValueError("INVALID_LEGACY_FIXTURE")
+            revision = int(current["revision"]) + 1
+            self._connection.execute(
+                """UPDATE player_roster_migrations SET status='ready',revision=?,
+                     active_npc_ids_json=?,archived_npc_ids_json=?,latest_snapshot_json=?,
+                     integrity_json=?,completed_at=COALESCE(completed_at,CURRENT_TIMESTAMP),
+                     updated_at=CURRENT_TIMESTAMP WHERE player_id=?""",
+                (
+                    revision, self._json(requested), self._json(archived),
+                    self._json(before), self._json(integrity), user["player_id"],
+                ),
+            )
+            after = player_fact_snapshot(self._connection, str(user["player_id"]))
+            comparison = compare_player_fact_snapshots(before, after)
+            if not comparison["verified"]:
+                raise RuntimeError("ROSTER_FACT_VERIFICATION_FAILED")
+            review = {
+                **current["review"], "status": "resolved", "active_npc_ids": requested,
+                "archived_npc_ids": archived, "active_selection_required": False,
+            }
+            self._connection.execute(
+                "UPDATE player_roster_migrations SET review_json=?,latest_snapshot_json=? WHERE player_id=?",
+                (self._json(review), self._json(after), user["player_id"]),
+            )
+            self._write_roster_migration_report(
+                player_id=str(user["player_id"]), action="select_active_roster",
+                status="ready", revision=revision, actor=actor, note=note,
+                before=before, after=after, comparison=comparison,
+                review=review, integrity=integrity,
+                request_key=(f"selection:{request_key}" if request_key else None),
+            )
+            row = self._connection.execute(
+                "SELECT * FROM player_roster_migrations WHERE player_id=?", (user["player_id"],),
+            ).fetchone()
+            return {**self._decode_roster_migration(row), "idempotent_replay": False}
+
+        result = self._life_transaction(write)
+        # Add names and report count only after the transaction commits.
+        hydrated = self.roster_migration(str(result["player_id"]))
+        assert hydrated is not None
+        hydrated["idempotent_replay"] = bool(result.get("idempotent_replay"))
+        return hydrated
+
+    def verify_roster_world_reconciliation(
+        self, player_id: str, *, actor: str = "system",
+        note: str = "验证共享住宅世界重建未丢失旧存档事实",
+    ) -> dict | None:
+        """Persist a once-only post-world checksum after projections are rebuilt."""
+        dynamic_tables = set(MIGRATION_PROJECTION_TABLES) | {
+            "npc_personas", "npc_runtime_states", "npc_relationships", "npc_goals",
+            "npc_daily_plans", "npc_social_edges", "npc_social_events", "npc_desires",
+            "npc_life_actions", "life_stories", "life_story_observations",
+            "life_interventions", "unresolved_threads", "npc_relationship_bonds",
+            "relationship_evidence",
+        }
+
+        def write():
+            row = self._connection.execute(
+                "SELECT * FROM player_roster_migrations WHERE player_id=?", (player_id,),
+            ).fetchone()
+            current = self._decode_roster_migration(row)
+            if current is None or current["status"] != "ready":
+                return current
+            if current["review"].get("world_verified"):
+                return current
+            before = dict(current["baseline_snapshot"])
+            after = player_fact_snapshot(self._connection, player_id)
+            integrity = inspect_player_integrity(self._connection, player_id)
+            comparison = compare_player_fact_snapshots(
+                before, after, allowed_changed_tables=dynamic_tables,
+            )
+            # Projection tables may legitimately collapse from many homes to
+            # one. Derived simulation tables may update or grow, but losing
+            # rows from them is never accepted as a migration side effect.
+            lost_dynamic_rows = [
+                {**change, "reason": "derived_rows_removed"}
+                for change in comparison["changed_tables"]
+                if change["table"] in dynamic_tables - set(MIGRATION_PROJECTION_TABLES)
+                and int(change["after_count"]) < int(change["before_count"])
+            ]
+            if lost_dynamic_rows:
+                comparison["unexpected_changes"].extend(lost_dynamic_rows)
+                comparison["verified"] = False
+            preserved_ids = sorted(before.get("preserved_npc_ids") or [])
+            ids_preserved = preserved_ids == sorted(after.get("preserved_npc_ids") or [])
+            verified = bool(comparison["verified"] and integrity["valid"] and ids_preserved)
+            status = "ready" if verified else "blocked_verification_failed"
+            revision = int(current["revision"]) + 1
+            review = {
+                **current["review"], "world_verified": verified,
+                "world_verified_at_revision": revision,
+                "all_legacy_npc_ids_preserved": ids_preserved,
+            }
+            self._connection.execute(
+                """UPDATE player_roster_migrations SET status=?,revision=?,
+                     latest_snapshot_json=?,review_json=?,integrity_json=?,
+                     updated_at=CURRENT_TIMESTAMP WHERE player_id=?""",
+                (status, revision, self._json(after), self._json(review),
+                 self._json(integrity), player_id),
+            )
+            self._write_roster_migration_report(
+                player_id=player_id, action="verify_shared_household", status=status,
+                revision=revision, actor=actor, note=note, before=before, after=after,
+                comparison=comparison, review=review, integrity=integrity,
+                request_key=f"world-verification:{MIGRATION_VERSION}",
+                error_code=None if verified else "FACT_VERIFICATION_FAILED",
+            )
+            updated = self._connection.execute(
+                "SELECT * FROM player_roster_migrations WHERE player_id=?", (player_id,),
+            ).fetchone()
+            return self._decode_roster_migration(updated)
+
+        return self._life_transaction(write)
+
+    def simulation_npc_profiles(self, player_id: str) -> list[dict]:
+        profiles = self.list_npc_profiles(player_id)
+        migration = self.roster_migration(player_id)
+        if migration is None:
+            return profiles
+        if migration["status"] != "ready":
+            raise ValueError("ROSTER_MIGRATION_REQUIRED")
+        by_id = {entry["id"]: entry for entry in profiles}
+        active_ids = list(migration["active_npc_ids"])
+        if not 2 <= len(active_ids) <= 8 or any(npc_id not in by_id for npc_id in active_ids):
+            raise ValueError("ROSTER_MIGRATION_INVALID")
+        return [by_id[npc_id] for npc_id in active_ids]
 
     def patch_user(self, user_id: str, disabled: bool | None, quota_delta: int | None) -> dict | None:
         with self._lock, self._connection:
@@ -605,7 +1160,7 @@ class Database:
                 if any(str(column["name"]) == "player_id" for column in columns):
                     player_scoped.add(table)
             unclassified = player_scoped - set(self._GAME_PROGRESS_TABLES) - {
-                "users", "agent_turn_traces",
+                "users", "agent_turn_traces", "roster_migration_reports",
             }
             if unclassified:
                 raise RuntimeError(
@@ -683,6 +1238,389 @@ class Database:
         row = self._connection.execute("SELECT response_json FROM chat_requests WHERE player_id=? AND idempotency_key=?", (player_id, key)).fetchone()
         return json.loads(row[0]) if row else None
 
+    @staticmethod
+    def _decode_chat_turn(row: sqlite3.Row | None) -> dict | None:
+        if row is None:
+            return None
+        value = dict(row)
+        for field in ("response_json", "effects_json"):
+            encoded = value.pop(field, None)
+            value[field.removesuffix("_json")] = json.loads(encoded) if encoded else None
+        return value
+
+    def register_chat_turn(self, player_id: str, key: str, npc_id: str,
+                           message: str) -> dict:
+        """Persist and validate the immutable identity of one chat command.
+
+        A journal row is created before quota reservation or model generation,
+        which means a cached response can never be replayed for a different
+        character or message.  A legacy ``chat_requests`` row is adopted on
+        first replay so databases created before the journal remain usable.
+        Legacy rows never stored the original player message, so that one-time
+        adoption can validate the NPC from the response but must pin the first
+        supplied normalized message as its future fingerprint.
+        """
+        fingerprint = request_fingerprint(npc_id, message)
+        with self._lock, self._connection:
+            row = self._connection.execute(
+                "SELECT * FROM chat_turn_journal WHERE player_id=? AND idempotency_key=?",
+                (player_id, key),
+            ).fetchone()
+            if row is not None:
+                if str(row["request_hash"]) != fingerprint:
+                    raise ChatRequestConflict(
+                        "idempotency key was reused with a different npc or message"
+                    )
+                return self._decode_chat_turn(row)  # type: ignore[return-value]
+
+            legacy = self._connection.execute(
+                "SELECT response_json FROM chat_requests WHERE player_id=? AND idempotency_key=?",
+                (player_id, key),
+            ).fetchone()
+            if legacy is not None:
+                response = json.loads(legacy["response_json"])
+                legacy_npc = str(response.get("npc_id") or "emma")
+                if legacy_npc != npc_id:
+                    raise ChatRequestConflict(
+                        "idempotency key was reused for a different npc"
+                    )
+                self._connection.execute(
+                    """INSERT OR IGNORE INTO chat_turn_journal(
+                         player_id,idempotency_key,npc_id,message,request_hash,status,
+                         response_json,effects_json,db_applied_at,life_applied_at)
+                       VALUES (?,?,?,?,?,'completed',?,'{}',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)""",
+                    (player_id, key, npc_id, message, fingerprint,
+                     self._json(response)),
+                )
+            else:
+                self._connection.execute(
+                    """INSERT OR IGNORE INTO chat_turn_journal(
+                         player_id,idempotency_key,npc_id,message,request_hash,status)
+                       VALUES (?,?,?,?,?,'registered')""",
+                    (player_id, key, npc_id, message, fingerprint),
+                )
+            row = self._connection.execute(
+                "SELECT * FROM chat_turn_journal WHERE player_id=? AND idempotency_key=?",
+                (player_id, key),
+            ).fetchone()
+            if row is None or str(row["request_hash"]) != fingerprint:
+                raise ChatRequestConflict(
+                    "idempotency key was reused with a different npc or message"
+                )
+            return self._decode_chat_turn(row)  # type: ignore[return-value]
+
+    def get_chat_turn(self, player_id: str, key: str) -> dict | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM chat_turn_journal WHERE player_id=? AND idempotency_key=?",
+                (player_id, key),
+            ).fetchone()
+        return self._decode_chat_turn(row)
+
+    def claim_chat_turn(self, player_id: str, key: str, owner_token: str,
+                        lease_seconds: int = 180) -> ChatTurnClaim:
+        """Acquire the durable single-generator lease for a player's chat.
+
+        Chat effects contain player-global learning state as well as NPC state,
+        so all turns for one player are serialized.  The write reservation is
+        taken before inspecting peers, making this election safe across worker
+        processes rather than only across threads in this Python process.
+        """
+        lease_seconds = max(30, min(900, int(lease_seconds)))
+        lease_modifier = f"+{lease_seconds} seconds"
+        with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._connection.execute(
+                    "SELECT * FROM chat_turn_journal WHERE player_id=? AND idempotency_key=?",
+                    (player_id, key),
+                ).fetchone()
+                if row is None:
+                    raise KeyError((player_id, key))
+                if row["response_json"]:
+                    result = ChatTurnClaim("committed")
+                else:
+                    lease_is_live = bool(row["owner_token"]) and bool(
+                        self._connection.execute(
+                            "SELECT datetime(?) > CURRENT_TIMESTAMP",
+                            (row["lease_expires_at"],),
+                        ).fetchone()[0]
+                    )
+                    if lease_is_live and row["owner_token"] != owner_token:
+                        result = ChatTurnClaim("busy", str(row["owner_token"]))
+                    else:
+                        blocker = self._connection.execute(
+                            """SELECT idempotency_key,response_json FROM chat_turn_journal
+                               WHERE player_id=? AND idempotency_key<>? AND (
+                                 (response_json IS NULL AND owner_token IS NOT NULL
+                                  AND datetime(lease_expires_at)>CURRENT_TIMESTAMP)
+                                 OR (response_json IS NOT NULL AND status<>'completed')
+                               )
+                               ORDER BY created_at,idempotency_key LIMIT 1""",
+                            (player_id, key),
+                        ).fetchone()
+                        if blocker is not None:
+                            result = ChatTurnClaim(
+                                "blocked", blocking_key=str(blocker["idempotency_key"]),
+                            )
+                        else:
+                            self._connection.execute(
+                                """UPDATE chat_turn_journal SET status='generating',owner_token=?,
+                                     lease_expires_at=datetime('now',?),updated_at=CURRENT_TIMESTAMP
+                                   WHERE player_id=? AND idempotency_key=?""",
+                                (owner_token, lease_modifier, player_id, key),
+                            )
+                            result = ChatTurnClaim("acquired", owner_token)
+                self._connection.commit()
+                return result
+            except Exception:
+                self._connection.rollback()
+                raise
+
+    def release_chat_turn(self, player_id: str, key: str, owner_token: str) -> None:
+        """Make a failed pre-commit generation immediately retryable."""
+        with self._lock, self._connection:
+            self._connection.execute(
+                """UPDATE chat_turn_journal SET status='registered',owner_token=NULL,
+                     lease_expires_at=NULL,updated_at=CURRENT_TIMESTAMP
+                   WHERE player_id=? AND idempotency_key=? AND owner_token=?
+                     AND response_json IS NULL""",
+                (player_id, key, owner_token),
+            )
+
+    def commit_chat_with_effects(self, player_id: str, key: str, owner_token: str,
+                                 message: str, response: dict, effects: dict,
+                                 npc_id: str = "emma") -> tuple[dict, bool]:
+        """Atomically publish a response and the durable effects to be applied.
+
+        No learning, event, memory, persona, or world mutation is allowed
+        before this boundary.  Once this commits, any process can finish the
+        outbox from ``effects_json`` without invoking the dialogue model again.
+        """
+        with self._lock, self._connection:
+            journal = self._connection.execute(
+                "SELECT * FROM chat_turn_journal WHERE player_id=? AND idempotency_key=?",
+                (player_id, key),
+            ).fetchone()
+            if journal is None:
+                raise KeyError((player_id, key))
+            if journal["response_json"]:
+                return json.loads(journal["response_json"]), False
+            if journal["owner_token"] != owner_token:
+                raise ChatTurnLeaseLost("chat generation lease was lost before commit")
+            stats = response["stats"]
+            self._connection.execute(
+                """UPDATE npc_states SET relationship=?,mood=?,english_xp=?,
+                     updated_at=CURRENT_TIMESTAMP WHERE player_id=? AND npc_id=?""",
+                (stats["relationship"], stats["mood"], stats["english_xp"],
+                 player_id, npc_id),
+            )
+            self._connection.execute(
+                "INSERT INTO messages(player_id,speaker,text,npc_id) VALUES (?,'player',?,?)",
+                (player_id, message, npc_id),
+            )
+            self._connection.execute(
+                """INSERT INTO messages(player_id,speaker,text,npc_id,translation)
+                   VALUES (?,'npc',?,?,?)""",
+                (player_id, response["npc_reply"], npc_id,
+                 response.get("npc_reply_zh") or None),
+            )
+            encoded_response = self._json(response)
+            self._connection.execute(
+                """INSERT INTO chat_requests(idempotency_key,player_id,response_json)
+                   VALUES (?,?,?)""",
+                (key, player_id, encoded_response),
+            )
+            self._connection.execute(
+                """UPDATE chat_turn_journal SET status='committed',response_json=?,
+                     effects_json=?,owner_token=NULL,lease_expires_at=NULL,
+                     updated_at=CURRENT_TIMESTAMP
+                   WHERE player_id=? AND idempotency_key=?""",
+                (encoded_response, self._json(effects), player_id, key),
+            )
+            return response, True
+
+    def _insert_chat_memory(self, player_id: str, npc_id: str, memory: dict) -> None:
+        content = " ".join(str(memory.get("content") or "").split())[:500]
+        if not content:
+            return
+        importance = max(1, min(5, int(memory.get("importance", 1))))
+        confidence = max(0.0, min(1.0, float(memory.get("confidence", 1))))
+        existing = self._connection.execute(
+            """SELECT * FROM npc_memories WHERE player_id=? AND npc_id=?
+               AND lower(content)=lower(?)""",
+            (player_id, npc_id, content),
+        ).fetchone()
+        if existing:
+            self._connection.execute(
+                """UPDATE npc_memories SET importance=max(importance,?),
+                   confidence=max(confidence,?) WHERE id=?""",
+                (importance, confidence, existing["id"]),
+            )
+            return
+        access_stage = str(memory.get("access_stage") or "stranger")
+        if access_stage not in {"stranger", "acquaintance", "friend", "close_friend"}:
+            access_stage = "stranger"
+        cursor = self._connection.execute(
+            """INSERT INTO npc_memories(
+                 player_id,npc_id,kind,content,source_event_id,importance,tags_json,
+                 confidence,expires_at,access_stage)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (player_id, npc_id, str(memory.get("kind") or "conversation"), content,
+             memory.get("source_event_id"), importance,
+             self._json(list(memory.get("tags") or [])), confidence,
+             memory.get("expires_at"), access_stage),
+        )
+        try:
+            self._connection.execute(
+                """INSERT INTO npc_memory_fts(content,player_id,npc_id,memory_id)
+                   VALUES (?,?,?,?)""",
+                (content, player_id, npc_id, str(cursor.lastrowid)),
+            )
+        except sqlite3.OperationalError:
+            pass
+
+    def apply_chat_db_effects(self, player_id: str, key: str) -> dict:
+        """Apply every SQLite-owned turn effect and checkpoint it atomically."""
+        with self._lock, self._connection:
+            row = self._connection.execute(
+                "SELECT * FROM chat_turn_journal WHERE player_id=? AND idempotency_key=?",
+                (player_id, key),
+            ).fetchone()
+            if row is None or not row["response_json"] or not row["effects_json"]:
+                raise RuntimeError("chat turn has not reached its durable commit boundary")
+            effects = json.loads(row["effects_json"])
+            if row["db_applied_at"]:
+                return effects
+            npc_id = str(row["npc_id"])
+
+            learning_state = effects.get("learning_state")
+            if isinstance(learning_state, dict):
+                self._connection.execute(
+                    """INSERT INTO learning_states(player_id,state_json) VALUES (?,?)
+                       ON CONFLICT(player_id) DO UPDATE SET state_json=excluded.state_json,
+                         updated_at=CURRENT_TIMESTAMP""",
+                    (player_id, self._json(learning_state)),
+                )
+
+            event_effect = effects.get("event_transition")
+            if isinstance(event_effect, dict):
+                history = event_effect.get("history")
+                active_event = event_effect.get("active_event")
+                if isinstance(history, dict):
+                    self._connection.execute(
+                        """INSERT INTO event_history(
+                             player_id,npc_id,template_id,category,started_on,completed_at,
+                             outcome_id,relationship_change,mood_change,memory)
+                           VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                        (history["player_id"], history["npc_id"], history["template_id"],
+                         history["category"], history["started_on"], history["completed_at"],
+                         history["outcome_id"], history["relationship_change"],
+                         history["mood_change"], history["memory"]),
+                    )
+                    self._connection.execute(
+                        "DELETE FROM active_events WHERE player_id=? AND npc_id=?",
+                        (player_id, npc_id),
+                    )
+                elif isinstance(active_event, dict):
+                    self._connection.execute(
+                        """INSERT INTO active_events(player_id,npc_id,event_json)
+                           VALUES (?,?,?) ON CONFLICT(player_id,npc_id) DO UPDATE SET
+                             event_json=excluded.event_json,updated_at=CURRENT_TIMESTAMP""",
+                        (player_id, npc_id, self._json(active_event)),
+                    )
+
+            for table, column, effect_key in (
+                ("npc_relationships", "relationship_json", "relationship"),
+                ("npc_runtime_states", "state_json", "runtime_state"),
+                ("npc_goals", "goal_json", "goal"),
+                ("npc_personas", "persona_json", "persona"),
+            ):
+                value = effects.get(effect_key)
+                if isinstance(value, dict):
+                    self._connection.execute(
+                        f"""INSERT INTO {table}(player_id,npc_id,{column}) VALUES (?,?,?)
+                            ON CONFLICT(player_id,npc_id) DO UPDATE SET
+                              {column}=excluded.{column},updated_at=CURRENT_TIMESTAMP""",
+                        (player_id, npc_id, self._json(value)),
+                    )
+
+            for memory in effects.get("memories") or []:
+                if isinstance(memory, dict):
+                    self._insert_chat_memory(player_id, npc_id, memory)
+
+            observations = [
+                " ".join(str(value).split())[:300]
+                for value in effects.get("summary_observations") or []
+                if str(value).strip()
+            ]
+            if observations:
+                game_date = str(effects.get("game_date") or "")
+                summary_row = self._connection.execute(
+                    """SELECT summary FROM conversation_summaries
+                       WHERE player_id=? AND npc_id=? AND game_date=?""",
+                    (player_id, npc_id, game_date),
+                ).fetchone()
+                existing = summary_row[0].split(" | ") if summary_row and summary_row[0] else []
+                merged = list(dict.fromkeys([*existing, *observations]))[-8:]
+                self._connection.execute(
+                    """INSERT INTO conversation_summaries(
+                         player_id,npc_id,game_date,summary) VALUES (?,?,?,?)
+                       ON CONFLICT(player_id,npc_id,game_date) DO UPDATE SET
+                         summary=excluded.summary""",
+                    (player_id, npc_id, game_date, " | ".join(merged)),
+                )
+
+            trace = effects.get("agent_trace")
+            if isinstance(trace, dict):
+                self._connection.execute(
+                    """INSERT INTO agent_turn_traces(
+                         player_id,npc_id,request_id,prompt_version,persona_version,
+                         memory_ids_json,model,fallback_used,dialogue_ms,analysis_ms,error_type)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    (player_id, npc_id, key, trace.get("prompt_version", "agent-v1"),
+                     trace.get("persona_version"), self._json(trace.get("memory_ids", [])),
+                     trace.get("model"), int(bool(trace.get("fallback_used"))),
+                     int(trace.get("dialogue_ms", 0)), int(trace.get("analysis_ms", 0)),
+                     trace.get("error_type")),
+                )
+
+            self._connection.execute(
+                """UPDATE chat_turn_journal SET db_applied_at=CURRENT_TIMESTAMP,
+                     updated_at=CURRENT_TIMESTAMP WHERE player_id=? AND idempotency_key=?""",
+                (player_id, key),
+            )
+            return effects
+
+    def mark_chat_life_applied(self, player_id: str, key: str) -> None:
+        with self._lock, self._connection:
+            self._connection.execute(
+                """UPDATE chat_turn_journal SET life_applied_at=CURRENT_TIMESTAMP,
+                     updated_at=CURRENT_TIMESTAMP
+                   WHERE player_id=? AND idempotency_key=? AND db_applied_at IS NOT NULL""",
+                (player_id, key),
+            )
+
+    def complete_chat_turn(self, player_id: str, key: str) -> dict:
+        with self._lock, self._connection:
+            row = self._connection.execute(
+                "SELECT * FROM chat_turn_journal WHERE player_id=? AND idempotency_key=?",
+                (player_id, key),
+            ).fetchone()
+            if row is None or not row["response_json"]:
+                raise RuntimeError("chat turn is not committed")
+            effects = json.loads(row["effects_json"] or "{}")
+            life_required = bool(effects.get("life_interaction"))
+            if not row["db_applied_at"] or (life_required and not row["life_applied_at"]):
+                raise RuntimeError("chat turn effects are incomplete")
+            self._connection.execute(
+                """UPDATE chat_turn_journal SET status='completed',
+                     updated_at=CURRENT_TIMESTAMP
+                   WHERE player_id=? AND idempotency_key=?""",
+                (player_id, key),
+            )
+            return json.loads(row["response_json"])
+
     def positive_relationship_change_today(self, player_id: str, npc_id: str, game_date: str) -> int:
         rows = self._connection.execute(
             """SELECT response_json,created_at FROM chat_requests
@@ -746,14 +1684,16 @@ class Database:
             row = self._connection.execute(
                 "SELECT profile_json FROM npc_profiles WHERE player_id=? AND npc_id=?", (player_id, npc_id)
             ).fetchone()
-        return json.loads(row[0]) if row else None
+        return normalize_profile_contract(json.loads(row[0])) if row else None
 
     def list_npc_profiles(self, player_id: str) -> list[dict]:
         with self._lock:
             rows = self._connection.execute(
                 "SELECT npc_id,profile_json FROM npc_profiles WHERE player_id=? ORDER BY created_at,npc_id", (player_id,)
             ).fetchall()
-        return [{"id": row["npc_id"], "profile": json.loads(row["profile_json"])} for row in rows]
+        return [{"id": row["npc_id"],
+                 "profile": normalize_profile_contract(json.loads(row["profile_json"]))}
+                for row in rows]
 
     def get_or_create_npc_profile(self, player_id: str, npc_id: str, default_profile: dict) -> dict:
         """Persist the caller-owned default once; never silently replace customization."""
@@ -761,11 +1701,12 @@ class Database:
             self.ensure_player(player_id)
             self._connection.execute(
                 "INSERT OR IGNORE INTO npc_profiles(player_id,npc_id,profile_json) VALUES (?,?,?)",
-                (player_id, npc_id, self._json(default_profile)),
+                (player_id, npc_id, self._json(normalize_profile_contract(default_profile))),
             )
             return self.get_npc_profile(player_id, npc_id)  # type: ignore[return-value]
 
     def save_npc_profile(self, player_id: str, npc_id: str, profile: dict) -> dict:
+        profile = normalize_profile_contract(profile)
         self.ensure_player(player_id)
 
         def write():
@@ -784,6 +1725,7 @@ class Database:
                            *, maximum: int = 8) -> dict:
         """Create one resident under the same cross-worker limit/name lock."""
         self.ensure_player(player_id)
+        profile = normalize_profile_contract(profile)
 
         def write():
             count = int(self._connection.execute(
@@ -814,9 +1756,9 @@ class Database:
         """Return durable onboarding progress without materializing legacy Emma.
 
         Emma is a compatibility resident created by older entry points and is
-        deliberately excluded from ``user_created_count``.  Existing accounts
-        with two genuinely created residents migrate to completed naturally;
-        a lone default Emma can never complete the guide by itself.
+        deliberately excluded from ``user_created_count``. Resident count is
+        informative only: completion is an explicit durable decision made by
+        the setup saga finalizer or the pre-v3 grandfather migration.
         """
         with self._lock:
             profile_rows = self._connection.execute(
@@ -827,40 +1769,90 @@ class Database:
                 "SELECT state_json,completed_at,updated_at FROM player_onboarding WHERE player_id=?",
                 (player_id,),
             ).fetchone()
-        resident_ids = [str(value["npc_id"]) for value in profile_rows]
+            migration_row = self._connection.execute(
+                "SELECT * FROM player_roster_migrations WHERE player_id=?", (player_id,),
+            ).fetchone()
+        all_resident_ids = [str(value["npc_id"]) for value in profile_rows]
+        migration = self._decode_roster_migration(migration_row)
+        resident_ids = all_resident_ids
+        if migration and migration["status"] == "ready":
+            resident_ids = list(migration["active_npc_ids"])
         user_created = sum(npc_id != "emma" for npc_id in resident_ids)
         stored = json.loads(row["state_json"]) if row else {}
-        completed = bool(stored.get("completed")) or user_created >= minimum
-        return {
-            "version": 1,
+        setup_status = str(stored.get("setup_status") or "")
+        # A staged onboarding cast is deliberately *not* ready merely because
+        # its profile rows exist. Social and world projections are established
+        # after this transaction and ``finalize_onboarding_setup`` is the only
+        # authority allowed to open the gameplay gate for that saga.
+        completed = bool(stored.get("completed"))
+        if migration and migration["status"] != "ready":
+            completed = False
+            setup_status = str(migration["status"])
+        if not setup_status:
+            setup_status = "completed" if completed else "not_started"
+        result = {
+            "version": ONBOARDING_STATE_VERSION,
             "completed": completed,
+            "setup_status": setup_status,
+            "setup_key": stored.get("setup_key"),
             "min_residents": minimum,
             "max_residents": maximum,
             "resident_count": len(resident_ids),
             "user_created_count": user_created,
             "remaining_slots": max(0, maximum - len(resident_ids)),
             "household_name": str(stored.get("household_name") or "Our Home"),
+            "intro_version": stored.get("intro_version"),
+            "intro_acknowledged_at": (stored.get("intro_acknowledged_at")
+                                        or (row["completed_at"] if completed and row else None)),
             "completed_at": row["completed_at"] if row else None,
             "updated_at": row["updated_at"] if row else None,
         }
+        if migration:
+            result["total_resident_count"] = len(all_resident_ids)
+            result["roster_migration"] = {
+                "migration_version": migration["migration_version"],
+                "status": migration["status"], "revision": migration["revision"],
+                "total_resident_count": len(all_resident_ids),
+                "active_resident_count": len(migration["active_npc_ids"]),
+                "archived_resident_count": len(migration["archived_npc_ids"]),
+                "review_required": migration["status"] == "needs_roster_review",
+                "integrity_valid": bool(migration["integrity"].get("valid")),
+            }
+        return result
 
     def refresh_onboarding(self, player_id: str, *, household_name: str | None = None,
                            force_complete: bool = False, minimum: int = 2,
                            maximum: int = 8) -> dict:
-        """Persist completion once enough non-legacy residents exist."""
+        """Refresh metadata without deriving readiness from resident count.
+
+        ``force_complete`` is reserved for the explicit pre-v3 compatibility
+        path. New onboarding worlds are completed only by the saga finalizer.
+        """
         def write():
-            profile_rows = self._connection.execute(
-                "SELECT npc_id FROM npc_profiles WHERE player_id=?", (player_id,),
-            ).fetchall()
-            user_created = sum(str(row["npc_id"]) != "emma" for row in profile_rows)
             row = self._connection.execute(
                 "SELECT state_json FROM player_onboarding WHERE player_id=?", (player_id,),
             ).fetchone()
             stored = json.loads(row["state_json"]) if row else {}
-            completed = force_complete or bool(stored.get("completed")) or user_created >= minimum
+            completed = force_complete or bool(stored.get("completed"))
             current_name = str(stored.get("household_name") or "Our Home")
             name = " ".join((household_name or current_name).split())[:64] or "Our Home"
-            value = {"version": 1, "completed": completed, "household_name": name}
+            now = str(self._connection.execute("SELECT CURRENT_TIMESTAMP").fetchone()[0])
+            intro_version = stored.get("intro_version")
+            intro_acknowledged_at = stored.get("intro_acknowledged_at")
+            if completed and not intro_acknowledged_at:
+                intro_version = CURRENT_INTRO_VERSION
+                intro_acknowledged_at = now
+            value = {
+                "version": ONBOARDING_STATE_VERSION, "completed": completed,
+                "household_name": name, "intro_version": intro_version,
+                "intro_acknowledged_at": intro_acknowledged_at,
+                "setup_status": ("completed" if completed else
+                                 stored.get("setup_status") or "not_started"),
+            }
+            if stored.get("setup_key"):
+                value["setup_key"] = stored["setup_key"]
+            if stored.get("setup_resident_ids"):
+                value["setup_resident_ids"] = stored["setup_resident_ids"]
             self._connection.execute(
                 """INSERT INTO player_onboarding(player_id,state_json,completed_at)
                    VALUES (?,?,CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END)
@@ -875,47 +1867,149 @@ class Database:
         self._life_transaction(write)
         return self.onboarding_state(player_id, minimum=minimum, maximum=maximum)
 
-    def create_onboarding_residents(self, player_id: str, residents: list[dict],
-                                    household_name: str, *, maximum: int = 8) -> list[dict]:
-        """Atomically create a validated onboarding cast and mark it complete."""
+    def acknowledge_onboarding_intro(self, player_id: str, intro_version: int,
+                                     *, minimum: int = 2, maximum: int = 8) -> dict:
+        """Idempotently persist that this account saw the current introduction."""
+        if intro_version != CURRENT_INTRO_VERSION:
+            raise ValueError("UNSUPPORTED_INTRO_VERSION")
         self.ensure_player(player_id)
-        name = " ".join(household_name.split())[:64] or "Our Home"
 
         def write():
-            if not 2 <= len(residents) <= maximum:
+            row = self._connection.execute(
+                "SELECT state_json FROM player_onboarding WHERE player_id=?", (player_id,),
+            ).fetchone()
+            stored = json.loads(row["state_json"]) if row else {}
+            if (stored.get("intro_version") == intro_version
+                    and stored.get("intro_acknowledged_at")):
+                return
+            now = str(self._connection.execute("SELECT CURRENT_TIMESTAMP").fetchone()[0])
+            stored.update({
+                "version": ONBOARDING_STATE_VERSION,
+                "completed": bool(stored.get("completed")),
+                "household_name": str(stored.get("household_name") or "Our Home"),
+                "intro_version": intro_version,
+                "intro_acknowledged_at": now,
+                "setup_status": stored.get("setup_status") or (
+                    "completed" if stored.get("completed") else "not_started"
+                ),
+            })
+            self._connection.execute(
+                """INSERT INTO player_onboarding(player_id,state_json)
+                   VALUES (?,?) ON CONFLICT(player_id) DO UPDATE SET
+                     state_json=excluded.state_json,updated_at=CURRENT_TIMESTAMP""",
+                (player_id, self._json(stored)),
+            )
+
+        self._life_transaction(write)
+        return self.onboarding_state(player_id, minimum=minimum, maximum=maximum)
+
+    @staticmethod
+    def onboarding_setup_key(household_name: str, profiles: list[dict]) -> str:
+        """Return the stable identity of one normalized onboarding request."""
+        name = " ".join(household_name.split())[:64] or "Our Home"
+        payload = {
+            "household_name": name,
+            "profiles": [normalize_profile_contract(profile) for profile in profiles],
+        }
+        return hashlib.sha256(Database._json(payload).encode("utf-8")).hexdigest()
+
+    def create_onboarding_residents(self, player_id: str, residents: list[dict],
+                                    household_name: str, *, maximum: int = 8) -> list[dict]:
+        """Atomically stage a cast while keeping the gameplay gate closed.
+
+        This is the durable first step of the setup saga. Replaying the same
+        normalized request returns the original residents (and therefore the
+        original IDs) without inserting duplicate profiles, greetings or
+        stats. A different request cannot replace a setup already in flight.
+        """
+        name = " ".join(household_name.split())[:64] or "Our Home"
+        normalized_entries = [
+            {"id": str(entry["id"]), "profile": normalize_profile_contract(entry["profile"])}
+            for entry in residents
+        ]
+        setup_key = self.onboarding_setup_key(
+            name, [entry["profile"] for entry in normalized_entries],
+        )
+
+        def write():
+            # Do not call ``ensure_player`` here: its legacy side effect creates
+            # an Emma state and greeting, which would reappear on every saga
+            # replay even though Emma is not part of a new user's chosen cast.
+            self._connection.execute(
+                "INSERT OR IGNORE INTO players(id) VALUES (?)", (player_id,),
+            )
+            if not 2 <= len(normalized_entries) <= maximum:
                 raise ValueError("INVALID_ONBOARDING_RESIDENT_COUNT")
             stored_row = self._connection.execute(
                 "SELECT state_json FROM player_onboarding WHERE player_id=?", (player_id,),
             ).fetchone()
             stored = json.loads(stored_row["state_json"]) if stored_row else {}
+            if not stored.get("intro_acknowledged_at"):
+                raise ValueError("INTRO_NOT_ACKNOWLEDGED")
+            stored_key = str(stored.get("setup_key") or "")
+            stored_status = str(stored.get("setup_status") or "")
+            if stored_status in {"initializing", "completed"} or stored.get("completed"):
+                if stored_key != setup_key:
+                    raise ValueError(
+                        "ONBOARDING_ALREADY_COMPLETED" if stored.get("completed")
+                        else "ONBOARDING_SETUP_IN_PROGRESS"
+                    )
+                staged_ids = [str(value) for value in stored.get("setup_resident_ids") or []]
+                if len(staged_ids) != len(normalized_entries):
+                    raise ValueError("ONBOARDING_SETUP_CORRUPT")
+                rows = self._connection.execute(
+                    "SELECT npc_id,profile_json FROM npc_profiles WHERE player_id=?",
+                    (player_id,),
+                ).fetchall()
+                by_id = {str(row["npc_id"]): json.loads(row["profile_json"]) for row in rows}
+                if any(npc_id not in by_id for npc_id in staged_ids):
+                    raise ValueError("ONBOARDING_SETUP_CORRUPT")
+                return [
+                    {"id": npc_id, "profile": normalize_profile_contract(by_id[npc_id])}
+                    for npc_id in staged_ids
+                ]
             existing_rows = self._connection.execute(
                 "SELECT npc_id,profile_json FROM npc_profiles WHERE player_id=?", (player_id,),
             ).fetchall()
+            # ``ensure_player`` keeps the historical Emma state/message ready
+            # for old endpoints. A genuinely new batch setup has no Emma
+            # profile, so remove those compatibility-only orphan rows before
+            # installing the authoritative cast.
+            if not any(str(row["npc_id"]) == "emma" for row in existing_rows):
+                self._connection.execute(
+                    "DELETE FROM messages WHERE player_id=? AND npc_id='emma'", (player_id,),
+                )
+                self._connection.execute(
+                    "DELETE FROM npc_states WHERE player_id=? AND npc_id='emma'", (player_id,),
+                )
             existing_user_created = sum(str(row["npc_id"]) != "emma" for row in existing_rows)
             if bool(stored.get("completed")) or existing_user_created >= 2:
                 raise ValueError("ONBOARDING_ALREADY_COMPLETED")
             existing_count = int(self._connection.execute(
                 "SELECT count(*) FROM npc_profiles WHERE player_id=?", (player_id,),
             ).fetchone()[0])
-            if existing_count + len(residents) > maximum:
+            if existing_count + len(normalized_entries) > maximum:
                 raise ValueError("NPC_LIMIT_REACHED")
-            incoming_ids = [str(entry["id"]) for entry in residents]
+            incoming_ids = [entry["id"] for entry in normalized_entries]
             if len(incoming_ids) != len(set(incoming_ids)):
                 raise ValueError("DUPLICATE_NPC_ID")
             existing_names = {
                 self._npc_name_key(json.loads(row["profile_json"]).get("name"))
                 for row in existing_rows
             }
-            incoming_names = [self._npc_name_key(entry["profile"].get("name")) for entry in residents]
+            incoming_names = [
+                self._npc_name_key(entry["profile"].get("name"))
+                for entry in normalized_entries
+            ]
             if any(not value for value in incoming_names):
                 raise ValueError("INVALID_NPC_NAME")
             if (len(incoming_names) != len(set(incoming_names))
                     or bool(existing_names & set(incoming_names))):
                 raise ValueError("NPC_NAME_TAKEN")
             created: list[dict] = []
-            for entry in residents:
-                npc_id = str(entry["id"])
-                profile = dict(entry["profile"])
+            for entry in normalized_entries:
+                npc_id = entry["id"]
+                profile = entry["profile"]
                 if npc_id == "emma":
                     raise ValueError("RESERVED_NPC_ID")
                 self._connection.execute(
@@ -932,12 +2026,22 @@ class Database:
                     (player_id, npc_id, self._json(profile)),
                 )
                 created.append({"id": npc_id, "profile": profile})
-            state = {"version": 1, "completed": True, "household_name": name}
+            now = str(self._connection.execute("SELECT CURRENT_TIMESTAMP").fetchone()[0])
+            state = {
+                "version": ONBOARDING_STATE_VERSION, "completed": False,
+                "household_name": name,
+                "intro_version": stored.get("intro_version") or CURRENT_INTRO_VERSION,
+                "intro_acknowledged_at": stored.get("intro_acknowledged_at") or now,
+                "setup_status": "initializing",
+                "setup_key": setup_key,
+                "setup_resident_ids": incoming_ids,
+                "setup_started_at": now,
+            }
             self._connection.execute(
                 """INSERT INTO player_onboarding(player_id,state_json,completed_at)
-                   VALUES (?,?,CURRENT_TIMESTAMP)
+                   VALUES (?,?,NULL)
                    ON CONFLICT(player_id) DO UPDATE SET state_json=excluded.state_json,
-                     completed_at=COALESCE(player_onboarding.completed_at,CURRENT_TIMESTAMP),
+                     completed_at=NULL,
                      updated_at=CURRENT_TIMESTAMP""",
                 (player_id, self._json(state)),
             )
@@ -945,27 +2049,300 @@ class Database:
 
         return self._life_transaction(write)
 
+    def finalize_onboarding_setup(self, player_id: str, setup_key: str, *,
+                                  require_life_world: bool) -> dict:
+        """Open the world only after every idempotent setup projection exists."""
+        def write():
+            row = self._connection.execute(
+                "SELECT state_json FROM player_onboarding WHERE player_id=?", (player_id,),
+            ).fetchone()
+            stored = json.loads(row["state_json"]) if row else {}
+            if not stored.get("intro_acknowledged_at"):
+                raise ValueError("INTRO_NOT_ACKNOWLEDGED")
+            if str(stored.get("setup_key") or "") != setup_key:
+                raise ValueError("ONBOARDING_SETUP_MISMATCH")
+            if stored.get("completed"):
+                return
+            if stored.get("setup_status") != "initializing":
+                raise ValueError("ONBOARDING_SETUP_NOT_INITIALIZING")
+            staged_ids = {str(value) for value in stored.get("setup_resident_ids") or []}
+            if not 2 <= len(staged_ids) <= 8:
+                raise ValueError("ONBOARDING_SETUP_CORRUPT")
+            profile_ids = {
+                str(row["npc_id"]) for row in self._connection.execute(
+                    "SELECT npc_id FROM npc_profiles WHERE player_id=?", (player_id,),
+                ).fetchall()
+            }
+            if not staged_ids <= profile_ids:
+                raise ValueError("ONBOARDING_SETUP_CORRUPT")
+            edge_pairs = {
+                (str(row["npc_a"]), str(row["npc_b"]))
+                for row in self._connection.execute(
+                    "SELECT npc_a,npc_b FROM npc_social_edges WHERE player_id=?", (player_id,),
+                ).fetchall()
+            }
+            expected_pairs = {
+                (npc_a, npc_b) for npc_a in profile_ids for npc_b in profile_ids if npc_a != npc_b
+            }
+            if not expected_pairs <= edge_pairs:
+                raise ValueError("ONBOARDING_INITIALIZATION_INCOMPLETE")
+            if require_life_world:
+                if not self._connection.execute(
+                    "SELECT 1 FROM life_world_states WHERE player_id=?", (player_id,),
+                ).fetchone():
+                    raise ValueError("ONBOARDING_INITIALIZATION_INCOMPLETE")
+                household_rows = self._connection.execute(
+                    "SELECT id FROM households WHERE player_id=?", (player_id,),
+                ).fetchall()
+                if len(household_rows) != 1:
+                    raise ValueError("ONBOARDING_INITIALIZATION_INCOMPLETE")
+                member_ids = {
+                    str(row["npc_id"]) for row in self._connection.execute(
+                        "SELECT npc_id FROM household_members WHERE player_id=?", (player_id,),
+                    ).fetchall()
+                }
+                if not profile_ids <= member_ids:
+                    raise ValueError("ONBOARDING_INITIALIZATION_INCOMPLETE")
+            now = str(self._connection.execute("SELECT CURRENT_TIMESTAMP").fetchone()[0])
+            stored.update({
+                "version": ONBOARDING_STATE_VERSION,
+                "completed": True,
+                "setup_status": "completed",
+                "setup_completed_at": now,
+            })
+            self._connection.execute(
+                """UPDATE player_onboarding SET state_json=?,
+                     completed_at=COALESCE(completed_at,CURRENT_TIMESTAMP),
+                     updated_at=CURRENT_TIMESTAMP WHERE player_id=?""",
+                (self._json(stored), player_id),
+            )
+
+        self._life_transaction(write)
+        return self.onboarding_state(player_id)
+
+    @classmethod
+    def _layout_digest(cls, layout: dict) -> tuple[str, str]:
+        encoded = cls._json(layout)
+        return encoded, hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _layout_version(row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"], "hash": row["layout_hash"],
+            "layout": json.loads(row["layout_json"]), "note": row["note"],
+            "author": row["author"], "is_default": bool(row["is_default"]),
+            "validation": json.loads(row["validation_json"] or "{}"),
+            "created_at": row["created_at"],
+        }
+
     def get_world_layout(self) -> dict | None:
+        """Return the immutable version addressed by the singleton active pointer."""
         with self._lock:
             row = self._connection.execute(
-                "SELECT layout_json,updated_at FROM world_layout_configs WHERE scope='published'"
+                """SELECT versions.*,active.activated_at,active.activated_by,
+                          active.activation_note
+                   FROM world_layout_active active
+                   JOIN world_layout_versions versions ON versions.id=active.version_id
+                   WHERE active.scope='global'"""
             ).fetchone()
-        return ({"layout": json.loads(row["layout_json"]), "updated_at": row["updated_at"]}
-                if row else None)
+        if not row:
+            return None
+        version = self._layout_version(row)
+        return {
+            "layout": version["layout"],
+            "updated_at": None if version["is_default"] else row["activated_at"],
+            "active_version": {key: value for key, value in version.items() if key != "layout"},
+            "activated_at": row["activated_at"],
+            "activated_by": row["activated_by"],
+            "activation_note": row["activation_note"],
+        }
+
+    def get_world_layout_draft(self) -> dict | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM world_layout_drafts WHERE scope='global'"
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "layout": json.loads(row["layout_json"]), "hash": row["layout_hash"],
+            "revision": int(row["revision"]), "author": row["author"],
+            "validation": json.loads(row["validation_json"] or "{}"),
+            "created_at": row["created_at"], "updated_at": row["updated_at"],
+        }
+
+    def save_world_layout_draft(self, layout: dict, expected_revision: int,
+                                author: str, validation: dict) -> dict:
+        encoded, layout_hash = self._layout_digest(layout)
+        with self._lock, self._connection:
+            row = self._connection.execute(
+                "SELECT revision FROM world_layout_drafts WHERE scope='global'"
+            ).fetchone()
+            current = int(row["revision"]) if row else 0
+            if current != expected_revision:
+                raise WorldLayoutDraftConflict(current)
+            revision = current + 1
+            self._connection.execute(
+                """INSERT INTO world_layout_drafts(
+                     scope,layout_json,layout_hash,revision,author,validation_json)
+                   VALUES ('global',?,?,?,?,?)
+                   ON CONFLICT(scope) DO UPDATE SET
+                     layout_json=excluded.layout_json,layout_hash=excluded.layout_hash,
+                     revision=excluded.revision,author=excluded.author,
+                     validation_json=excluded.validation_json,
+                     updated_at=CURRENT_TIMESTAMP""",
+                (encoded, layout_hash, revision, author.strip()[:80] or "admin",
+                 self._json(validation)),
+            )
+        return self.get_world_layout_draft()  # type: ignore[return-value]
+
+    def list_world_layout_versions(self, limit: int = 100) -> list[dict]:
+        with self._lock:
+            rows = self._connection.execute(
+                """SELECT versions.*,
+                          CASE WHEN active.version_id=versions.id THEN 1 ELSE 0 END AS is_active,
+                          active.activated_at
+                   FROM world_layout_versions versions
+                   LEFT JOIN world_layout_active active
+                     ON active.scope='global' AND active.version_id=versions.id
+                   ORDER BY versions.created_at DESC,versions.id DESC LIMIT ?""",
+                (max(1, min(500, int(limit))),),
+            ).fetchall()
+        return [
+            {
+                **{key: value for key, value in self._layout_version(row).items()
+                   if key != "layout"},
+                "is_active": bool(row["is_active"]),
+                "activated_at": row["activated_at"],
+            }
+            for row in rows
+        ]
+
+    def world_layout_version(self, version_id: str) -> dict | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM world_layout_versions WHERE id=?", (version_id,),
+            ).fetchone()
+        return self._layout_version(row) if row else None
+
+    def publish_world_layout(self, layout: dict, note: str = "兼容发布",
+                             author: str = "admin", validation: dict | None = None,
+                             expected_draft_revision: int | None = None,
+                             is_default: bool = False) -> dict:
+        """Insert an immutable content-addressed version and atomically activate it."""
+        encoded, layout_hash = self._layout_digest(layout)
+        version_id = f"layout-{layout_hash}"
+        clean_note = note.strip()[:240] or "发布布局"
+        clean_author = author.strip()[:80] or "admin"
+        validation = validation or {}
+        with self._lock, self._connection:
+            if expected_draft_revision is not None:
+                row = self._connection.execute(
+                    "SELECT revision,layout_hash FROM world_layout_drafts WHERE scope='global'"
+                ).fetchone()
+                current = int(row["revision"]) if row else 0
+                if current != expected_draft_revision or not row or row["layout_hash"] != layout_hash:
+                    raise WorldLayoutDraftConflict(current)
+            previous = self._connection.execute(
+                "SELECT version_id FROM world_layout_active WHERE scope='global'"
+            ).fetchone()
+            existing = self._connection.execute(
+                "SELECT id FROM world_layout_versions WHERE layout_hash=?", (layout_hash,),
+            ).fetchone()
+            self._connection.execute(
+                """INSERT OR IGNORE INTO world_layout_versions(
+                     id,layout_hash,layout_json,note,author,is_default,validation_json)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (version_id, layout_hash, encoded, clean_note, clean_author,
+                 int(is_default), self._json(validation)),
+            )
+            action = "publish" if not existing else "activate_existing"
+            self._connection.execute(
+                """INSERT INTO world_layout_active(
+                     scope,version_id,activated_by,activation_note)
+                   VALUES ('global',?,?,?)
+                   ON CONFLICT(scope) DO UPDATE SET
+                     version_id=excluded.version_id,activated_by=excluded.activated_by,
+                     activation_note=excluded.activation_note,
+                     activated_at=CURRENT_TIMESTAMP""",
+                (version_id, clean_author, clean_note),
+            )
+            self._connection.execute(
+                """INSERT INTO world_layout_audit(
+                     action,version_id,previous_version_id,note,author)
+                   VALUES (?,?,?,?,?)""",
+                (action, version_id, previous["version_id"] if previous else None,
+                 clean_note, clean_author),
+            )
+        result = self.get_world_layout()
+        assert result is not None
+        return {**result, "created": not bool(existing)}
+
+    def activate_world_layout_version(self, version_id: str, note: str,
+                                      author: str) -> dict | None:
+        clean_note = note.strip()[:240] or "回滚到历史版本"
+        clean_author = author.strip()[:80] or "admin"
+        with self._lock, self._connection:
+            exists = self._connection.execute(
+                "SELECT 1 FROM world_layout_versions WHERE id=?", (version_id,),
+            ).fetchone()
+            if not exists:
+                return None
+            previous = self._connection.execute(
+                "SELECT version_id FROM world_layout_active WHERE scope='global'"
+            ).fetchone()
+            self._connection.execute(
+                """INSERT INTO world_layout_active(
+                     scope,version_id,activated_by,activation_note)
+                   VALUES ('global',?,?,?)
+                   ON CONFLICT(scope) DO UPDATE SET
+                     version_id=excluded.version_id,activated_by=excluded.activated_by,
+                     activation_note=excluded.activation_note,
+                     activated_at=CURRENT_TIMESTAMP""",
+                (version_id, clean_author, clean_note),
+            )
+            self._connection.execute(
+                """INSERT INTO world_layout_audit(
+                     action,version_id,previous_version_id,note,author)
+                   VALUES ('activate',?,?,?,?)""",
+                (version_id, previous["version_id"] if previous else None,
+                 clean_note, clean_author),
+            )
+        return self.get_world_layout()
+
+    def world_layout_audit(self, limit: int = 100) -> list[dict]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM world_layout_audit ORDER BY id DESC LIMIT ?",
+                (max(1, min(500, int(limit))),),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def save_world_layout(self, layout: dict) -> dict:
-        with self._lock, self._connection:
-            self._connection.execute(
-                """INSERT INTO world_layout_configs(scope,layout_json) VALUES ('published',?)
-                   ON CONFLICT(scope) DO UPDATE SET layout_json=excluded.layout_json,
-                     updated_at=CURRENT_TIMESTAMP""",
-                (self._json(layout),),
-            )
-        return self.get_world_layout()  # type: ignore[return-value]
+        """Compatibility entry point; callers should validate before publishing."""
+        return self.publish_world_layout(layout)
 
-    def reset_world_layout(self) -> None:
+    def reset_world_layout(self, layout: dict | None = None,
+                           author: str = "admin") -> dict | None:
+        if layout is not None:
+            return self.publish_world_layout(
+                layout, note="恢复项目默认布局", author=author,
+                validation={"valid": True, "source": "built_in_default"},
+                is_default=True,
+            )
         with self._lock, self._connection:
-            self._connection.execute("DELETE FROM world_layout_configs WHERE scope='published'")
+            previous = self._connection.execute(
+                "SELECT version_id FROM world_layout_active WHERE scope='global'"
+            ).fetchone()
+            self._connection.execute("DELETE FROM world_layout_active WHERE scope='global'")
+            self._connection.execute(
+                """INSERT INTO world_layout_audit(
+                     action,version_id,previous_version_id,note,author)
+                   VALUES ('reset_virtual_default',NULL,?,?,?)""",
+                (previous["version_id"] if previous else None,
+                 "恢复项目默认布局", author.strip()[:80]),
+            )
+        return None
 
     def add_npc_memory(self, player_id: str, npc_id: str, kind: str, content: str,
                        source_event_id: str | None = None, importance: int = 1,

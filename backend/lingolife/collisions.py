@@ -176,6 +176,7 @@ class CollisionSnapshot:
     responsibilities: tuple[Mapping[str, Any], ...] = ()
     boundary_events: tuple[Mapping[str, Any], ...] = ()
     environment_events: tuple[Mapping[str, Any], ...] = ()
+    social_events: tuple[Mapping[str, Any], ...] = ()
     profiles: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     relationships: Mapping[tuple[str, str], Mapping[str, Any]] = field(default_factory=dict)
     rules_version: str = COLLISION_RULES_VERSION
@@ -430,6 +431,7 @@ def detect_collisions(snapshot: CollisionSnapshot,
     collisions = [
         *_detect_person_resource(snapshot, source),
         *_detect_person_person(snapshot, source),
+        *_detect_fact_events(snapshot, source, "person_person", snapshot.social_events),
         *_detect_fact_events(snapshot, source, "person_responsibility", snapshot.responsibilities),
         *_detect_fact_events(snapshot, source, "person_boundary", snapshot.boundary_events),
         *_detect_fact_events(snapshot, source, "person_environment", snapshot.environment_events),
@@ -451,6 +453,14 @@ def _response_score(response: CollisionResponseTemplate, npc_id: str, collision:
     assertion = _axis(profile, "assertiveness")
     stability = _axis(profile, "emotional_stability")
     flexibility = float(profile.get("flexibility", _axis(profile, "openness")))
+    pride = float(profile.get("pride", 50))
+    behavior = profile.get("behavior") if isinstance(profile.get("behavior"), Mapping) else {}
+    conflict_style = str(behavior.get("conflict_style") or "measured")
+    role = str(profile.get("householdRole") or "free_spirit")
+    boundary_text = " ".join(str(value) for value in profile.get("boundaries", ())).casefold()
+    dislike_text = " ".join(str(value) for value in profile.get("dislikes", ())).casefold()
+    collision_text = " ".join((collision.topic, collision.trigger,
+                               json.dumps(collision.facts, ensure_ascii=False))).casefold()
     stress = float((profile.get("emotion") or {}).get("stress", 40))
     trust = float(relationship.get("trust", 50))
     affinity = float(relationship.get("affinity", 50))
@@ -474,6 +484,46 @@ def _response_score(response: CollisionResponseTemplate, npc_id: str, collision:
         score += flexibility * .09 + stability * .04
     elif style == "quiet":
         score += max(0, 65 - _axis(profile, "extraversion")) * .08 + stability * .05
+    if style in {"assertive", "boundaried", "confrontational"}:
+        score += pride * .055
+    elif style in {"cooperative", "warm", "caretaking", "flexible"}:
+        score += max(0, 65 - pride) * .045
+    if conflict_style == "direct" and style in {"assertive", "boundaried", "confrontational"}:
+        score += 8
+    elif conflict_style == "avoidant" and style in {"avoidant", "quiet", "sensitive"}:
+        score += 8
+    elif conflict_style == "measured" and style in {"cooperative", "fair", "patient"}:
+        score += 6
+    if role == "mediator" and style in {"cooperative", "fair", "patient"}:
+        score += 7
+    elif role == "caretaker" and style in {"warm", "caretaking"}:
+        score += 7
+    elif role in {"organizer", "fixer"} and style in {"assertive", "practical", "boundaried"}:
+        score += 6
+    boundary_tokens = {token for token in boundary_text.replace("_", " ").split() if len(token) >= 4}
+    dislike_tokens = {token for token in dislike_text.replace("_", " ").split() if len(token) >= 4}
+    if collision.kind == "person_boundary" and any(token in collision_text for token in boundary_tokens):
+        score += 9 if style in {"boundaried", "assertive", "quiet"} else -4
+    if any(token in collision_text for token in dislike_tokens):
+        score += 7 if style in {"assertive", "confrontational", "avoidant", "sensitive"} else -3
+    # Subjective memories are not decorative history: a resident tends to
+    # reuse a coping strategy that they remember choosing in a similar
+    # situation.  The bounded recency bonus is deliberately smaller than the
+    # Persona/relationship contribution, so experience creates continuity
+    # without turning one response into a permanent script.
+    memory_context = profile.get("memory_context")
+    if isinstance(memory_context, Sequence) and not isinstance(memory_context, (str, bytes)):
+        relevant = [item for item in memory_context if isinstance(item, Mapping)
+                    and str(item.get("topic") or "") == collision.topic
+                    and str(item.get("other_npc_id") or "") in {"", next(
+                        (value for value in collision.participant_ids if value != npc_id), "",
+                    )}]
+        for recency, memory in enumerate(reversed(relevant[-4:])):
+            decay = 1 / (recency + 1)
+            if str(memory.get("response_id") or "") == response.id:
+                score += 8 * decay
+            elif str(memory.get("response_style") or "") == style:
+                score += 3 * decay
     return score
 
 
@@ -537,6 +587,9 @@ def resolve_collision_autonomously(collision: Collision, *,
         memories.append({
             "npc_id": npc_id, "kind": "relationship" if other else "episodic",
             "topic": collision.topic,
+            "other_npc_id": other,
+            "response_id": chosen.id,
+            "response_style": chosen.style,
             "content_seed": f"I responded by {chosen.id.replace('_', ' ')} during {collision.topic.replace('_', ' ')}.",
         })
         if index < len(collision.action_ids):
