@@ -14,6 +14,8 @@ AI 驱动的 3D 天空之城生活模拟 / 英语学习游戏。Web 是唯一玩
 
 ## 文档入口
 
+- [新玩家完整流程、子系统地图与优化优先级](docs/PLAYER_JOURNEY_AND_SYSTEMS.md)
+- [进城实操引导与事件结果：玩法、接口与验收清单](docs/CITY_PRACTICE_GUIDE.md)
 - [当前进展与跨会话交接](docs/SESSION_HANDOFF.md)
 - [游戏设计文档 v0.4](LingoLife%20GDD.md)
 - [NPC Agent 目标设计 v0.4](NPC%20Agent%20系统设计文档.md)

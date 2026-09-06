@@ -5,6 +5,8 @@ import {LocationIcon} from './LocationIcon'
 import {AvatarStage} from './AvatarStage'
 import type {AnimationCue,AvatarConfig,LifeStory,PublicRelationshipSummary,ResidentWorldAction,TroubleSignal} from '../types'
 import type {ObservableCharacterState} from '../life/characterExpression'
+import type {SpatialPresence} from '../types'
+import {visibleOnCityMap} from '../life/spatialPresence'
 import type {NormalizedResidentAction} from '../life/normalizeWorldSnapshot'
 import './CityMap.css'
 import './CityMapExpansion.css'
@@ -28,6 +30,8 @@ export type CityCharacter={
   storyContext?:LifeStory|null
   relationshipContext?:PublicRelationshipSummary|null
   householdId?:string
+  spatialPresence?:SpatialPresence
+  homeLocationId?:string
 }
 export type CityMapProps={
   characters:CityCharacter[]
@@ -137,7 +141,7 @@ export function CityMap({characters,landmarks=DEFAULT_LANDMARKS,activeCharacterI
         <div className="city-landmarks">{landmarks.map(place=>{const resource=getLocationAsset(place.id,place.kind);return <button type="button" key={place.id} className={`city-landmark city-landmark--${place.kind}`} style={{left:`${place.x/12}%`,top:`${place.y/7.6}%`,'--landmark-accent':resource.accent} as React.CSSProperties} onClick={()=>setSelected({landmark:place})} aria-label={language==='zh'?`查看${place.name}详情`:`View details for ${place.name}`}><i><LocationIcon name={resource.icon}/></i><b>{place.name}</b></button>})}</div>
         <div className="city-map__characters">
           {characters.slice(0,1).map(c=><HomeMarker key="shared-home" character={c} homeLabel={copy.home} onSelect={()=>setSelected({homeCharacter:c})}/>)}
-          {characters.slice(0,5).map(c=><CharacterPin key={c.id} character={c} active={c.id===activeCharacterId} onSelect={()=>onCharacterClick(c.id)}/>)}
+          {characters.filter(visibleOnCityMap).slice(0,8).map(c=><CharacterPin key={c.id} character={c} active={c.id===activeCharacterId} onSelect={()=>onCharacterClick(c.id)}/>)}
         </div>
       </div>
     </div>

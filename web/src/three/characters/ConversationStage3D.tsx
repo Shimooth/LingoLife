@@ -8,6 +8,7 @@ import { DirectedCharacter3D } from './DirectedCharacter3D'
 import type { ConversationAtmosphere, ConversationStage3DProps, SpeechLine } from './types'
 import './characters.css'
 import {IndoorEnvironment3D} from '../interiors'
+import {selectSceneSpeech} from '../../conversationOpening'
 
 type Palette = { sky: string; horizon: string; floor: string; accent: string; light: string }
 
@@ -84,7 +85,7 @@ export function ConversationStage3D({ npcAvatar, playerAvatar, showPlayerAvatar 
   const [internalTranslation, setInternalTranslation] = useState(false)
   const atmosphere = requestedAtmosphere ?? inferAtmosphere(locationKind)
   const palette = atmospheres[atmosphere]
-  const fallbackLine: SpeechLine | null = liveSpeech ?? (messages.length ? { ...messages[messages.length - 1], key: messages[messages.length - 1].created_at } : null)
+  const fallbackLine = selectSceneSpeech(liveSpeech, messages)
   const translationVisible = showTranslation ?? internalTranslation
   const toggleTranslation = () => {
     const next = !translationVisible

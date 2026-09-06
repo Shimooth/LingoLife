@@ -1,0 +1,24 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Guide and shared meal QA</title></head><body><div id="root"></div>
+<script type="module">
+import React from 'react';import {createRoot} from 'react-dom/client';
+import {CityPracticeGuide} from '/src/components/CityPracticeGuide.tsx';
+import {LifeStoryEncounter} from '/src/components/LifeStoryEncounter.tsx';
+import {HouseholdInspector} from '/src/components/HouseholdInspector.tsx';
+import {normalizeResidentAction} from '/src/life/normalizeWorldSnapshot.ts';
+import {presentInHome} from '/src/life/spatialPresence.ts';
+import {defaultAvatar} from '/src/avatar.ts';
+import '/src/styles.css';
+const frames=await(await fetch('./dinner-snapshots.json')).json(),h=React.createElement;
+const initialStory={id:'qa-recap',level:'moment',status:'resolved_autonomously',title:'A meal shared',title_zh:'室友分享了一顿饭',summary:'Ava made food. Bo accepted a portion.',summary_zh:'Ava 做了饭，Bo 接受了一份。',participant_ids:['ava','bo'],participants:[{id:'ava',name:'Ava'},{id:'bo',name:'Bo'}],location_id:'home-1',household_id:'shared',observed_at:null,outcome:{mode:'autonomous',result:'accepted',participant_reactions:[],consequences:[],aftermath:[]},presentation:{beats:[]}};
+function Demo(){
+ const [mode,setMode]=React.useState('guide'),[index,setIndex]=React.useState(0),[language,setLanguage]=React.useState('zh'),[open,setOpen]=React.useState(false),[busy,setBusy]=React.useState(false),[step,setStep]=React.useState('participate'),[status,setStatus]=React.useState('active'),[story,setStory]=React.useState(initialStory);
+ const snapshot=frames[index],avatars={ava:{...defaultAvatar,model:'city-01'},bo:{...defaultAvatar,model:'chibi'}},residents=snapshot.residents.map(item=>({...item,avatar:avatars[item.id]}));
+ const progress={version:1,revision:0,status,step,npc_id:'ava',story_id:story.id,participation:story.observed_at?'observed':null};
+ const reset=()=>{setOpen(false);setStep('participate');setStatus('active');setStory(initialStory)};
+ return h(React.Fragment,null,
+ h('div',{id:'qa-controls'},h('button',{'data-mode':'guide',onClick:()=>{setMode('guide');reset()}},'Guide'),h('button',{'data-mode':'dinner',onClick:()=>setMode('dinner')},'Dinner'),h('button',{'data-language':true,onClick:()=>setLanguage(value=>value==='zh'?'en':'zh')},'Language'),h('select',{'aria-label':'Simulation snapshot',value:index,onChange:event=>setIndex(Number(event.target.value))},...frames.map((frame,i)=>h('option',{key:i,value:i},`${frame.seconds}s · ${frame.household.life.dinner.phase}`))),h('output',{id:'qa-state'},JSON.stringify({step,status,open,phase:snapshot.household.life.dinner.phase}))),
+ mode==='guide'?h(CityPracticeGuide,{data:{progress,story,candidate:story},residents,language,busy,failed:false,onFollow:()=>{},onOpen:()=>setOpen(true),onPause:()=>setStatus('paused'),onResume:()=>setStatus('active'),onRefresh:()=>{}}):h(HouseholdInspector,{household:snapshot.household,gameDate:'2026-09-06',residentNames:{ava:'Ava',bo:'Bo'},residentVisuals:residents.map(resident=>({id:resident.id,name:resident.name,avatar:resident.avatar,isHome:presentInHome(resident),roomId:resident.current_room_id,currentAction:normalizeResidentAction(resident)})),language,onClose:()=>setMode('guide')}),
+ mode==='guide'&&open&&h(LifeStoryEncounter,{story,language,participantAvatars:avatars,guideStep:step,guideBusy:busy,guideFailed:false,onClose:()=>setOpen(false),onGuideComplete:async()=>{setStatus('completed');setOpen(false)},onObserve:async()=>{setBusy(true);await new Promise(resolve=>setTimeout(resolve,150));const next={...story,observed_at:new Date().toISOString()};setStory(next);setStep('result');setBusy(false);return next},onIntervene:async()=>story}));
+}
+createRoot(document.getElementById('root')).render(h(React.StrictMode,null,h(Demo)));
+</script><style>#qa-controls{position:fixed;z-index:200;top:0;left:0;display:flex;gap:3px;flex-wrap:wrap;max-width:100vw;font-size:10px;background:#fff8;padding:3px}#qa-controls select{max-width:145px}#qa-state{font-size:9px;max-width:100vw;overflow-wrap:anywhere}</style></body></html>

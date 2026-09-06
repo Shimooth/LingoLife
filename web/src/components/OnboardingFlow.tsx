@@ -17,7 +17,9 @@ import {
 } from '../onboardingProfiles'
 import {normalizeNpcProfilePolicy,withProfileAge,withRomancePreference} from '../profilePolicy'
 import {CharacterCanvas3D} from '../three/characters'
-import {CHARACTER_PRESETS} from '../three/characters/characterAssets'
+import {CharacterModelPicker} from './CharacterModelPicker'
+import {CharacterPortrait} from './CharacterPortrait'
+import type {CharacterMotion} from '../three/characters/types'
 import type {FamilyRole,NpcProfile,OnboardingCompleteRequest,SharedHistoryKind,SharedHistoryTone} from '../types'
 import './OnboardingFlow.css'
 
@@ -57,6 +59,9 @@ export function OnboardingFlow({language,minimum,maximum,introAcknowledged,savin
 }){
  const copy=COPY[language],reduce=useReducedMotion()
  const safeMinimum=Math.max(2,Math.min(8,minimum)),safeMaximum=Math.max(safeMinimum,Math.min(8,maximum))
+ const [previewMotion,setPreviewMotion]=useState<CharacterMotion>('idle')
+ const [previewTake,setPreviewTake]=useState(0)
+ const [editorTab,setEditorTab]=useState<'profile'|'appearance'>('profile')
  const [phase,setPhase]=useState<'intro'|'loop'|'residents'>(introAcknowledged?'loop':'intro')
  const [acknowledging,setAcknowledging]=useState(false),[introError,setIntroError]=useState('')
  const [drafts,setDrafts]=useState<OnboardingResidentDraft[]>(()=>createOnboardingResidents(safeMinimum))
@@ -109,7 +114,7 @@ export function OnboardingFlow({language,minimum,maximum,introAcknowledged,savin
  })
  const updateHistory=(id:string,change:Partial<Pick<DraftSharedHistoryHook,'summary'|'tone'>>)=>setHistoryHooks(current=>current.map(hook=>hook.id===id?{...hook,...change}:hook))
  const submit=(event:FormEvent)=>{
-  event.preventDefault();setAttempted(true)
+  event.preventDefault();setAttempted(true);setEditorTab('profile')
   if(!valid||saving)return
   const social=buildOnboardingSocialContract(drafts,familyBonds,historyHooks)
   onComplete({residents:drafts.map(draft=>normalizeNpcProfilePolicy({...draft.profile,avatar:{...draft.profile.avatar,strokes:[]}})),...social})
@@ -148,19 +153,21 @@ export function OnboardingFlow({language,minimum,maximum,introAcknowledged,savin
     <div className="onboarding-workspace">
      <aside className="onboarding-roster">
       <header><strong>{copy.roster}</strong><span>{copy.residentCount(drafts.length,safeMaximum)}</span></header>
-      <div>{drafts.map((draft,index)=>{
+      <div>{drafts.map(draft=>{
        const draftIssues=issues[draft.key]??[],hasIssue=attempted&&draftIssues.length>0
-       return <button type="button" className={`${draft.key===selected.key?'is-selected':''} ${hasIssue?'has-error':''}`} onClick={()=>setSelectedKey(draft.key)} key={draft.key}><i style={{background:draft.profile.avatar.hairColor}}>{index+1}</i><span><b>{draft.profile.name||copy.required}</b><small>{draft.profile.occupation||copy.required}</small></span><em aria-hidden>{hasIssue?'!':'›'}</em></button>
+       return <button type="button" className={`${draft.key===selected.key?'is-selected':''} ${hasIssue?'has-error':''}`} onClick={()=>{setSelectedKey(draft.key);setPreviewMotion('idle')}} aria-pressed={draft.key===selected.key} key={draft.key}><CharacterPortrait avatar={draft.profile.avatar} live/><span><b>{draft.profile.name||copy.required}</b><small>{draft.profile.occupation||copy.required}</small></span><em aria-hidden>{hasIssue?'!':'›'}</em></button>
       })}</div>
       <button className="onboarding-add" type="button" disabled={drafts.length>=safeMaximum} onClick={addResident}>＋ {copy.add}</button>
       <small>{drafts.length>=safeMaximum?copy.max:copy.min(safeMinimum)}</small>
      </aside>
      <section className="onboarding-resident">
       <div className="onboarding-preview">
-       <CharacterCanvas3D key={`${selected.key}:${selected.profile.avatar.model}`} avatar={selected.profile.avatar} animation="idle" view="full" name={selected.profile.name||'Resident'}/>
+       <CharacterCanvas3D avatar={selected.profile.avatar} animation={previewMotion} animationKey={previewTake} staticPreview={Boolean(reduce)} view="full" name={selected.profile.name||'Resident'}/>
+       <nav className="onboarding-preview__motions" aria-label={language==='zh'?'动作预览':'Preview animation'}>{([{id:'idle',zh:'站立',en:'Idle'},{id:'walk',zh:'走动',en:'Walk'},{id:'happy',zh:'开心',en:'Happy'}] as const).map(item=><button type="button" key={item.id} aria-pressed={previewMotion===item.id} disabled={Boolean(reduce)} onClick={()=>{setPreviewMotion(item.id);setPreviewTake(value=>value+1)}}>{item[language]}</button>)}</nav>
        <div><span>⌂ {copy.residentHome}</span><strong>{selected.profile.name||copy.required}</strong><small>{selected.profile.relationship} · {selected.profile.occupation}</small></div>
       </div>
-      <form className="onboarding-editor" onSubmit={submit} noValidate>
+      <form className={`onboarding-editor onboarding-editor--${editorTab}`} onSubmit={submit} noValidate>
+       <nav className="onboarding-editor__tabs" aria-label={language==='zh'?'居民设置':'Resident setup'}><button type="button" aria-pressed={editorTab==='profile'} onClick={()=>setEditorTab('profile')}>{language==='zh'?'性格与生活':'Personality & life'}</button><button type="button" aria-pressed={editorTab==='appearance'} onClick={()=>setEditorTab('appearance')}>{language==='zh'?'选择外观':'Appearance'}</button></nav>
        <div className="onboarding-editor__actions"><button type="button" onClick={rerollSelected}>↻ {copy.reroll}</button><button type="button" disabled={drafts.length<=safeMinimum} onClick={removeResident}>− {copy.remove}</button></div>
        <div className="onboarding-field-grid">
         <label className={invalid('name')||invalid('duplicate-name')?'has-error':''}>{copy.name}<input maxLength={24} value={selected.profile.name} onChange={event=>setField('name',event.target.value.replace(/[^\p{L}\p{N} _'-]/gu,''))}/>{fieldMessage(invalid('duplicate-name')?'duplicate-name':'name')}</label>
@@ -185,7 +192,7 @@ export function OnboardingFlow({language,minimum,maximum,introAcknowledged,savin
        <label className={invalid('goal')?'has-error':''}>{copy.goal}<textarea rows={3} maxLength={180} value={selected.profile.longTermGoal} onChange={event=>setField('longTermGoal',event.target.value)}/>{fieldMessage('goal')}</label>
        <fieldset className="onboarding-social-contract"><legend>{copy.familyTitle}</legend><p>{copy.familyHint}</p><div className="onboarding-social-contract__rows">{otherDrafts.map(other=>{const currentRole=familyRoleFor(other.key),atLimit=!currentRole&&(familyCount(selected.key)>=4||familyCount(other.key)>=4);return <label key={other.key}><span>{other.profile.name}</span><select value={currentRole} disabled={atLimit} onChange={event=>setFamilyRole(other.key,event.target.value as FamilyRole|'')}><option value="">{copy.notFamily}</option>{(Object.entries(copy.familyRoles) as [FamilyRole,string][]).map(([role,label])=><option value={role} key={role}>{label}</option>)}</select></label>})}</div></fieldset>
        <fieldset className={`onboarding-social-contract ${attempted&&!socialValid?'has-error':''}`}><legend>{copy.historyTitle}</legend><p>{copy.historyHint}</p><div className="onboarding-history-list">{otherDrafts.map(other=>{const hook=historyFor(other.key),atLimit=!hook&&(historyCount(selected.key)>=4||historyCount(other.key)>=4);return <section key={other.key}><label><span>{other.profile.name}</span><select value={hook?.kind??''} disabled={atLimit} onChange={event=>setHistoryKind(other,event.target.value as SharedHistoryKind|'')}><option value="">{copy.noHistory}</option>{(Object.entries(copy.historyKinds) as [SharedHistoryKind,string][]).map(([kind,label])=><option value={kind} key={kind}>{label}</option>)}</select></label>{hook&&<div><label>{copy.historySummary}<input maxLength={180} value={hook.summary} onChange={event=>updateHistory(hook.id,{summary:event.target.value})}/></label><label><span className="onboarding-visually-hidden">Tone</span><select value={hook.tone} onChange={event=>updateHistory(hook.id,{tone:event.target.value as SharedHistoryTone})}>{(Object.entries(copy.historyTones) as [SharedHistoryTone,string][]).map(([tone,label])=><option value={tone} key={tone}>{label}</option>)}</select></label></div>}</section>})}</div></fieldset>
-       <fieldset><legend>{copy.appearance}</legend><label>{copy.model}<select value={selected.profile.avatar.model} onChange={event=>setField('avatar',{...selected.profile.avatar,model:event.target.value,strokes:[]})}>{CHARACTER_PRESETS.map(preset=><option value={preset.id} key={preset.id}>{preset.label[language]}</option>)}</select></label></fieldset>
+       <fieldset className="onboarding-appearance"><legend>{copy.appearance}</legend><p>{language==='zh'?'点击缩略图试穿造型；左侧可预览实际动作。外观不会改变已经填写的性格和生活设定。':'Choose a look and preview its animations. Your personality and life settings stay unchanged.'}</p><CharacterModelPicker avatar={selected.profile.avatar} language={language} onChange={model=>setField('avatar',{...selected.profile.avatar,model,strokes:[]})}/></fieldset>
        <label className="onboarding-romance"><input type="checkbox" checked={Boolean(selected.profile.romanceEnabled)} disabled={(selected.profile.age??0)<18} onChange={event=>updateProfile(profile=>withRomancePreference(profile,event.target.checked))}/><span><b>{copy.romance}</b><small>{copy.romanceHint}</small></span></label>
        <footer>
         <div>{attempted&&!valid&&<strong role="alert">{copy.invalid}</strong>}{error&&<strong role="alert">{error}</strong>}<small className={difference.valid?'is-valid':'is-warning'}>{difference.valid?'✓ ':''}{difference.valid?copy.differenceGood:copy.differenceBad}</small><small>{copy.savedHint}</small></div>

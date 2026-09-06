@@ -429,6 +429,11 @@ class Database:
                 self._connection.execute("ALTER TABLE messages ADD COLUMN npc_id TEXT NOT NULL DEFAULT 'emma'")
             if "translation" not in columns:
                 self._connection.execute("ALTER TABLE messages ADD COLUMN translation TEXT")
+            if "conversation_id" not in columns:
+                self._connection.execute("ALTER TABLE messages ADD COLUMN conversation_id TEXT")
+            self._connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(player_id,npc_id,conversation_id,id)"
+            )
             self._connection.execute(
                 "UPDATE messages SET translation='我今天工作过得糟透了……' "
                 "WHERE speaker='npc' AND text='I had a terrible day at work...' "
@@ -1226,11 +1231,17 @@ class Database:
         row = self._connection.execute("SELECT relationship,mood,english_xp FROM npc_states WHERE player_id=? AND npc_id=?", (player_id, npc_id)).fetchone()
         return Stats(**dict(row))
 
-    def messages(self, player_id: str, limit: int, npc_id: str = "emma") -> list[dict]:
+    def messages(self, player_id: str, limit: int, npc_id: str = "emma",
+                 *, conversation_id: str | None = None) -> list[dict]:
         self.ensure_player(player_id)
+        scope_sql = " AND conversation_id=?" if conversation_id is not None else ""
+        parameters = ((player_id, npc_id, conversation_id, limit) if conversation_id is not None
+                      else (player_id, npc_id, limit))
         rows = self._connection.execute(
-            "SELECT speaker,text,translation,created_at FROM (SELECT id,speaker,text,translation,created_at FROM messages WHERE player_id=? AND npc_id=? ORDER BY id DESC LIMIT ?) ORDER BY id",
-            (player_id, npc_id, limit),
+            "SELECT speaker,text,translation,created_at,conversation_id FROM "
+            "(SELECT id,speaker,text,translation,created_at,conversation_id FROM messages "
+            "WHERE player_id=? AND npc_id=?" + scope_sql + " ORDER BY id DESC LIMIT ?) ORDER BY id",
+            parameters,
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -1416,14 +1427,14 @@ class Database:
                  player_id, npc_id),
             )
             self._connection.execute(
-                "INSERT INTO messages(player_id,speaker,text,npc_id) VALUES (?,'player',?,?)",
-                (player_id, message, npc_id),
+                "INSERT INTO messages(player_id,speaker,text,npc_id,conversation_id) VALUES (?,'player',?,?,?)",
+                (player_id, message, npc_id, (response.get("conversation") or {}).get("id")),
             )
             self._connection.execute(
-                """INSERT INTO messages(player_id,speaker,text,npc_id,translation)
-                   VALUES (?,'npc',?,?,?)""",
+                """INSERT INTO messages(player_id,speaker,text,npc_id,translation,conversation_id)
+                   VALUES (?,'npc',?,?,?,?)""",
                 (player_id, response["npc_reply"], npc_id,
-                 response.get("npc_reply_zh") or None),
+                 response.get("npc_reply_zh") or None, (response.get("conversation") or {}).get("id")),
             )
             encoded_response = self._json(response)
             self._connection.execute(
@@ -1751,6 +1762,34 @@ class Database:
         self._life_transaction(write)
         return profile
 
+    def update_city_practice(self, player_id: str, operation) -> dict:
+        """Serialize metadata transitions with the existing onboarding save.
+
+        Keeping this inside player_onboarding also makes the test-account reset
+        remove tutorial progress without touching authentication or invitations.
+        """
+        from .practice import initial_practice
+
+        def write():
+            row = self._connection.execute(
+                "SELECT state_json FROM player_onboarding WHERE player_id=?", (player_id,),
+            ).fetchone()
+            stored = json.loads(row["state_json"]) if row else {}
+            if not stored.get("completed"):
+                raise ValueError("world setup is not complete")
+            before = stored.get("city_practice") or initial_practice()
+            after = operation(before)
+            if after != before:
+                after["revision"] = int(before.get("revision", 0)) + 1
+                stored["city_practice"] = after
+                self._connection.execute(
+                    "UPDATE player_onboarding SET state_json=?,updated_at=CURRENT_TIMESTAMP WHERE player_id=?",
+                    (self._json(stored), player_id),
+                )
+            return after
+
+        return self._life_transaction(write)
+
     def onboarding_state(self, player_id: str, *, minimum: int = 2,
                          maximum: int = 8) -> dict:
         """Return durable onboarding progress without materializing legacy Emma.
@@ -2036,6 +2075,9 @@ class Database:
                 "setup_key": setup_key,
                 "setup_resident_ids": incoming_ids,
                 "setup_started_at": now,
+                "city_practice": {"version": 1, "revision": 0, "status": "active",
+                                  "step": "discover", "npc_id": None, "story_id": None,
+                                  "participation": None, "receipt": None},
             }
             self._connection.execute(
                 """INSERT INTO player_onboarding(player_id,state_json,completed_at)

@@ -89,7 +89,7 @@
       "anchors": [
         {"id": "kitchen-entry", "kind": "entry", "position": [-4.45, -0.17, 2.35], "rotation": 1.5708, "privacy": "open", "actions": []},
         {"id": "kitchen-prep", "kind": "counter", "position": [-0.82, -0.17, -1.82], "rotation": 3.1416, "privacy": "open", "fixture_id": "kitchen-stove", "actions": ["prepare_food"]},
-        {"id": "kitchen-dishes", "kind": "sink", "position": [-2.18, -0.17, -1.82], "rotation": 3.1416, "privacy": "open", "fixture_id": "kitchen-sink", "actions": ["leave_dishes"]},
+        {"id": "kitchen-dishes", "kind": "sink", "position": [-2.18, -0.17, -1.82], "rotation": 3.1416, "privacy": "open", "fixture_id": "kitchen-sink", "actions": ["leave_dishes", "clean_shared_space"]},
         {"id": "kitchen-eat-west", "kind": "dining-seat", "position": [1.15, -0.17, -0.5], "rotation": -1.5708, "privacy": "open", "fixture_id": "kitchen-chair-west", "actions": ["eat"]},
         {"id": "kitchen-eat-east", "kind": "dining-seat", "position": [3.55, -0.17, -0.5], "rotation": 1.5708, "privacy": "open", "fixture_id": "kitchen-chair-east", "actions": ["eat"]},
         {"id": "kitchen-eat-north", "kind": "dining-seat", "position": [2.35, -0.17, -1.65], "rotation": 0.0, "privacy": "open", "fixture_id": "kitchen-chair-north", "actions": ["eat"]},

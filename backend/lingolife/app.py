@@ -53,7 +53,7 @@ from .layout_validation import (LayoutTopologyError, load_world_asset_catalog,
                                 validate_layout_topology)
 from .layouts import default_world_layout, shared_home_manifest
 from .models import (AdminLoginRequest, AdminRosterSelectionRequest, AdminUserPatch, AdminUserResetRequest,
-                     ChatRequest, ChatResponse,
+                     ChatRequest, ChatResponse, CityPracticeRequest, DinnerRequest,
                      InviteCreateRequest, LifeInterventionRequest, LoginRequest, NpcProfile,
                      OnboardingCompleteRequest, OnboardingIntroRequest, PasswordChangeRequest, RegisterRequest,
                      SocialInterventionRequest, WorldLayout, WorldLayoutActivateRequest,
@@ -61,6 +61,7 @@ from .models import (AdminLoginRequest, AdminRosterSelectionRequest, AdminUserPa
                      WorldLayoutRequest, WorldLayoutValidationRequest,
                      materialize_onboarding_profiles)
 from .profile_contract import CURRENT_INTRO_VERSION
+from .practice import practice_view, reconcile as reconcile_practice, transition as transition_practice
 from .social import SocialWorldEngine
 
 KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$")
@@ -504,6 +505,32 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         user = current_user(authorization)
         return onboarding_state(user["player_id"])
 
+    def city_practice_response(user: dict, body: CityPracticeRequest | None = None):
+        require_world_ready(user)
+        if life_world is None:
+            raise HTTPException(409, {"code": "LIFE_SIMULATION_REQUIRED",
+                                      "message": "The life simulation must be enabled for guided play."})
+        player_id = user["player_id"]
+        profiles = life_profiles(player_id)
+        stories = life_world.stories(player_id, profiles)["stories"]
+        try:
+            progress = db.update_city_practice(player_id, lambda current: (
+                transition_practice(current, body.event, npc_id=body.npc_id,
+                                    story_id=body.story_id, resident_ids=[item["id"] for item in profiles],
+                                    stories=stories) if body else reconcile_practice(current, stories)
+            ))
+        except ValueError as error:
+            raise HTTPException(409, {"code": "PRACTICE_TRANSITION_REJECTED", "message": str(error)})
+        return practice_view(progress, stories)
+
+    @app.get(settings.api_prefix + "/onboarding/practice")
+    def city_practice(authorization: Optional[str] = Header(None)):
+        return city_practice_response(current_user(authorization))
+
+    @app.post(settings.api_prefix + "/onboarding/practice")
+    def update_city_practice(body: CityPracticeRequest, authorization: Optional[str] = Header(None)):
+        return city_practice_response(current_user(authorization), body)
+
     @app.post(settings.api_prefix + "/onboarding/intro/acknowledge")
     def acknowledge_onboarding_intro(body: OnboardingIntroRequest,
                                      authorization: Optional[str] = Header(None)):
@@ -614,6 +641,7 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
                             "animation_cue": cue},
                     "stats": stats, "messages": db.messages(player_id, 200, npc_id),
                     "quota": db.quota(user["id"]), "active_event": None,
+                    "conversation": context["conversation"],
                     "life_context": context, "social_interactions": []}
         learning_state = db.get_learning_state(player_id)
         agent = agent_bundle(player_id, npc_id, profile, stats, learning_state)
@@ -853,7 +881,11 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         profiles = life_profiles(user["player_id"])
         try:
             state = life_world.observe(user["player_id"], profiles, story_id)
-            return life_world.story(user["player_id"], profiles, story_id, state=state)
+            story = life_world.story(user["player_id"], profiles, story_id, state=state)
+            db.update_city_practice(user["player_id"], lambda current: (
+                reconcile_practice(current, [story]) if current.get("story_id") == story_id else current
+            ))
+            return story
         except KeyError:
             raise HTTPException(404, {"code": "LIFE_STORY_NOT_FOUND", "message": "Life story was not found."})
 
@@ -865,8 +897,12 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         if life_world is None:
             raise HTTPException(404, {"code": "LIFE_STORY_NOT_FOUND", "message": "Life story was not found."})
         try:
-            return life_world.intervene(user["player_id"], life_profiles(user["player_id"]),
-                                        story_id, body.action, body.idempotency_key)
+            story = life_world.intervene(user["player_id"], life_profiles(user["player_id"]),
+                                         story_id, body.action, body.idempotency_key)
+            db.update_city_practice(user["player_id"], lambda current: (
+                reconcile_practice(current, [story]) if current.get("story_id") == story_id else current
+            ))
+            return story
         except KeyError:
             raise HTTPException(404, {"code": "LIFE_STORY_NOT_FOUND", "message": "Life story was not found."})
         except ValueError as error:
@@ -891,6 +927,19 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
             return life_world.household(user["player_id"], life_profiles(user["player_id"]), household_id)
         except KeyError:
             raise HTTPException(404, {"code": "HOUSEHOLD_NOT_FOUND", "message": "Household was not found."})
+
+    @app.post(settings.api_prefix + "/households/{household_id}/dinner")
+    def household_dinner(household_id: str, body: DinnerRequest, authorization: Optional[str] = Header(None)):
+        user = current_user(authorization)
+        require_world_ready(user)
+        if life_world is None:
+            raise HTTPException(404, {"code": "HOUSEHOLD_NOT_FOUND", "message": "Household was not found."})
+        try:
+            return life_world.dinner_command(user["player_id"], life_profiles(user["player_id"]), household_id, body.action)
+        except KeyError:
+            raise HTTPException(404, {"code": "HOUSEHOLD_NOT_FOUND", "message": "Household was not found."})
+        except ValueError as error:
+            raise HTTPException(409, {"code": "DINNER_COMMAND_REJECTED", "message": str(error)})
 
     @app.post(settings.api_prefix + "/npcs", status_code=201)
     def create_npc(body: NpcProfile, authorization: Optional[str] = Header(None)):
@@ -1137,7 +1186,16 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
                    "memories": prompt_memories, "conversation_summaries": summaries, **dialogue_agent,
                    "dialogue_objective": dialogue_objective(event_view, agent["runtime_state"],
                                                              agent["goal"], agent["relationship"])}
-        result = provider_reply(message, old, db.messages(player_id, settings.recent_message_limit, npc_id), context, on_chunk)
+        conversation = life_context.get("conversation") if life_context else None
+        history = db.messages(player_id, settings.recent_message_limit, npc_id,
+                              conversation_id=conversation["id"] if conversation else None)
+        # The visible opening is part of this encounter, even before any turn
+        # is persisted. Include it so responses such as "Why?" have a referent.
+        if conversation and not history:
+            history = [{"speaker": "npc", "text": conversation["opening"]["text"]}]
+        history = [{key: value for key, value in item.items() if key != "conversation_id"}
+                   for item in history]
+        result = provider_reply(message, old, history, context, on_chunk)
         # Legacy/custom providers may still populate these API-era fields. At
         # the provider boundary they are always neutralized; only validated
         # semantic and language evidence can reach authoritative settlement.
@@ -1239,6 +1297,7 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
             "animation_cue": final_animation_cue,
         })
         response = {**result.model_dump(), "npc_id": npc_id, "game_date": game_today().isoformat(),
+                    "conversation": conversation,
                     "relationship_change": rel, "mood_change": mood,
                     "english_xp_change": xp, "stats": stats,
                     "animation": "happy" if mood > 0 else "sad" if mood < 0 else "idle",

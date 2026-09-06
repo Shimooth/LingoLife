@@ -5,6 +5,7 @@ import * as THREE from 'three'
 import {defaultAvatar} from '../../avatar'
 import type {CityCharacter,CityLandmark} from '../../components/CityMap'
 import {deriveResidentExpression} from '../../life/characterExpression'
+import {visibleOnCityMap} from '../../life/spatialPresence'
 import {CharacterEmote,DirectedCharacter3D,type CharacterMotion,type CharacterPerformance,type CharacterPerformanceMode} from '../characters'
 import {
  BUILDING_LOTS,BUILDING_MODELS,CITY_PLATFORM_OUTLINE,DISTRICTS,KAYKIT_ASSET_BASE,KAYKIT_PROP_MODELS,KAYKIT_ROAD_MODELS,KIND_COLORS,ROAD_TILES,ROAD_TILE_SCALE,SKY_ROAD_EXITS,STREET_PROPS,TREES,WORLD_DEPTH,WORLD_WIDTH,
@@ -638,7 +639,19 @@ function CharacterMarker({character,lot,parcelIndex,parcelCount,route,active,act
   registry.set(character.id,current)
   return()=>{if(registry.get(character.id)===current)registry.delete(character.id)}
  },[actors,character.id])
- useEffect(()=>{arrivalNotified.current=''},[action?.event_id])
+ const journeyKey=character.lifeAction?.id??action?.event_id??`${character.id}:${action?.started_at}:${action?.target_location_id}`
+ useEffect(()=>{arrivalNotified.current=''},[journeyKey])
+ // Life actions have no legacy event_id. Arrival still needs a fresh server
+ // snapshot, including on reduced-motion/demand canvases without frame ticks.
+ useEffect(()=>{
+  if(action?.state!=='walking_to_event'||!Number.isFinite(arrivesAt))return
+  const remaining=arrivesAt-(Date.now()+serverSkew)
+  const timer=window.setTimeout(()=>{
+   if(arrivalNotified.current===journeyKey)return
+   arrivalNotified.current=journeyKey;onJourneyElapsed?.()
+  },Math.min(2147483647,Math.max(0,remaining)+80))
+  return()=>window.clearTimeout(timer)
+ },[action?.state,arrivesAt,journeyKey,onJourneyElapsed,serverSkew])
  const waitingRotation=visualState==='waiting_at_event'&&lot?waitingFacing(lot,action?.participant_index??0):undefined
  useFrame((_,delta)=>{
   if(!actor.current)return
@@ -656,8 +669,8 @@ function CharacterMarker({character,lot,parcelIndex,parcelCount,route,active,act
   const sample=samplePedestrianRoute(route,progress)
   actor.current.position.set(...sample.position)
   actor.current.rotation.y=sample.rotation
-  if(sample.done&&action.event_id&&arrivalNotified.current!==action.event_id){
-   arrivalNotified.current=action.event_id
+  if(sample.done&&arrivalNotified.current!==journeyKey){
+   arrivalNotified.current=journeyKey
    setVisualState('waiting_at_event')
    onJourneyElapsed?.()
   }
@@ -684,10 +697,11 @@ function CharacterMarker({character,lot,parcelIndex,parcelCount,route,active,act
  const journeyDurationSeconds=Number.isFinite(rawJourneyDuration)&&rawJourneyDuration>0?rawJourneyDuration:undefined
  const journeySpeed=route?.length&&journeyDurationSeconds?route.length/journeyDurationSeconds:1.18
  const playbackRate=moving?THREE.MathUtils.clamp(journeySpeed/1.18,.52,1.65):1
- const stateLabel=language==='zh'?({idle:'空闲',living:'正在生活',event_pending:'有待办',walking_to_event:'前往事件',waiting_at_event:'等待查看'} as const)[visualState]:({idle:'Idle',living:'Living their day',event_pending:'Pending',walking_to_event:'On the way',waiting_at_event:'Waiting'} as const)[visualState]
+ const lifeJourney=character.lifeAction?.source==='life'
+ const stateLabel=language==='zh'?({idle:'空闲',living:'正在生活',event_pending:'有待办',walking_to_event:lifeJourney?'正在路上':'前往事件',waiting_at_event:lifeJourney?'正在确认到达':'等待查看'} as const)[visualState]:({idle:'Idle',living:'Living their day',event_pending:'Pending',walking_to_event:'On the way',waiting_at_event:lifeJourney?'Confirming arrival':'Waiting'} as const)[visualState]
  const livingDetail=language==='zh'?character.visibleIntentZh?.trim()||character.visibleIntent?.trim():character.visibleIntent?.trim()||character.visibleIntentZh?.trim()
  const troubleCopy=language==='zh'?character.troubleSignal?.summary_zh?.trim()||'似乎遇到了一点麻烦':character.troubleSignal?.summary?.trim()||'Something seems to be troubling them'
- return <group ref={actor} position={position} rotation-y={waitingRotation??lot?.rotation??0} onClick={event=>{event.stopPropagation();onClick()}} onPointerDown={event=>event.stopPropagation()} onPointerOver={event=>{event.stopPropagation();setHovered(true)}} onPointerOut={()=>setHovered(false)}>
+ return <group name={`city-resident:${character.id}`} ref={actor} position={position} rotation-y={waitingRotation??lot?.rotation??0} onClick={event=>{event.stopPropagation();onClick()}} onPointerDown={event=>event.stopPropagation()} onPointerOver={event=>{event.stopPropagation();setHovered(true)}} onPointerOut={()=>setHovered(false)}>
   <DirectedCharacter3D avatar={avatar} animation={animation} performance={directedPerformance} performanceMode={performanceMode} performanceKey={`${action?.event_id??'daily'}:${visualState}:${expression.key}:${animation}`} performanceVariant={action?.participant_index??characterHash%2} playbackRate={playbackRate} reducedMotion={reducedMotion} name={character.name} seed={character.id} scale={characterScale}/>
   <mesh position-y={.5}>
    <cylinderGeometry args={[.48,.48,1,12]}/><meshBasicMaterial transparent opacity={0} depthWrite={false}/>
@@ -719,20 +733,21 @@ export function WorldScene({characters,landmarks,followedCharacterId,serverTime,
  const authoredRoads=useMemo<RoadTilePlacement[]>(()=>worldLayout?.city.roads.flatMap(item=>{const model=modelFromAsset(item.asset,KAYKIT_ROAD_MODELS);return model?[{id:item.id,model,position:[item.position.x,item.position.z],rotation:item.rotation.y,surface:'city'}]:[]})??[],[worldLayout?.city.roads])
  const characterLot=(character:CityCharacter)=>character.locationId?layout.landmarkLots.get(character.locationId):layout.homeLots.get(character.id)
  const characterNavigation=useMemo(()=>{
-  const values=characters.slice(0,24).map(character=>({
+  const values=characters.filter(visibleOnCityMap).slice(0,24).map(character=>({
    character,origin:character.locationId?layout.landmarkLots.get(character.locationId):layout.homeLots.get(character.id),
   }))
   const parcelResidents=new Map<string,string[]>()
   values.forEach(({character,origin})=>{if(origin)parcelResidents.set(origin.id,[...(parcelResidents.get(origin.id)??[]),character.id].sort())})
   return values.map(({character,origin})=>{
-   const target=character.worldAction?.target_location_id?layout.landmarkLots.get(character.worldAction.target_location_id):undefined
+   const destination=character.worldAction?.target_location_id
+   const target=destination===character.homeLocationId?layout.homeLots.get(character.id):destination?layout.landmarkLots.get(destination):undefined
    const participantIndex=character.worldAction?.participant_index??0
    const route=character.worldAction?.state==='walking_to_event'&&origin&&target?(authoredRoads.length?buildPedestrianRouteForRoads(origin,target,authoredRoads,{seed:`${character.worldAction.event_id}:${character.id}`,startLateralOffset:participantIndex ? .28 : -.28,endLateralOffset:participantIndex ? .7 : -.7}):buildPedestrianRoute(origin,target,{seed:`${character.worldAction.event_id}:${character.id}`,startLateralOffset:participantIndex ? .28 : -.28,endLateralOffset:participantIndex ? .7 : -.7})):undefined
    const peers=origin?parcelResidents.get(origin.id)??[character.id]:[character.id]
    return {character,origin,route,parcelIndex:Math.max(0,peers.indexOf(character.id)),parcelCount:peers.length}
   })
  },[authoredRoads,characters,layout.homeLots,layout.landmarkLots])
- const followedCharacter=characters.find(character=>character.id===followedCharacterId)
+ const followedCharacter=characters.find(character=>character.id===followedCharacterId&&visibleOnCityMap(character))
  const followedLot=followedCharacter?characterLot(followedCharacter):undefined
  const followedLotRotation=followedLot?.rotation
  const followCameraOffset=useMemo<WorldPoint>(()=>[...followViewOffset(followedLotRotation)],[followedLotRotation])
@@ -761,7 +776,7 @@ export function WorldScene({characters,landmarks,followedCharacterId,serverTime,
   <Trees quality={quality} occupiedPositions={layout.occupiedPositions} authored={worldLayout?.city.decorations}/>
   <LandmarkBuildings placements={layout.landmarkPlacements} selectedId={selectedLandmarkId} hoveredId={hoveredLandmarkId} language={language} night={night} quality={quality} onHover={setHoveredLandmarkId} onSelect={onLandmarkSelect}/>
   {characterNavigation.map(({character,origin,route,parcelIndex,parcelCount})=><CharacterMarker key={character.id} character={character} lot={origin} parcelIndex={parcelIndex} parcelCount={parcelCount} route={route} active={character.id===followedCharacterId} actors={actors} serverTime={serverTime} reducedMotion={reducedMotion} language={language} onClick={()=>onCharacterClick(character.id)} onEvent={onCharacterEvent} onTrouble={onCharacterTrouble?()=>onCharacterTrouble(character.id):undefined} onJourneyElapsed={onJourneyElapsed}/>)}
-  <CameraRig focus={resolvedFocus} focusVersion={focusVersion} followedCharacterId={followedCharacterId} followCameraOffset={followCameraOffset} followWalking={followedCharacter?.worldAction?.state==='walking_to_event'} actors={actors} reducedMotion={reducedMotion} viewMode={viewMode}/>
+  <CameraRig focus={resolvedFocus} focusVersion={focusVersion} followedCharacterId={followedCharacter?.id} followCameraOffset={followCameraOffset} followWalking={followedCharacter?.worldAction?.state==='walking_to_event'} actors={actors} reducedMotion={reducedMotion} viewMode={viewMode}/>
  </>
 }
 

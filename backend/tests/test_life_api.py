@@ -348,8 +348,10 @@ def test_city_redacts_private_household_actions_from_observer_status(tmp_path):
     assert visible["current_location_id"] == home_id
     assert visible["current_action"]["interruptibility"] == "private"
     assert visible["current_action"]["visible_context"]["visibility"] == "private"
-    assert visible["visible_intent_zh"] == "正在家中处理私人事务，暂时不便打扰"
-    assert "shower" not in visible["visible_intent"].casefold()
+    assert visible["current_room_id"] == "bathroom"  # Physical room is observable, private intent is not.
+    assert visible["current_action"]["target_resource_id"] is None
+    assert visible["visible_intent_zh"] == "正在洗澡，稍后再聊"
+    assert "shower" in visible["visible_intent"].casefold()
     assert "浴室" not in visible["visible_intent_zh"]
     assert "shared-bathroom" not in encoded
 

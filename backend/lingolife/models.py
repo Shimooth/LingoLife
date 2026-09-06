@@ -16,6 +16,13 @@ from .profile_contract import (
 )
 
 
+class CityPracticeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    event: Literal["start", "pause", "follow", "select_story", "acknowledge_result"]
+    npc_id: Optional[str] = Field(default=None, max_length=128)
+    story_id: Optional[str] = Field(default=None, max_length=160)
+
+
 class Stats(BaseModel):
     relationship: int = Field(ge=0, le=100)
     mood: int = Field(ge=0, le=100)
@@ -93,6 +100,7 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(AIResult):
+    conversation: Optional[Dict[str, Any]] = None
     stats: Stats
     animation: Literal["idle", "sad", "happy"]
     quota: Dict[str, int]
@@ -525,6 +533,10 @@ class InviteCreateRequest(BaseModel):
 
 class SocialInterventionRequest(BaseModel):
     action: Literal["mediate", "encourage", "give_space", "let_them_handle_it"]
+
+
+class DinnerRequest(BaseModel):
+    action: Literal["propose", "cleanup"]
 
 
 class LifeInterventionRequest(BaseModel):

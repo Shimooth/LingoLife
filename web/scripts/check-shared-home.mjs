@@ -217,7 +217,7 @@ if(!environment.includes('eight separated private bedrooms'))fail('the renderer 
 if(!environment.includes('PersonalBedroomTrace'))fail('the renderer no longer differentiates resident-owned rooms')
 if(!environment.includes('name="builtin-television"'))fail('the declared television fixture is not rendered')
 const preview=await readFile(new URL('../src/components/HouseholdInteriorPreview.tsx',import.meta.url),'utf8')
-if(!preview.includes('resolveSharedHomeResidentAnchors'))fail('resident staging no longer follows semantic action anchors')
+if(!preview.includes('resolveIndoorResidentAnchors'))fail('resident staging no longer follows owned bedroom and semantic public anchors')
 if(!preview.includes('resolveSharedHomePrivateSpaces'))fail('the cutaway no longer renders stable private-room assignments')
 if(!preview.includes('.slice(0,8)'))fail('the cutaway no longer supports the eight-resident boundary')
 

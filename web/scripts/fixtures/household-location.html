@@ -1,0 +1,17 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Resident location QA</title></head><body><div id="root"></div><script type="module">
+import React from 'react';import {createRoot} from 'react-dom/client';
+import {HouseholdInspector} from '/src/components/HouseholdInspector.tsx';
+import {defaultAvatar} from '/src/avatar.ts';
+import '/src/styles.css';
+const h=React.createElement;
+const model=new URLSearchParams(location.search).get('model')==='chibi'?'chibi':'city-01';
+const rooms=[{id:'shared-lounge',kind:'living_room'},{id:'shared-kitchen',kind:'kitchen'},{id:'bedroom',kind:'bedroom'}].map(room=>({...room,resource_ids:[]}));
+function Demo(){
+ const [phase,setPhase]=React.useState('private'),[language,setLanguage]=React.useState('zh'),[focus,setFocus]=React.useState({id:'aria',request:1});
+ const make=(id,room,type,privateActivity=false)=>({id,name:id==='aria'?'Aria':'Nora',avatar:{...defaultAvatar,model},isHome:id!=='aria'||phase!=='away',roomId:room,privateRoomId:id==='aria'?'shared:private-room-08':'shared:private-room-01',currentAction:{source:'life',id:id+phase,type,status:'performing',interruptibility:'free',raw:{visible_context:{visibility:privateActivity?'private':'public'}}}});
+ const residents=[make('aria',phase==='living'?'living_room':phase==='private'||phase==='sleep'?'bedroom':phase==='shower'?'bathroom':'kitchen',phase==='private'?'rest_alone':phase==='sleep'?'sleep':phase==='shower'?'shower':phase==='living'?'read':'prepare_food',['private','sleep','shower'].includes(phase)),make('nora','living_room','read')];
+ return h(React.Fragment,null,h('div',{className:'qa-controls'},...['private','sleep','shower','kitchen','living','away'].map(p=>h('button',{'data-phase':p,key:p,onClick:()=>setPhase(p)},p)),h('button',{'data-focus':true,onClick:()=>setFocus(old=>({id:'aria',request:old.request+1}))},'Find Aria'),h('button',{'data-language':true,onClick:()=>setLanguage(old=>old==='zh'?'en':'zh')},'Language')),
+ h(HouseholdInspector,{household:{id:'shared',name:'QA Home',members:residents.map(r=>({npc_id:r.id,name:r.name})),rooms,resources:[]},residentVisuals:residents,residentFocus:focus,language,onClose:()=>{},onMemberSelect:()=>{}}));
+}
+createRoot(document.getElementById('root')).render(h(React.StrictMode,null,h(Demo)));
+</script><style>body{margin:0}.qa-controls{position:fixed;top:0;left:0;z-index:1000;display:flex;gap:5px;padding:4px;background:#fff;flex-wrap:wrap}.qa-controls button{font-size:11px}.household-inspector{top:65px;height:calc(100dvh - 70px)}</style></body></html>

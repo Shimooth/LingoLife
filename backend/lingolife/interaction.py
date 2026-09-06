@@ -13,13 +13,14 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Mapping, Sequence
 
-from .agent import compile_persona
 from .animation import ANIMATION_CUES, AnimationCue, animation_cue
 from .collisions import CollisionCatalog, load_collision_catalog
-from .life import stable_id
+from .life import stable_id, stable_fraction
+from .interaction_copy import CALLBACKS, response_pair, setup_pair
+from .npc_voice import voice_mode as _voice_mode
 
 
-INTERACTION_RULES_VERSION = "interaction-scene-v1"
+INTERACTION_RULES_VERSION = "interaction-scene-v2"
 INTERACTION_STAGE_ORDER = ("setup", "exchange", "reaction", "closure")
 INTERACTION_STAGE_COPY = {
     "setup": ("The moment begins", "事情发生"),
@@ -164,26 +165,6 @@ def _number(value: object, fallback: float = 50) -> float:
     return result if math.isfinite(result) else fallback
 
 
-def _axes(profile: Mapping[str, Any]) -> Mapping[str, Any]:
-    raw = profile.get("axes") or profile.get("persona_axes")
-    if isinstance(raw, Mapping):
-        return raw
-    return compile_persona(profile).get("axes", {})
-
-
-def _voice_mode(profile: Mapping[str, Any], topic: str) -> str:
-    axes = _axes(profile)
-    if topic in {"companionship", "friendly_competition"} and _number(axes.get("humor"), 40) >= 65:
-        return "playful"
-    if _number(axes.get("assertiveness")) >= 70:
-        return "direct"
-    if _number(axes.get("extraversion")) <= 37:
-        return "reserved"
-    if _number(axes.get("warmth"), 55) >= 70:
-        return "warm"
-    return "measured"
-
-
 def _find_edge(relationships: Mapping[Any, Any], owner_id: str,
                target_id: str) -> Mapping[str, Any]:
     direct = relationships.get((owner_id, target_id))
@@ -281,11 +262,11 @@ def _beat(*, collision_id: str, sequence: int, phase: str,
 
 def _same_stance_line(style: str) -> tuple[str, str, AnimationCue, str]:
     if style == "confrontational":
-        return ("Then neither of us is ready to give way.", "看来我们两个人现在都不愿意让步。", "sad", "frustrated")
+        return ("Well, I'm not budging either.", "行啊，那我也不让。", "sad", "frustrated")
     if style in {"avoidant", "sensitive"}:
-        return ("I need some room too. Let us slow this down.", "我也需要一点空间，我们先慢下来吧。", "sad", "guarded")
+        return ("Yeah. I need a breather too.", "嗯，我也得缓缓。", "sad", "guarded")
     if style in {"warm", "cooperative", "fair", "patient", "caretaking"}:
-        return ("That works for me too. We can try it that way.", "我也愿意，那我们就这样试试看。", "happy", "open")
+        return ("Yeah, that's what I was thinking.", "对，我也是这么想的。", "happy", "open")
     if style == "quiet":
         return ("Yes. We can keep this simple and quiet.", "嗯，我们可以简单、安静地待着。", "listen", "calm")
     return ("I can work with that for now.", "目前这样我可以接受。", "talk", "measured")
@@ -293,92 +274,129 @@ def _same_stance_line(style: str) -> tuple[str, str, AnimationCue, str]:
 
 def _voiced_setup(setup: tuple[int, str, str, AnimationCue, str],
                   mode: str, topic: str) -> tuple[str, str, AnimationCue, str]:
-    line = (setup[1], setup[2], setup[3], setup[4])
-    if mode == "reserved":
-        return (f"Um… {line[0]}", f"那个……{line[1]}", "talk", "guarded")
-    if mode == "direct":
-        return (f"Can we be direct? {line[0]}", f"我们直说吧。{line[1]}", "talk", "focused")
-    if mode == "warm":
-        return (f"Hey. {line[0]}", f"嗨。{line[1]}", line[2], "warm")
-    if mode == "playful" and topic == "friendly_competition":
-        return (f"{line[0]} No pressure—mostly.", f"{line[1]}别有压力——大概吧。", "happy", "playful")
-    return line
+    en, zh = setup_pair(topic, mode, (setup[1], setup[2]))
+    return en, zh, setup[3], "playful" if mode == "playful" else setup[4]
+
+
+def _pick(seed: str, *pairs: tuple[str, str]) -> tuple[str, str]:
+    return pairs[min(len(pairs) - 1, int(stable_fraction(seed, "spoken-variant") * len(pairs)))]
+
+
+def _spoken_response(intent: str, copy: ResponseCopy, mode: str) -> tuple[str, str, AnimationCue, str]:
+    en, zh = response_pair(intent, mode, (copy.text, copy.translation_zh))
+    return en, zh, copy.cue, copy.emotion
+
+
+REFUSALS = {"decline_kindly", "decline_shared_food", "abandon_plan", "stop_helping"}
+
+
+def _answer_refusal(mode: str, tension: str) -> tuple[str, str, AnimationCue, str]:
+    # A suggestion made before hearing "no" is not a second invitation or a
+    # promise to proceed together. The resolver still owns the actual decision.
+    if tension == "high":
+        return "Heard you. I'll leave it.", "听见了，不说了。", "sad", "restrained"
+    pair = {
+        "reserved": ("Okay. Just asking.", "好，就问问。"),
+        "direct": ("All right. I'll leave you to it.", "行，那你自己待着吧。"),
+        "warm": ("Okay. I wanted company, but I won't push.", "好吧，我是想有人陪，不过不勉强你。"),
+        "playful": ("Invitation withdrawn. No paperwork needed.", "邀请撤回，不用办理手续。"),
+    }.get(mode, ("Oh, okay. Another time, maybe.", "噢，好吧，下次有机会再说。"))
+    return *pair, "listen", "gentle"
 
 
 def _clarification_line(*, speaker_profile: Mapping[str, Any], topic: str,
                         own_style: str, heard_style: str,
-                        closeness: str, tension: str) -> tuple[str, str, AnimationCue, str]:
+                        closeness: str, tension: str, seed: str = "",
+                        own_intent: str = "", heard_intent: str = "") -> tuple[str, str, AnimationCue, str]:
     mode = _voice_mode(speaker_profile, topic)
+    if mode == "playful" and (tension != "calm" or topic in {"privacy", "private_food", "borrowed_property", "unequal_care"}):
+        mode = "measured"
     if "confrontational" in {own_style, heard_style}:
         if mode == "reserved":
-            return ("I heard you. I need a moment before I answer anything else.",
-                    "我听到了，但在继续回应前，我需要缓一缓。", "sad", "guarded")
+            return ("I heard you. Doesn't mean I'm okay with it.",
+                    "听见了，不代表我没意见。", "sad", "guarded")
         if mode == "warm" and closeness in {"warm", "close"}:
-            return ("I am upset too, but I do not want us to turn on each other.",
-                    "我也很难受，但我不想让我们彼此伤害。", "sad", "earnest")
-        if mode == "direct":
-            return ("I hear the frustration. Raising the pressure will not solve this.",
-                    "我听到了你的不满，但增加压力解决不了问题。", "talk", "firm")
-        return ("We are both getting tense. Let us deal with the issue, not attack each other.",
-                "我们都越来越紧张了，先处理事情，不要彼此攻击。", "talk", "strained")
+            return ("It's you saying it like that that hurts.",
+                    "就是因为是你这样说，我才难受。", "sad", "hurt")
+        pair = _pick(seed, ("Don't talk to me like that.", "别这么跟我说话。"),
+                     ("I'm still not happy about this.", "这事我还是不痛快。"),
+                     ("That doesn't make it okay.", "这么说也不代表就没事了。"))
+        return *pair, "talk", "firm" if mode == "direct" else "strained"
+    if own_intent in REFUSALS:
+        pair = (("Not angry. Just not up for it.", "没生气，就是不想。") if tension == "calm"
+                else ("I mean it. Not right now.", "我是认真的，现在不想。"))
+        return *pair, "listen", "guarded"
+    if heard_intent in REFUSALS:
+        return _answer_refusal(mode, tension)
     if own_style in {"avoidant", "sensitive"} or heard_style in {"avoidant", "sensitive"}:
         if tension == "high":
-            return ("I can pause, but I do not want this to disappear without an answer.",
-                    "我可以暂停，但我不希望这件事没有回应就消失。", "sad", "guarded")
-        return ("We can take some space and come back when the words are easier.",
-                "我们可以先留一点空间，等更容易开口时再回来谈。", "listen", "gentle")
+            return ("Fine. But I haven't forgotten about it.",
+                    "行，可这事我还记着呢。", "sad", "guarded")
+        return ("This is awkward. Let's leave it a bit.",
+                "有点尴尬，先缓缓吧。", "listen", "restrained")
+    if tension == "high":
+        return ("I heard the plan. I'm still annoyed, though.",
+                "安排听见了，可我气还没消。", "talk", "strained")
     if mode == "playful" and topic == "friendly_competition":
-        return ("Good. Bragging rights only—no dramatic victory speeches.",
-                "很好，只争个小小的炫耀权，可不许发表夸张的胜利演说。", "happy", "playful")
+        return ("No victory speech until you've actually won.",
+                "赢了再发表获奖感言啊。", "happy", "playful")
+    if topic == "shared_food" and own_intent in {"accept_shared_food", "share_food_together"} and heard_intent in {"accept_shared_food", "share_food_together"}:
+        pair = {
+            "reserved": ("Food first. Talk after?", "先吃，再聊？"),
+            "direct": ("Let's eat before we spend all evening talking.", "先吃吧，别聊一晚上。"),
+            "warm": ("We can talk over food. That's the nice part.", "咱们边吃边聊，这才舒服嘛。"),
+            "playful": ("Can eating be the next item on our agenda?", "下一项议程可以是开吃了吗？"),
+        }.get(mode, ("Right, let's eat. We can talk while we do.", "行，开吃，边吃边说。"))
+        return *pair, "listen" if mode == "reserved" else "talk", "focused" if mode == "direct" else "open"
     if mode == "reserved":
-        return ("Okay. I may not say much, but I am comfortable with that.",
-                "好。我可能话不多，但这样让我觉得自在。", "listen", "calm")
+        pair = _pick(seed, ("Mm. That's enough talking for me.", "嗯，我的话说完了。"),
+                     ("Yeah. I heard you.", "嗯，听见了。"))
+        return *pair, "listen", "calm"
     if mode == "direct":
-        return ("Good. Then let us be clear about the next step.",
-                "好，那我们把下一步说清楚。", "talk", "focused")
-    if mode == "warm":
-        return ("That feels fair. Thank you for meeting me halfway.",
-                "这样很公平，谢谢你愿意和我各退一步。", "happy", "warm")
-    if closeness == "close":
-        return ("That sounds like us. We can make it work without making it bigger.",
-                "这很像我们会有的处理方式，不必把事情越弄越大。", "happy", "familiar")
-    return ("I understand what you mean. That gives us something to work with.",
-            "我明白你的意思了，这样我们就有了可以继续处理的方向。", "talk", "open")
+        pair = CALLBACKS.get(topic, ("At least we're talking about the actual problem.", "至少现在说的是正事。"))
+        return *pair, "talk", "focused"
+    if closeness in {"warm", "close"} and tension == "calm" and topic in {"companionship", "shared_entertainment", "friendly_competition", "shared_food"}:
+        pair = _pick(seed, ("Listen to us making a whole production out of this.", "听听，咱俩把这事弄得跟什么大工程似的。"),
+                     ("You do have a way of making things interesting.", "跟你待着还真不无聊。"))
+        return *pair, "happy", "familiar"
+    pair = CALLBACKS.get(topic, ("Well. Here we are.", "好吧，就这么个情况。"))
+    return *pair, "talk", "warm" if mode == "warm" else "open"
 
 
 def _closure_line(*, topic: str, styles: Sequence[str], closeness: str,
                   tension: str, voice_mode: str,
-                  requires_intervention: bool) -> tuple[str, str, AnimationCue, str]:
+                  requires_intervention: bool, seed: str = "",
+                  intents: Sequence[str] = ()) -> tuple[str, str, AnimationCue, str]:
     if "confrontational" in styles or tension == "high":
         if requires_intervention:
-            return ("Let us stop here before this gets worse. We may need help untangling it.",
-                    "先停在这里吧，免得情况更糟。也许我们需要有人帮忙理清楚。", "sad", "tense")
+            return ("We're going in circles. Someone else needs to weigh in.",
+                    "咱俩说来说去还是这样，得有别人来评评理。", "sad", "tense")
         if closeness in {"warm", "close"}:
-            return ("We are frustrated, but this matters too much to leave as an attack.",
-                    "我们都很挫败，但这件事太重要了，不能只留下彼此的攻击。", "sad", "earnest")
-        return ("We are not solving this while we are this tense. Let us pause.",
-                "现在这么紧张，问题解决不了。我们先暂停吧。", "sad", "tense")
+            return ("I care about you. I'm still mad, though.",
+                    "我是在乎你，可我也还在生气。", "sad", "earnest")
+        pair = _pick(seed, ("I'm done talking for now. We're not settled.", "先不说了，这事可还没完。"),
+                     ("Fine. We'll leave it there. Doesn't mean I agree.", "行，先这样，不代表我同意。"))
+        return *pair, "sad", "tense"
+    if any(intent in REFUSALS for intent in intents):
+        return "Okay. Leaving it there.", "行，那就不说了。", "listen", "restrained"
     if any(style in {"avoidant", "sensitive"} for style in styles):
-        return ("We will leave it here for now, and come back when there is more room.",
-                "我们暂时先停在这里，等彼此更有余地时再回来谈。", "listen", "guarded")
+        return ("I'll leave it for now. Still feels a bit off.",
+                "先不说了，心里还是有点别扭。", "listen", "guarded")
     if topic == "friendly_competition" and voice_mode == "playful":
         return ("Deal. May the best questionable technique win.",
                 "说定了，看看谁那套可疑的小技巧更厉害。", "jump", "playful")
     if all(style in {"warm", "cooperative", "fair", "patient", "caretaking", "quiet"}
            for style in styles):
         if closeness == "close":
-            return ("All right. We know each other well enough to try it this way.",
-                    "好。我们足够了解彼此，可以先这样试试看。", "happy", "warm")
-        if closeness == "new":
-            return ("All right. That is a fair place to start.",
-                    "好，这会是一个公平的开始。", "happy", "open")
-        return ("All right. Let us try that and check in with each other.",
-                "好，我们就这样试试，也记得照顾彼此的感受。", "happy", "settled")
+            pair = _pick(seed, ("All right, you. Enough talking.", "行啦你，别光顾着说了。"),
+                         ("There. We got there eventually.", "这不，兜一圈总算说清楚了。"))
+            return *pair, "happy", "warm"
+        pair = _pick(seed, ("Okay. Let's give it a go.", "行，试试吧。"),
+                     ("Right, then.", "那就这样。"), ("Yeah. That works.", "嗯，这样行。"))
+        return *pair, "happy", "settled"
     if requires_intervention:
-        return ("That is where things stand. Neither of us has to force the next step yet.",
-                "事情暂时就停在这里，我们都不必立刻强迫下一步发生。", "look_around", "uncertain")
-    return ("Let us try that for now and see what happens next.",
-            "暂时就这样试试，看看接下来会怎样。", "talk", "measured")
+        return ("So... what now?", "所以……现在怎么办？", "look_around", "uncertain")
+    return ("Okay. I heard you.", "行，你的意思我听见了。", "talk", "measured")
 
 
 def _single_person_reaction(profile: Mapping[str, Any], topic: str) -> tuple[str, str, AnimationCue, str]:
@@ -428,6 +446,11 @@ def build_interaction_scene(*, collision: object, resolution: object,
     responder_profile = profiles.get(responder or "", {})
     opener_mode = _voice_mode(opener_profile, topic)
     responder_mode = _voice_mode(responder_profile, topic)
+    # A funny person need not perform a joke while actively angry or guarding
+    # a boundary. Familiar banter is only used when the relationship permits it.
+    if tension != "calm" or topic in {"privacy", "private_food", "borrowed_property", "unequal_care"}:
+        opener_mode = "measured" if opener_mode == "playful" else opener_mode
+        responder_mode = "measured" if responder_mode == "playful" else responder_mode
 
     sequence = 0
     stage_beats: dict[str, list[dict[str, Any]]] = {stage: [] for stage in INTERACTION_STAGE_ORDER}
@@ -441,7 +464,6 @@ def build_interaction_scene(*, collision: object, resolution: object,
             cue=line[2], emotion=line[3], mode=mode,
         ))
 
-    add("setup", opener, _voiced_setup(setup, opener_mode, topic), opener_mode)
     opener_role = participants.index(opener) if opener in participants else 0
     responder_role = participants.index(responder) if responder in participants else 0
     opener_response_id = str(responses.get(opener) or _fallback_response(topic, opener_role))
@@ -450,29 +472,77 @@ def build_interaction_scene(*, collision: object, resolution: object,
     responder_copy = _response_copy(responder_response_id, topic=topic, role=responder_role)
     opener_style = _style_for(opener_response_id, scenario_id, catalog) or opener_copy.style
     responder_style = _style_for(responder_response_id, scenario_id, catalog) or responder_copy.style
+    if "confrontational" in {opener_style, responder_style}:
+        opener_mode = "measured" if opener_mode == "playful" else opener_mode
+        responder_mode = "measured" if responder_mode == "playful" else responder_mode
 
-    add("exchange", responder, (responder_copy.text, responder_copy.translation_zh,
-                                 responder_copy.cue, responder_copy.emotion), responder_mode)
+    setup_line = _voiced_setup(setup, opener_mode, topic)
+    responder_line = _spoken_response(responder_response_id, responder_copy, responder_mode)
+    facts = _value(collision, "facts", {}) or {}
+    consumed_meal = (topic == "shared_food" and isinstance(facts, Mapping)
+                     and facts.get("consumed_by") == responder and facts.get("prepared_by") == opener)
+    if consumed_meal:
+        # These collisions can be emitted AFTER actual consumption. Don't replay
+        # an invitation to food already eaten; refusal/save refer to any more.
+        pair = {
+            "reserved": ("How was it?", "吃着怎么样？"),
+            "direct": ("So, how was the food?", "所以，这顿吃着怎么样？"),
+            "warm": ("How was your meal? I'm glad you had some.", "这顿吃着怎么样？你吃上了就好。"),
+            "playful": ("Meal finished. The cook awaits a review.", "饭吃完了，厨子等个评价。"),
+        }.get(opener_mode, ("How was the meal?", "这顿吃得怎么样？"))
+        setup_line = (*pair, "talk", "curious")
+        pair = {
+            "decline_shared_food": ("I've had my portion. No more for me.", "我这份吃完了，不再吃了。"),
+            "save_food_for_later": ("I've eaten. If there's more, save it for later?", "我吃过了，要是还有就留着晚点吃？"),
+        }.get(responder_response_id, {
+            "reserved": ("Finished mine. Thanks.", "吃完了，谢了。"),
+            "direct": ("Finished my portion. Thanks for cooking.", "我这份吃完了，做饭辛苦了。"),
+            "warm": ("I finished mine. You cooked and checked on me, too.", "我吃完了，你做了饭还惦记着来问我。"),
+            "playful": ("One portion successfully dealt with. That's my report.", "成功解决一份，汇报完毕。"),
+        }.get(responder_mode, ("I've finished mine. Thanks for the meal.", "我吃完了，谢啦。")))
+        responder_line = (*pair, responder_copy.cue, responder_copy.emotion)
+
+    add("setup", opener, setup_line, opener_mode)
+
+    add("exchange", responder, responder_line, responder_mode)
     if opener == responder:
         add("reaction", opener, _single_person_reaction(opener_profile, topic), opener_mode)
     else:
         opener_line = (_same_stance_line(opener_style)
                        if opener_response_id == responder_response_id
-                       else (opener_copy.text, opener_copy.translation_zh,
-                             opener_copy.cue, opener_copy.emotion))
+                       else _spoken_response(opener_response_id, opener_copy, opener_mode))
+        if consumed_meal:
+            # No second portion, food quality or future get-together is invented.
+            opener_line = ("Right. Just wanted to check.", "嗯，就想问问你。", "listen", "open")
+        elif responder_response_id in REFUSALS and opener_style in {"warm", "cooperative", "patient", "quiet", "fair"}:
+            opener_line = _answer_refusal(opener_mode, tension)
         add("reaction", opener, opener_line, opener_mode)
         clarification = _clarification_line(
             speaker_profile=responder_profile, topic=topic,
             own_style=responder_style, heard_style=opener_style,
             closeness=closeness, tension=tension,
+            seed=f"{collision_id}:{responder}:reaction",
+            own_intent=responder_response_id, heard_intent=opener_response_id,
         )
+        if consumed_meal:
+            clarification = ("And now there's the washing-up...", "接下来还有洗碗这回事……", "talk", "measured")
+            if responder_mode == "reserved":
+                clarification = ("Still the dishes, though.", "不过碗还得洗。", "listen", "calm")
+            elif responder_mode == "warm":
+                clarification = ("The washing-up is the less fun bit, isn't it?", "洗碗就没那么好玩了，是吧？", "talk", "warm")
+            elif responder_mode == "playful":
+                clarification = ("Now for the sequel. The dishes.", "接下来是续集：《洗碗》。", "talk", "playful")
         add("reaction", responder, clarification, responder_mode)
 
     closure = _closure_line(
         topic=topic, styles=(opener_style, responder_style),
         closeness=closeness, tension=tension, voice_mode=opener_mode,
         requires_intervention=requires_intervention,
+        seed=f"{collision_id}:{opener}:closure",
+        intents=(opener_response_id, responder_response_id),
     )
+    if consumed_meal and tension == "calm":
+        closure = ("Right. Moving on, then.", "行，那先说到这儿。", "talk", "settled")
     add("closure", opener, closure, opener_mode)
     stages = []
     for stage_id in INTERACTION_STAGE_ORDER:

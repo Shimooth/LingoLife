@@ -1,0 +1,16 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shared-home life QA</title></head><body><div id="root"></div>
+<script type="module">
+import React from 'react';import {createRoot} from 'react-dom/client';
+import {HouseholdInteriorPreview} from '/src/components/HouseholdInteriorPreview.tsx';
+import {SHARED_HOME_MANIFEST} from '/src/three/interiors/sharedHomeLayout.ts';
+import {defaultAvatar} from '/src/avatar.ts';
+import {CHARACTER_PRESETS} from '/src/three/characters/characterAssets.ts';
+import '/src/styles.css';import '/src/components/HouseholdInspector.css';
+function Demo(){const [model,setModel]=React.useState('city-01'),[action,setAction]=React.useState('prepare_food');
+ const make=(id,type,model)=>({id,name:id,avatar:{...defaultAvatar,model},isHome:true,roomId:'kitchen',currentAction:{source:'life',id:id+type,type,status:'performing',locationId:'home-1',interruptibility:'free',raw:{}}});
+ return React.createElement(React.Fragment,null,
+ React.createElement('div',{style:{padding:20}},React.createElement('select',{value:action,onChange:e=>setAction(e.target.value)},...['prepare_food','eat','clean_shared_space','leave_dishes','read','talk_to_resident'].map(s=>React.createElement('option',{key:s},s))),React.createElement('select',{value:model,onChange:e=>setModel(e.target.value)},...CHARACTER_PRESETS.map(p=>p.id).map(s=>React.createElement('option',{key:s},s)))),
+ React.createElement('div',{style:{maxWidth:1100,margin:'auto'}},React.createElement(HouseholdInteriorPreview,{rooms:SHARED_HOME_MANIFEST.rooms,resources:[],language:'zh',residents:[make('Emma',action,model),make('Leo','eat','city-02'),make('Nora','eat','chibi')]})));
+}
+createRoot(document.getElementById('root')).render(React.createElement(React.StrictMode,null,React.createElement(Demo)));
+</script><style>.household-interior-preview{height:700px!important;min-height:700px!important}.household-interior-preview__canvas{height:100%}</style></body></html>

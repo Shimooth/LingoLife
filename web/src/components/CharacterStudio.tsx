@@ -4,11 +4,10 @@ import type { FamilyRole, NpcProfile, SharedHistoryKind, SharedHistoryTone } fro
 import {AVATAR_HAIR_COLORS,AVATAR_OUTFIT_COLORS,AVATAR_SKIN_COLORS} from "../avatar";
 import {isAdultProfile,ROMANCE_ADULT_AGE,romanceIsEnabled,withProfileAge,withRomancePreference} from "../profilePolicy";
 import { CharacterCanvas3D } from "../three/characters";
+import { CharacterModelPicker } from './CharacterModelPicker';
 import {
-  CHARACTER_PRESETS,
   CHIBI_ACCESSORIES,
   CHIBI_HAIR,
-  CHIBI_MODEL_ID,
   CHIBI_OUTFITS,
   getCharacterFamily,
   resolveChibiAccessory,
@@ -272,21 +271,7 @@ export function CharacterStudio({
                           ? "奇趣角色支持发型与服装组合；城市居民是素材包中完整制作的低模预设。"
                           : "The chibi model supports mix-and-match parts; city residents are complete low-poly presets."}
                       </p>
-                      <div className="avatar-preset-grid">
-                        {CHARACTER_PRESETS.map((preset, index) => (
-                          <button
-                            type="button"
-                            className={(profile.avatar.model ?? CHIBI_MODEL_ID) === preset.id ? "chosen" : ""}
-                            onClick={() => avatar("model", preset.id)}
-                            key={preset.id}
-                          >
-                            <span className={`avatar-preset-token avatar-preset-token--${preset.family}`} aria-hidden>
-                              {preset.family === "chibi" ? "✦" : String(index).padStart(2, "0")}
-                            </span>
-                            <span>{preset.label[language]}</span>
-                          </button>
-                        ))}
-                      </div>
+                      <CharacterModelPicker avatar={profile.avatar} language={language} onChange={model => avatar('model', model)} />
                     </fieldset>
 
                     {characterFamily === "chibi" ? <>

@@ -1,0 +1,6 @@
+.story-outcome-card{padding:18px;border:1px solid #cadbd4;border-radius:20px;background:linear-gradient(135deg,#eff7f0,#fffaf0);color:#344f47;overflow-wrap:anywhere}
+.story-outcome-card.is-negative,.story-outcome-card.is-uncertain{border-color:#e2c5b9;background:linear-gradient(135deg,#fff0e8,#fffaf2)}
+.story-outcome-card.is-mixed{border-color:#ded1ae;background:linear-gradient(135deg,#fbf3df,#fffaf2)}
+.story-outcome-card>header{display:block;padding:0}.story-outcome-card header small{font-size:.65rem;letter-spacing:.07em;color:#718579}.story-outcome-card h3{margin:7px 0;font-size:1.05rem}.story-outcome-card header p{margin:0;font-size:.8rem;font-weight:650}
+.story-outcome-card__summary{font-size:.82rem;line-height:1.7}.story-outcome-card__columns{display:grid;grid-template-columns:1fr 1fr;gap:10px}.story-outcome-card__columns section{padding:12px;border-radius:14px;background:#ffffffc9}.story-outcome-card h4{margin:0 0 8px;font-size:.78rem}.story-outcome-card__columns p{display:grid;gap:4px;font-size:.75rem;line-height:1.6;margin:8px 0}.story-outcome-card__columns p[data-tone=negative]{color:#925247}.story-outcome-card footer{margin-top:12px;font-size:.7rem;line-height:1.6;color:#657970}
+@media(max-width:650px){.story-outcome-card{padding:13px}.story-outcome-card__columns{grid-template-columns:1fr}}

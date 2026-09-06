@@ -536,6 +536,8 @@ class NpcLifeContext:
     nearby_resident_ids: tuple[str, ...] = ()
     resources: tuple[ResourceState, ...] = ()
     recent_action_types: tuple[str, ...] = ()
+    available_home_meal: bool = False
+    pending_home_dishes: bool = False
     rules_version: str = RULES_VERSION
 
 
@@ -567,6 +569,8 @@ class ActionDecision:
 
 
 def _resource_target(template: ActionTemplate, context: NpcLifeContext) -> str | None:
+    if template.type == "eat" and context.current_location_kind == "home" and context.available_home_meal:
+        return None  # Eat the real meal at home instead of routing to an unrelated cafe.
     kinds = template.required_resource_kinds or template.optional_resource_kinds
     if not kinds:
         return None
@@ -761,6 +765,27 @@ def rank_life_actions(context: NpcLifeContext, catalog: LifeCatalog | None = Non
                 score -= 14 if flexibility == "adaptive" else 32 if flexibility == "rigid" else 24
                 reasons.append("schedule_conflict")
         repetitions = context.recent_action_types.count(template.type)
+        if context.current_location_kind == "home":
+            previous = context.recent_action_types[0] if context.recent_action_types else None
+            if context.available_home_meal:
+                if template.type == "eat" and float(context.needs.get("food", 55)) < 85:
+                    score += 38 if previous == "prepare_food" else 26
+                    reasons.append("meal_ready_at_home")
+                elif template.type == "prepare_food":
+                    score -= 24
+                    reasons.append("use_prepared_food_first")
+            if previous == "eat" and context.pending_home_dishes:
+                if template.type == "clean_shared_space" and (
+                    traits & {"tidy", "reliable", "caring"}
+                    or "dishes" in context.chore_preferences
+                ):
+                    score += 30
+                    reasons.append("finish_meal_cleanup")
+                elif template.type == "leave_dishes" and (
+                    traits & {"messy", "impulsive"} or float(context.needs.get("rest", 70)) < 35
+                ):
+                    score += 22
+                    reasons.append("leave_cleanup_for_later")
         if repetitions:
             score -= (28 if template.type == "practice_hobby" else 20) * repetitions
             if template.type == "practice_hobby" and context.recent_action_types[0] == template.type:

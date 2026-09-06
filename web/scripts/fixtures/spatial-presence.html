@@ -1,0 +1,23 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Indoor / outdoor presence QA</title></head><body><div id="root"></div>
+<script type="module">
+import React from 'react';import {createRoot} from 'react-dom/client';
+import {WorldObserver3D} from '/src/three/world/WorldObserver3D.tsx';
+import {defaultAvatar} from '/src/avatar.ts';
+import '/src/styles.css';
+const h=React.createElement,home={x:140,y:130},cafe={id:'moonlight_cafe',name:'月光咖啡馆',kind:'cafe',x:518,y:540},park={id:'riverside_park',name:'河畔公园',kind:'park',x:940,y:450};
+function Demo(){
+ const [snapshot,setSnapshot]=React.useState({phase:'home',at:Date.now()}),[follow,setFollow]=React.useState(),[opened,setOpened]=React.useState(''),[arrivals,setArrivals]=React.useState(0),[language,setLanguage]=React.useState('zh');
+ const {phase,at}=snapshot,walking=phase==='depart'||phase==='return',away=phase==='cafe'||phase==='return',inside=!walking;
+ const change=next=>{setSnapshot({phase:next,at:Date.now()});setOpened('')};
+ const emma={id:'emma',name:'Emma',avatar:{...defaultAvatar,model:'city-01'},householdId:'shared',homeLocationId:'home-1',home,
+  location:away?{...cafe,place:cafe.name}:{...home,place:language==='zh'?'共享住宅':'Shared home'},locationId:away?cafe.id:undefined,
+  spatialPresence:{mode:inside?'indoor':'traveling',location_id:away?cafe.id:'home-1',building_id:inside?(away?cafe.id:'home-1'):null},
+  worldAction:{state:walking?'walking_to_event':'living',target_location_id:phase==='depart'?cafe.id:'home-1',started_at:new Date(at).toISOString(),arrives_at:new Date(at+4500).toISOString()},
+  lifeAction:{source:'life',id:'action:'+phase+at,type:'read',status:walking||phase==='rooms'?'traveling':'performing',locationId:away?cafe.id:'home-1',interruptibility:'free',raw:{type:'read',status:walking?'traveling':'performing'}}};
+ const bo={...emma,id:'bo',name:'Bo',location:{...park,place:park.name},locationId:park.id,avatar:{...defaultAvatar,model:'chibi'},spatialPresence:{mode:'outdoor',location_id:park.id,building_id:null},worldAction:{state:'living'},lifeAction:{...emma.lifeAction,id:'bo-idle',type:'practice_hobby',status:'performing',raw:{type:'practice_hobby',status:'performing'}}};
+ return h(React.Fragment,null,
+  h('div',{className:'qa-controls'},...['home','rooms','depart','cafe','return'].map(value=>h('button',{key:value,'data-phase':value,onClick:()=>change(value)},value)),h('button',{'data-language':true,onClick:()=>setLanguage(value=>value==='zh'?'en':'zh')},'Language'),h('output',{id:'qa-state'},JSON.stringify({phase,opened,arrivals,follow}))),
+  h(WorldObserver3D,{characters:[emma,bo],landmarks:[cafe,park],language,quality:'low',followedCharacterId:follow,serverTime:new Date(at).toISOString(),onCharacterFollow:setFollow,onCharacterInteract:id=>setOpened('chat:'+id),onHouseholdOpen:(id,npcId)=>{window.lastLocatedResident=npcId;setOpened('home:'+id)},onLandmarkClick:place=>setOpened('place:'+place.id),onJourneyElapsed:()=>{setArrivals(value=>value+1);change(phase==='depart'?'cafe':'home')}}));
+}
+createRoot(document.getElementById('root')).render(h(React.StrictMode,null,h(Demo)));
+</script><style>body{margin:0}.qa-controls{display:flex;gap:8px;flex-wrap:wrap;padding:10px}.qa-controls output{font-size:11px;overflow-wrap:anywhere}.world3d-shell{height:calc(100dvh - 100px);min-height:500px}</style></body></html>

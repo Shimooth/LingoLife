@@ -114,7 +114,7 @@ def test_unknown_authored_interest_has_a_safe_deterministic_fallback():
     assert first["visible_context"]["activity_zh"] == "钻研origami"
 
 
-def test_private_actions_hide_the_exact_activity_room_and_internal_values():
+def test_private_actions_show_physical_activity_but_hide_internal_values_and_resource_ids():
     view = project_observable_action(
         action(action_type="shower", location_id="household-1:shared-bathroom",
                target_resource_id="shared-shower"),
@@ -125,13 +125,26 @@ def test_private_actions_hide_the_exact_activity_room_and_internal_values():
     )
     encoded = json.dumps(view, ensure_ascii=False).casefold()
 
-    assert view["visible_intent"] == "At home and unavailable for a little while"
-    assert view["visible_intent_zh"] == "正在家中处理私人事务，暂时不便打扰"
+    assert view["visible_intent"] == "Showering · talk later"
+    assert view["visible_intent_zh"] == "正在洗澡，稍后再聊"
     assert view["visible_context"]["visibility"] == "private"
-    assert view["visible_context"]["topic"] == "private"
-    assert "shower" not in encoded and "bathroom" not in encoded
+    assert view["visible_context"]["topic"] == "hygiene"
+    assert "shared-shower" not in encoded and "bathroom" not in encoded
     assert "淋浴" not in encoded and "浴室" not in encoded
     assert "17" not in encoded and "88" not in encoded and "13" not in encoded
+
+
+def test_sleep_rest_and_errands_are_distinct_and_match_action_phase():
+    sleeping = project_observable_action(action(action_type="sleep"), {})
+    resting = project_observable_action(action(action_type="rest_alone"), {})
+    cooking = project_observable_action(action(action_type="prepare_food"), {})
+    assert "睡觉" in sleeping["visible_intent_zh"]
+    assert "休息" in resting["visible_intent_zh"]
+    assert len({view["visible_context"]["activity"] for view in (sleeping,resting,cooking)}) == 3
+    for phase,word in (("traveling","准备"),("blocked","等待"),("completed","睡醒"),("interrupted","被打断"),("abandoned","暂时不睡")):
+        view = project_observable_action(action(action_type="sleep",status=phase), {})
+        assert word in view["visible_intent_zh"]
+        assert "正在睡觉" not in view["visible_intent_zh"]
 
 
 def test_two_day_routine_is_deterministic_and_not_monopolized_by_hobbies():

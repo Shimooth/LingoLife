@@ -1,5 +1,6 @@
 import type { AvatarConfig, Message } from '../../types'
 import type {WorldLayoutInteriorPlacement} from '../../worldLayout'
+import type {LifeMotion} from './lifeRetarget'
 
 export type CharacterMotion =
   | 'idle'
@@ -66,6 +67,11 @@ export type Character3DProps = {
   animationKey?: string | number
   animationLoop?: boolean
   animationSpeed?: number
+  animationPaused?: boolean
+  lifeMotion?: LifeMotion
+  lifeAttention?: number
+  lifeHandTarget?: [number,number,number]
+  lifeProp?: 'cup'|'spoon'|'utensil'|'book'|'cloth'
   animationTransitionMs?: number
   motionScale?: number
 }

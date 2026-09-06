@@ -1,0 +1,13 @@
+.character-portrait{position:relative;display:block;width:100%;height:100%;overflow:hidden;border-radius:inherit;background:radial-gradient(ellipse at 50% 28%,#fff7ef,#dce8dc)}
+.character-portrait img{display:block;width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 5px 3px #405c5324)}
+.character-portrait__fallback{display:grid;height:100%;place-items:center;color:#7b9886;font-size:40px}
+.character-model-picker{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:9px;max-height:355px;overflow:auto;padding:3px;scrollbar-width:thin;overscroll-behavior:contain}
+.character-model-picker>button{position:relative;display:flex;min-width:0;flex-direction:column;align-items:stretch;padding:5px 5px 9px;border:2px solid transparent;border-radius:15px;color:#465b50;background:#fff;text-align:center;cursor:pointer;transition:border-color .18s,box-shadow .18s}
+.character-model-picker>button:hover{border-color:#a2bbac;box-shadow:0 5px 12px #55716017}
+.character-model-picker>button.is-selected{border-color:#668976;background:#f0f7ed;box-shadow:0 0 0 2px #66897615}
+.character-model-picker>button:focus-visible{outline:3px solid #cf866d;outline-offset:1px}
+.character-model-picker .character-portrait{height:114px;border-radius:10px}
+.character-model-picker>button>span:not(.character-portrait){margin-top:7px;font-size:11px;font-weight:800;line-height:1.4}
+.character-model-picker>button>small{margin-top:3px;color:#7b8880;font-size:9px}
+.character-model-picker>button>i{position:absolute;top:8px;right:8px;display:grid;width:19px;height:19px;place-items:center;border-radius:50%;color:#fff;background:#608573;font-size:11px;font-style:normal}
+@media(prefers-reduced-motion:reduce){.character-model-picker>button{transition:none}}

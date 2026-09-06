@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Resident preview QA</title></head>
+<body><div id="root"></div><script type="module">
+import React from 'react';
+import {createRoot} from 'react-dom/client';
+import {OnboardingFlow} from '/src/components/OnboardingFlow.tsx';
+import {CharacterStudio} from '/src/components/CharacterStudio.tsx';
+import {createOnboardingResidents} from '/src/onboardingProfiles.ts';
+import {defaultAvatar} from '/src/avatar.ts';
+import '/src/styles.css';
+function StudioFixture() {
+  const [profile, setProfile] = React.useState(() => ({...createOnboardingResidents(2)[0].profile, avatar: defaultAvatar}));
+  return React.createElement(CharacterStudio, {profile, onChange: setProfile, onSave: () => {}, onClose: () => {}, saving: false, error: '', language: 'zh'});
+}
+const setup = React.createElement(OnboardingFlow, {
+  language: new URLSearchParams(location.search).get('lang') === 'en' ? 'en' : 'zh',
+  minimum: 2, maximum: 8, introAcknowledged: true, saving: false, error: '',
+  onAcknowledgeIntro: async () => {}, onComplete: setup => { window.qaSetup = setup; },
+});
+createRoot(document.getElementById('root')).render(React.createElement(React.StrictMode, null, new URLSearchParams(location.search).get('mode') === 'studio' ? React.createElement(StudioFixture) : setup));
+</script></body></html>

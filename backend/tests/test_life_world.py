@@ -136,7 +136,7 @@ def test_collision_story_persists_its_replayable_multistage_interaction():
     _, _, state = _world()
     record = state["stories"][_collision_story_id(state)]
 
-    assert record["interaction"]["rules_version"] == "interaction-scene-v1"
+    assert record["interaction"]["rules_version"] == "interaction-scene-v2"
     assert [stage["id"] for stage in record["interaction"]["stages"]] == [
         "setup", "exchange", "reaction", "closure",
     ]

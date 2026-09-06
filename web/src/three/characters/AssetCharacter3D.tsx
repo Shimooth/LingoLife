@@ -1,23 +1,18 @@
-import { useEffect, useMemo, useRef } from 'react'
-import { useAnimations, useGLTF } from '@react-three/drei'
+import { Suspense, useEffect, useMemo, useRef } from 'react'
+import { useGLTF } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
-import { AnimationClip, Color, LoopOnce, LoopRepeat, MathUtils, Mesh, MeshStandardMaterial, Object3D, PropertyBinding, type AnimationAction, type AnimationMixerEventMap, type Group, type Material } from 'three'
-import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
-import type { AvatarConfig } from '../../types'
+import { AnimationMixer, LoopOnce, LoopRepeat, MathUtils, type AnimationClip, type AnimationAction, type AnimationMixerEventMap, type Group } from 'three'
+import { clipsForModel, disposeCharacterInstance, prepareChibi, prepareCity } from './characterModel'
 import {
-  CHIBI_ACCESSORIES,
   CHIBI_CLIPS,
-  CHIBI_HAIR,
-  CHIBI_OUTFITS,
   CITY_ANIMATION_URL,
   CITY_CLIPS,
   getCharacterPreset,
-  resolveChibiAccessory,
-  resolveChibiHair,
-  resolveChibiOutfit,
   stableChoice,
 } from './characterAssets'
 import type { Character3DProps, CharacterMotion } from './types'
+import {LifeRigAnimation} from './LifeRigAnimation'
+import {LifeHandProp} from './LifeHandProp'
 
 const oneShotMotions = new Set<CharacterMotion>(['happy', 'jump', 'push'])
 const cityJumpSequences = {
@@ -27,107 +22,7 @@ const cityJumpSequences = {
   c: ['Jump_C_Full'],
   cParts: ['Jump_C_Start', 'Jump_C_InAir', 'Jump_C_Landing'],
 } as const
-const optionalChibiNodes = new Set([
-  ...CHIBI_HAIR.map((entry) => entry.node),
-  ...CHIBI_OUTFITS.flatMap((entry) => entry.nodes),
-  ...CHIBI_ACCESSORIES.flatMap((entry) => entry.nodes),
-])
-
-function cloneMaterial(material: Material): Material {
-  const copy = material.clone()
-  if (copy instanceof MeshStandardMaterial) {
-    copy.roughness = Math.max(copy.roughness, .82)
-    copy.metalness = 0
-  }
-  return copy
-}
-
-function cloneCharacter(source: Group): Group {
-  const model = cloneSkeleton(source) as Group
-  model.traverse((object) => {
-    if (!(object instanceof Mesh)) return
-    object.castShadow = true
-    object.receiveShadow = true
-    object.frustumCulled = false
-    object.material = Array.isArray(object.material)
-      ? object.material.map(cloneMaterial)
-      : cloneMaterial(object.material)
-  })
-  return model
-}
-
-function materialList(object: Object3D): Material[] {
-  const found: Material[] = []
-  object.traverse((child) => {
-    if (!(child instanceof Mesh)) return
-    found.push(...(Array.isArray(child.material) ? child.material : [child.material]))
-  })
-  return found
-}
-
-function tintObject(object: Object3D | undefined, color: string, soften = 0): void {
-  if (!object) return
-  const tint = new Color(color)
-  if (soften) tint.lerp(new Color('#ffffff'), soften)
-  materialList(object).forEach((material) => {
-    if ('color' in material && material.color instanceof Color) material.color.copy(tint)
-  })
-}
-
-function prepareChibi(source: Group, avatar: AvatarConfig): Group {
-  const model = cloneCharacter(source)
-  const hair = CHIBI_HAIR.find((entry) => entry.id === resolveChibiHair(avatar.hair)) ?? CHIBI_HAIR[0]
-  const outfit = CHIBI_OUTFITS.find((entry) => entry.id === resolveChibiOutfit(avatar.outfit)) ?? CHIBI_OUTFITS[0]
-  const accessory = CHIBI_ACCESSORIES.find((entry) => entry.id === resolveChibiAccessory(avatar.accessory)) ?? CHIBI_ACCESSORIES[0]
-
-  optionalChibiNodes.forEach((name) => {
-    const object = model.getObjectByName(name)
-    if (object) object.visible = false
-  })
-
-  if (accessory.id !== 'helmet') {
-    const hairObject = model.getObjectByName(hair.node)
-    if (hairObject) hairObject.visible = true
-    tintObject(hairObject, avatar.hairColor, .08)
-  }
-  outfit.nodes.forEach((name) => {
-    const object = model.getObjectByName(name)
-    if (object) object.visible = true
-    tintObject(object, avatar.outfitColor, .34)
-  })
-  accessory.nodes.forEach((name) => {
-    const object = model.getObjectByName(name)
-    if (object) object.visible = true
-  })
-  tintObject(model.getObjectByName('character_low'), avatar.skin, .5)
-  return model
-}
-
-function prepareCity(source: Group, hairColor: string): Group {
-  const model = cloneCharacter(source)
-  model.traverse((object) => {
-    if (!(object instanceof Mesh)) return
-    const materials = Array.isArray(object.material) ? object.material : [object.material]
-    materials.forEach((material) => {
-      if (material.name === 'Hair' && 'color' in material && material.color instanceof Color) {
-        material.color.copy(new Color(hairColor).lerp(new Color('#ffffff'), .16))
-      }
-    })
-  })
-  return model
-}
-
-function clipsForModel(clips: readonly AnimationClip[], model: Group): AnimationClip[] {
-  return clips.map((clip) => new AnimationClip(
-    clip.name,
-    clip.duration,
-    clip.tracks.filter((track) => {
-      const nodeName = PropertyBinding.parseTrackName(track.name).nodeName
-      return !nodeName || Boolean(model.getObjectByName(nodeName))
-    }),
-    clip.blendMode,
-  ))
-}
+// Model preparation is shared by live avatars and compressed portraits.
 
 function useCharacterAnimation(
   clips: AnimationClip[],
@@ -139,8 +34,21 @@ function useCharacterAnimation(
   loopOverride?: boolean,
   speed = 1,
   transitionMs = 220,
+  paused = false,
 ) {
-  const { actions, mixer } = useAnimations(clips, model)
+  // Actions must belong to this skeleton, including when only a Chibi outfit changes.
+  // useAnimations caches actions by clip name and can retain the previous root.
+  const mixer = useMemo(() => new AnimationMixer(model), [model])
+  const actions = useMemo(() => {
+    const bound: Record<string, AnimationAction> = {}
+    clips.forEach(clip => Object.defineProperty(bound, clip.name, { get: () => mixer.clipAction(clip, model) }))
+    return bound
+  }, [clips, mixer, model])
+  useFrame((_, delta) => { if (!paused) mixer.update(Math.min(delta, .05)) })
+  useEffect(() => () => {
+    mixer.stopAllAction()
+    mixer.uncacheRoot(model)
+  }, [mixer, model])
   const previousMotion = useRef<CharacterMotion | undefined>(undefined)
   const candidates = family === 'chibi' && motion === 'crouch'
     ? (loopOverride === false ? ['anim_crouch'] : ['anim_crouchiddle'])
@@ -201,11 +109,13 @@ function useCharacterAnimation(
       exitCrouchAction.clampWhenFinished = false
       started.add(exitCrouchAction)
     } else startSequenceAction(0)
+    // Demand-rendered portraits still need one fully evaluated idle pose, not a T-pose.
+    if (paused) mixer.update(.35)
     return () => {
       mixer.removeEventListener('finished', onFinished)
       started.forEach(startedAction => startedAction.fadeOut(Math.max(.1, transition * .8)))
     }
-  }, [actions, family, idleName, loopOverride, mixer, motion, performanceKey, sequenceNames, speed, transitionMs])
+  }, [actions, family, idleName, loopOverride, mixer, motion, paused, performanceKey, sequenceNames, speed, transitionMs])
 }
 
 function AssetTransform({ children, family, props }: { children: React.ReactNode; family: 'chibi' | 'city'; props: Character3DProps }) {
@@ -225,6 +135,7 @@ function AssetTransform({ children, family, props }: { children: React.ReactNode
   useFrame(({ clock }, delta) => {
     const root = performanceRoot.current
     if (!root) return
+    if (props.animationPaused) return
     const time = clock.elapsedTime * (props.animationSpeed ?? 1) + phase
     const talk = props.animation === 'talk' ? 1 : 0
     const listen = props.animation === 'listen' ? 1 : 0
@@ -247,15 +158,29 @@ function AssetTransform({ children, family, props }: { children: React.ReactNode
   </group>
 }
 
+function NativeAnimation({clips,model,family,props}:{clips:AnimationClip[];model:Group;family:'chibi'|'city';props:Character3DProps}) {
+  useCharacterAnimation(clips, model, props.animation ?? 'idle', family, props.seed ?? props.name, props.animationKey, props.animationLoop, props.animationSpeed, props.animationTransitionMs, props.animationPaused)
+  return null
+}
+
+function RigPlayback({clips,model,family,props}:{clips:AnimationClip[];model:Group;family:'chibi'|'city';props:Character3DProps}) {
+ const native=<NativeAnimation clips={clips} model={model} family={family} props={props}/>
+ return <>
+  {props.lifeMotion?<Suspense fallback={native}><LifeRigAnimation model={model} family={family} motion={props.lifeMotion} attention={props.lifeAttention} handTarget={props.lifeHandTarget} paused={props.animationPaused}/></Suspense>:native}
+  {props.lifeProp&&<LifeHandProp model={model} family={family} kind={props.lifeProp}/>}
+ </>
+}
+
 function ChibiAssetCharacter(props: Character3DProps) {
   const preset = getCharacterPreset('chibi')
   const gltf = useGLTF(preset.url)
+  const {hair,hairColor,outfit,outfitColor,accessory,skin}=props.avatar
   const model = useMemo(
-    () => prepareChibi(gltf.scene, props.avatar),
-    [gltf.scene, props.avatar],
+    () => prepareChibi(gltf.scene, {hair,hairColor,outfit,outfitColor,accessory,skin}),
+    [gltf.scene,hair,hairColor,outfit,outfitColor,accessory,skin],
   )
-  useCharacterAnimation(gltf.animations, model, props.animation ?? 'idle', 'chibi', props.seed ?? props.name, props.animationKey, props.animationLoop, props.animationSpeed, props.animationTransitionMs)
-  return <AssetTransform family="chibi" props={props}><primitive object={model} /></AssetTransform>
+  useEffect(() => () => disposeCharacterInstance(model), [model])
+  return <AssetTransform family="chibi" props={props}><primitive object={model} /><RigPlayback clips={gltf.animations} model={model} family="chibi" props={props}/></AssetTransform>
 }
 
 function CityAssetCharacter(props: Character3DProps) {
@@ -266,9 +191,9 @@ function CityAssetCharacter(props: Character3DProps) {
     () => prepareCity(gltf.scene, props.avatar.hairColor),
     [gltf.scene, props.avatar.hairColor],
   )
+  useEffect(() => () => disposeCharacterInstance(model), [model])
   const animationClips = useMemo(() => clipsForModel(animationGltf.animations, model), [animationGltf.animations, model])
-  useCharacterAnimation(animationClips, model, props.animation ?? 'idle', 'city', props.seed ?? props.name, props.animationKey, props.animationLoop, props.animationSpeed, props.animationTransitionMs)
-  return <AssetTransform family="city" props={props}><primitive object={model} /></AssetTransform>
+  return <AssetTransform family="city" props={props}><primitive object={model} /><RigPlayback clips={animationClips} model={model} family="city" props={props}/></AssetTransform>
 }
 
 export function AssetCharacter3D(props: Character3DProps) {

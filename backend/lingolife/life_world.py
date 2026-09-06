@@ -120,6 +120,8 @@ COLLISION_COOLDOWN_SECONDS = {
     "person_boundary": 30 * 60,
     "person_environment": 60 * 60,
 }
+from . import dinner as dinner_life
+
 HOME_ONLY_ACTIONS = frozenset({
     "borrow_household_item", "clean_shared_space", "leave_dishes", "sleep",
 })
@@ -423,6 +425,17 @@ class LifeWorldEngine:
         if not household_id:
             return None
         options = list(self._shared_home_action_anchors(action_type))
+        if action_type == "clean_shared_space":
+            household = state.get("households", {}).get(household_id, {})
+            has_dishes = int((household.get("state") or {}).get("dirty_dishes", 0)) > 0 or any(
+                item.get("active") and item.get("kind") == "dishes"
+                and item.get("household_id") == household_id
+                for item in state.get("responsibilities", [])
+            )
+            if has_dishes:
+                kitchen_options = [anchor for anchor in options if anchor.get("room_id") == "kitchen"]
+                if kitchen_options:
+                    options = kitchen_options
         if not options:
             return None
 
@@ -1951,6 +1964,17 @@ class LifeWorldEngine:
             recent_action_types=tuple(
                 resident.get("recent_action_types", [])[:ACTION_REPETITION_WINDOW]
             ),
+            available_home_meal=any(
+                food.get("active", True)
+                and food.get("household_id") == resident.get("household_id")
+                and (food.get("owner_id") == npc_id or food.get("access") == "shared")
+                for food in state.get("household_food", [])
+            ),
+            pending_home_dishes=bool((state.get("households", {}).get(resident.get("household_id"), {}).get("state") or {}).get("dirty_dishes", 0)) or any(
+                item.get("active") and item.get("kind") == "dishes"
+                and item.get("household_id") == resident.get("household_id")
+                for item in state.get("responsibilities", [])
+            ),
         )
         decision = select_life_action(context, self.catalog)
         unconstrained_selected = decision.selected
@@ -2007,6 +2031,15 @@ class LifeWorldEngine:
         ) and decision.selected.action_type != self._scheduled_action_type(active_block):
             reason = f"urgent_need:{urgent_need}" if urgent_need else "active_incident"
             self._record_schedule_consequence(state, npc_id, active_block, reason, now)
+        meal_action = dinner_life.hint(state, npc_id, now)
+        if (meal_action and not urgent_need and not active_incident
+                and (not active_block or active_block.get("kind") not in {"work", "study", "sleep_window", "accepted_invitation"})):
+            meal_candidate = next((item for item in decision.ranked if item.action_type == meal_action), None)
+            if meal_candidate:
+                # An accepted household commitment, selected only between
+                # actions. Never interrupt private activity or urgent needs.
+                meal_candidate = replace(meal_candidate, reasons=(*meal_candidate.reasons, "accepted_shared_meal"))
+                decision = self._decision_with_candidate(decision, meal_candidate, state["player_id"], npc_id)
         target_location = resident.get("current_location_id")
         coordinated_meeting: tuple[str, LifeAction] | None = None
         if decision.selected.target_resource_id in resources:
@@ -2095,6 +2128,9 @@ class LifeWorldEngine:
             travel, journey = self._city_travel(
                 state, resident, target_location, decision.commitment_id,
             )
+        meal_commitment = "accepted_shared_meal" in decision.selected.reasons
+        if meal_commitment and journey is None:
+            travel = min(travel, 12)  # A short, real room-to-room approach.
         if coordinated_meeting:
             target_id, target_action = coordinated_meeting
             started_target_action = record_action_transition(
@@ -2111,6 +2147,12 @@ class LifeWorldEngine:
             current_location_id=resident.get("current_location_id"),
             target_location_id=target_location, travel_seconds=travel, catalog=self.catalog,
         )
+        if meal_commitment:
+            # Authored compact meal variants. These are new commitments, never
+            # fast-forwarding already-running actions or awarding partial work.
+            action = replace(action, duration_seconds={"prepare_food":180,"eat":120,"clean_shared_space":90,"rest_alone":45}.get(action.action_type, action.duration_seconds))
+            if action.action_type == "rest_alone":
+                action = replace(action, need_deltas={}, emotion_deltas={}, resource_deltas={})
         outcome = "acquired"
         if action.target_resource_id and action.target_resource_id in resources:
             transition = reserve_resource(resources[action.target_resource_id], npc_id=npc_id,
@@ -2127,6 +2169,8 @@ class LifeWorldEngine:
         )
         if coordinated_meeting and action.status == "performing":
             resident["current_location_id"] = target_location
+        if action.status == "performing":
+            dinner_life.started(state, profiles, npc_id, action, now, self.clock.game_date(now).isoformat(), period)
         resident["decision_serial"] = serial
         resident["runtime"] = runtime
         self._store_desire_stack(
@@ -2162,9 +2206,16 @@ class LifeWorldEngine:
         self._settle_due_stories(state, profiles, end)
         resource_map = self._resource_map(state)
         window = self.clock.decision_window(end)
+        dinner_life.advance(state, profiles, end)
         for npc_id in sorted(state["residents"]):
             resident = state["residents"][npc_id]
             self._ensure_daily_plans(state, profiles, npc_id, end)
+            meal_block = self._active_plan_block(resident, end)
+            if (dinner_life.ready_to_switch(state, npc_id, end)
+                    and not self._urgent_need(resident["runtime"])
+                    and not self._has_active_incident(state, npc_id)
+                    and (not meal_block or meal_block.get("kind") not in {"work", "study", "sleep_window", "accepted_invitation"})):
+                resident["pending_instruction"] = "substitute"
             self._expire_desires(state, npc_id, end)
             action = self._ensure_current_action(state, profiles, npc_id, window.key,
                                                  window.period, end, resource_map)
@@ -2246,6 +2297,7 @@ class LifeWorldEngine:
                         state, resident, action, transition.effects, resource_map, end,
                         profiles.get(npc_id, {}),
                     )
+                    dinner_life.advance(state, profiles, end)
                     resident["current_action"] = None
                     resident["current_journey"] = None
                     action = self._ensure_current_action(
@@ -2269,9 +2321,12 @@ class LifeWorldEngine:
                 if action.status != "retrying":
                     break
             resident["current_action"] = action.to_dict()
+            if action.status == "performing":
+                dinner_life.started(state, profiles, npc_id, action, end, self.clock.game_date(end).isoformat(), window.period)
 
         self._process_ended_plan_blocks(state, end)
         state["resources"] = [resource_map[key].to_dict() for key in sorted(resource_map)]
+        dinner_life.advance(state, profiles, end)
         self._detect_and_record(state, profiles, window.key, end)
         self._settle_due_stories(state, profiles, end)
         state["simulation_cursor_at"] = end.isoformat()
@@ -2404,6 +2459,18 @@ class LifeWorldEngine:
                     "consumed_action_id": None,
                     "consumed_at": None,
                 })
+                # A social cook can leave an extra portion. This is real inventory,
+                # not an invitation invented by presentation or an AI response.
+                if (profile and access == "shared" and household
+                        and len(household.get("members", [])) > 1
+                        and (set(_profile_traits(profile)) & {"caring", "friendly", "warm"}
+                             or profile.get("householdRole") in {"cook", "caretaker"})):
+                    kitchen = resources.get(target_id) if target_id else None
+                    if kitchen and float(kitchen.state.get("stock", 0)) >= 3:
+                        extra = dict(household_food[-1])
+                        extra["id"] = stable_id("prepared-food", action.id, "extra-portion")
+                        household_food.append(extra)
+                        resources[target_id] = apply_resource_deltas(kitchen, {"stock": -3})
             elif at_shared_home and action.action_type == "eat":
                 available_food = [
                     item for item in household_food
@@ -2421,6 +2488,9 @@ class LifeWorldEngine:
                     str(item.get("id") or ""),
                 ))
                 if available_food:
+                    meal = dinner_life.latest(state, household_id)
+                    if meal and meal.get("responses", {}).get(action.npc_id, {}).get("status") in {"accepted", "later"}:
+                        available_food.sort(key=lambda item: item.get("dinner_id") != meal["id"])
                     portion = available_food[0]
                     portion.update({
                         "active": False,
@@ -2428,6 +2498,9 @@ class LifeWorldEngine:
                         "consumed_action_id": action.id,
                         "consumed_at": now.isoformat(),
                     })
+
+            if at_shared_home and action.action_type == "prepare_food":
+                dinner_life.prepared(state, resident, action, resources, now)
 
             # Household waste is a durable resource pressure.  It accumulates
             # from concrete home actions and creates one responsibility fact at
@@ -2472,7 +2545,19 @@ class LifeWorldEngine:
                         "triggers": ["trash_duty", "trash_bin_full"],
                     })
             kitchen_after = resources.get(target_id) if target_id else None
-            creates_dishes = action.action_type == "leave_dishes" or (
+            if at_shared_home and action.action_type == "eat":
+                household_state["dirty_dishes"] = min(8, int(household_state.get("dirty_dishes", 0)) + 1)
+            elif at_shared_home and action.action_type == "clean_shared_space":
+                household_state["dirty_dishes"] = 0
+            # A plate is an everyday trace, not automatically a household dispute.
+            dishes_piled_up = (
+                at_shared_home and action.action_type == "eat"
+                and int(household_state.get("dirty_dishes", 0)) >= 3
+                and not any(item.get("active") and item.get("kind") == "dishes"
+                            and item.get("household_id") == household_id
+                            for item in state.get("responsibilities", []))
+            )
+            creates_dishes = action.action_type == "leave_dishes" or dishes_piled_up or (
                 action.action_type == "prepare_food" and kitchen_after is not None
                 and kitchen_after.kind == "kitchen"
                 and float(kitchen_after.state.get("cleanliness", 100)) <= 55
@@ -2525,6 +2610,8 @@ class LifeWorldEngine:
                         "recurrence_count": count,
                         "triggers": ["care_imbalance", "repeated_uncredited_work"],
                     })
+            if at_shared_home:
+                dinner_life.completed(state, resident, action, now)
             applied.append(action.id)
             resident["completed_action_count"] = int(resident.get("completed_action_count", 0)) + 1
             state["metrics"]["completed_actions"] = int(state["metrics"].get("completed_actions", 0)) + 1
@@ -3507,6 +3594,14 @@ class LifeWorldEngine:
         if cls._has_due_transition(state, after):
             return after
         candidates: list[datetime] = []
+        for dinner in (state.get("household_dinners") or {}).values():
+            if dinner["phase"] not in dinner_life.FINAL:
+                deadline = _moment(dinner["deadline"])
+                if deadline > after:
+                    candidates.append(deadline)
+                join_after = _moment(dinner.get("join_after", dinner["created_at"]))
+                if join_after > after:
+                    candidates.append(join_after)
         for raw in state["residents"].values():
             action = LifeAction.from_dict(raw["current_action"])
             for value in (action.arrives_at if action.status == "traveling" else None,

@@ -279,15 +279,29 @@ def project_observable_action(action: LifeAction, profile: Mapping[str, Any], *,
     )
     privacy = ACTION_PRIVACY.get(action.action_type, "open")
     if privacy == "private":
-        # The authoritative simulation still knows the room and action, but an
-        # observer only sees that the resident is home and unavailable. This
-        # projection is shared by the city, household cutaway, and AI context.
+        # Physical activity is observable; private thoughts, objects and exact
+        # resource identifiers remain hidden. Sleep is not an unspecified errand.
+        sleeping = action.action_type == "sleep"
+        activity_en, activity_zh = ("sleep", "睡觉") if sleeping else ("take a shower", "洗澡")
+        if action.status == "performing":
+            intent_en, intent_zh = (("Sleeping · please do not disturb", "正在睡觉，暂时不便打扰") if sleeping
+                                    else ("Showering · talk later", "正在洗澡，稍后再聊"))
+        elif action.status in {"planned", "traveling"}:
+            intent_en, intent_zh = f"Getting ready to {activity_en}", f"正准备{activity_zh}"
+        elif action.status in {"blocked", "retrying"}:
+            intent_en, intent_zh = f"Waiting to {activity_en}", f"正在等待{activity_zh}"
+        elif action.status == "interrupted":
+            intent_en, intent_zh = ("Sleep interrupted", "睡觉被打断") if sleeping else ("Shower interrupted", "洗澡被打断")
+        elif action.status == "abandoned":
+            intent_en, intent_zh = ("Sleep postponed", "暂时不睡了") if sleeping else ("Shower postponed", "暂时不洗澡了")
+        else:
+            intent_en, intent_zh = ("Finished sleeping", "已经睡醒") if sleeping else ("Finished showering", "已经洗好澡")
         return {
-            "visible_intent": "At home and unavailable for a little while",
-            "visible_intent_zh": "正在家中处理私人事务，暂时不便打扰",
+            "visible_intent": intent_en,
+            "visible_intent_zh": intent_zh,
             "visible_context": {
-                "icon": "◌", "activity": "take some private time",
-                "activity_zh": "处理私人事务", "topic": "private",
+                "icon": "☾" if sleeping else "◌", "activity": activity_en,
+                "activity_zh": activity_zh, "topic": "rest" if sleeping else "hygiene",
                 "phase": phase, "phase_label": phase_en,
                 "phase_label_zh": phase_zh, "progress_kind": progress_kind,
                 "visibility": privacy,

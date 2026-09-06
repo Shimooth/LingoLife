@@ -200,6 +200,12 @@ def project_public_life_context(context: Mapping[str, Any] | None) -> dict[str, 
             key: value for key, value in visible_context.items()
             if key not in {"location", "location_zh", "target_name", "object", "object_zh"}
         }
+        # City/indoor physical labels can now say sleeping or showering. The
+        # narrower conversation/Agent contract still withholds those details.
+        action["visible_context"].update(icon="◌", activity="take some private time",
+                                         activity_zh="处理私人事务", topic="private")
+        action["visible_intent"] = "At home and unavailable for a little while"
+        action["visible_intent_zh"] = "正在家中处理私人事务，暂时不便打扰"
 
     result: dict[str, Any] = {"current_action": action}
     for key in ("recent_life_stories", "npc_relationships", "household_id"):

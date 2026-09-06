@@ -4,6 +4,7 @@ import {Component,Suspense,useMemo,type ReactNode} from 'react'
 import * as THREE from 'three'
 import type {InteriorTheme} from './interiorThemes'
 import type {WorldLayoutInteriorPlacement} from '../../worldLayout'
+import type {HouseholdLifeFacts} from '../../types'
 import {
  SHARED_HOME_PRIVATE_SPACES,sharedHomeDefaultPlacements,
  type SharedHomePrivateSpace,type SharedHomeRoomKind,
@@ -422,7 +423,25 @@ function RoomShell({theme,preview,occupiedPrivateSlots}:{theme:InteriorTheme;pre
  </group>
 }
 
-export function IndoorEnvironment3D({theme,mode='encounter',placements,occupiedPrivateSlots=[]}:{theme:InteriorTheme;mode?:'encounter'|'preview';placements?:readonly WorldLayoutInteriorPlacement[];occupiedPrivateSlots?:readonly number[]}){
+function KitchenActivity({assets,life,cooking,reducedMotion}:{assets:readonly Placement[];life?:HouseholdLifeFacts;cooking:boolean;reducedMotion:boolean}){
+ const stove=assets.find(item=>item.id==='kitchen-stove'),sink=assets.find(item=>item.id==='kitchen-sink')
+ const props:Placement[]=[]
+ if(cooking&&stove){
+  const [x,y,z]=stove.position
+  props.push({id:'active-pan',asset:`${KITCHEN}/pan.gltf`,position:[x,y+.78,z+.22],rotation:.7,scale:.34})
+  props.push({id:'active-tomato',asset:`${RESTAURANT}/food_ingredient_tomato.gltf`,position:[x+.27,y+.81,z+.23],scale:.22})
+ }
+ if(sink&&life?.dirty_dishes_count){
+  const [x,y,z]=sink.position
+  for(let index=0;index<Math.min(4,life.dirty_dishes_count);index++)props.push({id:`dirty-dish-${index}`,asset:`${RESTAURANT}/plate_dirty.gltf`,position:[x+.32,y+1.025+index*.034,z+.12],rotation:index*.24,scale:.3})
+ }
+ return <group name="household-live-objects">
+  {props.map(placement=><InteriorAssetBoundary key={placement.id} placement={placement}><Suspense fallback={null}><InteriorAsset placement={placement}/></Suspense></InteriorAssetBoundary>)}
+  {cooking&&stove&&<group name="cooking-steam" position={[stove.position[0],stove.position[1]+.9,stove.position[2]+.22]}>{[0,1,2].map(index=><mesh key={index} position={[(index-1)*.065,index*.08,0]}><sphereGeometry args={[.065,8,6]}/><meshBasicMaterial color="#fff5e8" transparent opacity={reducedMotion?.08:.15} depthWrite={false}/></mesh>)}</group>}
+ </group>
+}
+
+export function IndoorEnvironment3D({theme,mode='encounter',placements,occupiedPrivateSlots=[],householdLife,cooking=false,reducedMotion=false}:{theme:InteriorTheme;mode?:'encounter'|'preview';placements?:readonly WorldLayoutInteriorPlacement[];occupiedPrivateSlots?:readonly number[];householdLife?:HouseholdLifeFacts;cooking?:boolean;reducedMotion?:boolean}){
  const preview=mode==='preview'
  const sceneAssets=placements?.map(item=>({
   id:item.id,asset:item.asset,
@@ -432,6 +451,7 @@ export function IndoorEnvironment3D({theme,mode='encounter',placements,occupiedP
  }))??defaultSceneAssets(theme)
  return <group name={`LingoLife ${theme} environment`} position={[0,preview ? -.08 : 0,preview ? .05 : 0]} scale={preview ? .99 : 1}>
   <RoomShell theme={theme} preview={preview} occupiedPrivateSlots={occupiedPrivateSlots}/>
-  {sceneAssets.map(placement=><InteriorAssetBoundary key={placement.id} placement={placement}><Suspense fallback={<MissingInteriorAsset placement={placement}/>}><InteriorAsset placement={placement}/></Suspense></InteriorAssetBoundary>)}
+  {sceneAssets.filter(item=>!(cooking&&item.id==='kitchen-kettle')&&!(householdLife&&!householdLife.shared_meals.length&&item.id==='kitchen-meal')).map(placement=><InteriorAssetBoundary key={placement.id} placement={placement}><Suspense fallback={<MissingInteriorAsset placement={placement}/>}><InteriorAsset placement={placement}/></Suspense></InteriorAssetBoundary>)}
+  {theme==='home_kitchen'&&<KitchenActivity assets={sceneAssets} life={householdLife} cooking={cooking} reducedMotion={reducedMotion}/>}
  </group>
 }

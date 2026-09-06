@@ -128,10 +128,25 @@ function authoredAnchor(anchor:SharedHomeAnchor,room:SharedHomeRoom,placements:r
  }
 }
 
-export type SharedHomeResidentAnchorInput={id:string;actionType?:LifeActionType|null}
+export type SharedHomeResidentAnchorInput={id:string;actionType?:LifeActionType|null;privateRoomId?:string|null}
 export type SharedHomeResolvedAnchor={id:string;position:[number,number,number];rotation:number}
 export type SharedHomePrivateSpaceInput={id:string;privateRoomId?:string|null}
 export type SharedHomePrivateSpaceAssignment={residentId:string;slot:number;space:SharedHomePrivateSpace}
+
+/** Residents use their own bedroom, never whichever unclaimed bed is first.
+ * Room ownership is supplied for the full roster, not just visible occupants. */
+export function resolveIndoorResidentAnchors(kind:string,residents:readonly SharedHomeResidentAnchorInput[],roster:readonly SharedHomePrivateSpaceInput[],placements:readonly WorldLayoutInteriorPlacement[]=[]):SharedHomeResolvedAnchor[]{
+ const room=sharedHomeRoomForKind(kind)
+ const ownership=new Map(resolveSharedHomePrivateSpaces(roster).map(item=>[item.residentId,item]))
+ const fallback=resolveSharedHomeResidentAnchors(kind,residents,placements)
+ return residents.map((resident,index)=>{
+  const owner=ownership.get(resident.id)
+  const id=kind==='bedroom'&&owner?(resident.actionType==='sleep'?owner.space.bed_anchor_id:owner.space.door_anchor_id):kind==='bathroom'&&resident.actionType==='shower'?'bathroom-shower':undefined
+  const raw=id&&room.anchors.find(anchor=>anchor.id===id)
+  const anchor=raw&&authoredAnchor(raw,room,placements)
+  return anchor?{id:anchor.id,position:[...anchor.position],rotation:anchor.rotation}:fallback[index]
+ })
+}
 
 const explicitPrivateSlot=(privateRoomId?:string|null)=>{
  const match=privateRoomId?.match(/private-room-(\d{2})$/)
@@ -191,6 +206,9 @@ export function resolveSharedHomeResidentAnchors(
   const chosen=[...unique.slice(start),...unique.slice(0,start)].find(anchor=>!used.has(anchor.id))??unique[0]
   if(!chosen)return {id:`fallback-${resident.id}`,position:[-.9+residentIndex*.9,-.17,.8],rotation:residentIndex%2?.25:-.25}
   used.add(chosen.id)
-  return {id:chosen.id,position:[...chosen.position],rotation:chosen.rotation}
+  const table=placements.find(item=>item.id==='kitchen-dining-table')??room.placements.find(item=>item.id==='kitchen-dining-table')
+  const tablePosition=table&&placementTuple(table)
+  const facing=chosen.kind==='dining-seat'&&tablePosition?Math.atan2(tablePosition[0]-chosen.position[0],tablePosition[2]-chosen.position[2]):chosen.rotation
+  return {id:chosen.id,position:[...chosen.position],rotation:facing}
  })
 }

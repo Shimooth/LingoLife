@@ -17,12 +17,16 @@ from typing import Any, Mapping, Sequence
 from .animation import animation_cue, performance_to_dict, journey_performance, ambient_performance
 from .agent import project_public_life_context
 from .city import HOME_SLOTS, LOCATION_BY_ID, city_payload, home_slot
+from .conversation import conversation_id, conversation_opening
 from .db import Database, LifeWorldRevisionConflict
 from .interaction import build_interaction_scene, public_interaction_scene
 from .layout_runtime import compile_city_runtime, compile_shared_home_runtime
 from .life import LifeAction, stable_id
 from .life_observable import life_action_phase, project_observable_action
 from .life_world import LifeWorldEngine
+from .household_life import public_home_life
+from .spatial_presence import spatial_presence
+from . import dinner as dinner_life
 
 
 def story_attention_budget(resident_count: int) -> dict[str, Any]:
@@ -519,6 +523,27 @@ class LifeWorldService:
                 return saved
         raise RuntimeError("life world could not be changed after concurrent writes")
 
+    def dinner_command(self, player_id: str, profile_entries: Sequence[Mapping[str, Any]],
+                       household_id: str, action: str) -> dict[str, Any]:
+        profiles = _profiles(profile_entries)
+        def update(state):
+            if household_id not in state.get("households", {}):
+                raise KeyError(household_id)
+            value = copy.deepcopy(state)
+            now = _utc(None)
+            if action == "propose":
+                dinner_life.propose(value, profiles, household_id, now,
+                                    self.engine.clock.game_date(now).isoformat(), source="player")
+            elif action == "cleanup":
+                dinner_life.request_cleanup(value, profiles, household_id, now)
+            else:
+                raise ValueError("unknown dinner command")
+            if value != state:
+                value["revision"] = int(value.get("revision", 0)) + 1
+            return value
+        state = self._mutate(player_id, profile_entries, update)
+        return {"dinner": dinner_life.public_dinner(state, household_id)}
+
     def _projection_payload(self, state: Mapping[str, Any]) -> dict[str, list[dict[str, Any]]]:
         """Build all query projections before opening the SQLite transaction."""
         resources = list(state.get("resources") or [])
@@ -535,6 +560,7 @@ class LifeWorldService:
                 self._public_resource(resource)
                 for resource in resources if resource.get("household_id") == household_id
             ]
+            household["life"] = public_home_life(state, str(household["id"]))
             households.append(household)
         actions: list[dict[str, Any]] = []
         for resident in (state.get("residents") or {}).values():
@@ -676,6 +702,11 @@ class LifeWorldService:
                                   if household_id and raw_action_location_id.startswith(f"{household_id}:")
                                   else raw_action_location_id)
             action["location_id"] = action_location_id
+            presence = spatial_presence(
+                current_location_id=raw_current_location_id,
+                target_location_id=raw_action_location_id, status=raw_action.status,
+                home_location_id=authoritative_home_id, household_id=household_id,
+            )
             location = LOCATION_BY_ID.get(current_location_id)
             if location:
                 position = {"x": location.x, "y": location.y}
@@ -729,6 +760,16 @@ class LifeWorldService:
                                  "observable_state": observable["observable_state"]},
             })
             target.update({
+                "conversation_id": conversation_id(npc_id, self.engine.clock.game_date(moment).isoformat(), raw_action.id),
+                "spatial_presence": presence,
+                # Physical room visibility is separate from private intentions,
+                # resource identifiers and interruption permission. The owner
+                # can observe a clothed/covered resident without reading minds.
+                "current_room_id": ({"shared-kitchen": "kitchen", "shared-bathroom": "bathroom",
+                                     "private-bedroom": "bedroom", "living_room": "living-room"}.get(
+                                         raw_current_location_id[len(household_id) + 1:].split(":")[0],
+                                         raw_current_location_id[len(household_id) + 1:].split(":")[0])
+                                    if is_internal_home_location and presence["mode"] == "indoor" else None),
                 "current_location_id": current_location_id, "position": position,
                 "is_home": is_internal_home_location or current_location_id == target["home"]["id"],
                 "household_id": resident.get("household_id"), "current_action": action,
@@ -771,6 +812,7 @@ class LifeWorldService:
                 self._public_resource(resource) for resource in resources
                 if resource.get("household_id") == household["id"]
             ]
+            household["life"] = public_home_life(state, str(household["id"]))
             households.append(household)
         all_moments = [story for story in story_views
                        if story["level"] == "moment" and story["presentable"]]
@@ -864,7 +906,8 @@ class LifeWorldService:
 
     def npc_context(self, player_id: str, profile_entries: Sequence[Mapping[str, Any]], npc_id: str,
                     *, now: datetime | None = None) -> dict[str, Any]:
-        state = self.load(player_id, profile_entries, now=now)
+        moment = _utc(now)
+        state = self.load(player_id, profile_entries, now=moment)
         if npc_id not in state["residents"]:
             raise KeyError(npc_id)
         resident = state["residents"][npc_id]
@@ -896,7 +939,7 @@ class LifeWorldService:
         for pair in self.engine.public_snapshot(state)["relationships"]:
             if npc_id in pair["participant_ids"]:
                 relationships.append(pair)
-        return project_public_life_context({
+        context = project_public_life_context({
             "current_action": {"type": action.action_type, "status": action.status,
                                "phase": life_action_phase(action.status),
                                "visible_intent": observable["visible_intent"],
@@ -914,6 +957,13 @@ class LifeWorldService:
             "recent_life_stories": stories, "npc_relationships": relationships,
             "household_id": resident["household_id"],
         })
+        game_date = self.engine.clock.game_date(moment).isoformat()
+        context["conversation"] = {
+            "id": conversation_id(npc_id, game_date, action.id),
+            "game_date": game_date,
+            "opening": conversation_opening(context["current_action"]),
+        }
+        return context
 
     @staticmethod
     def _cast_name(participant_ids: Sequence[str],
@@ -1176,6 +1226,8 @@ class LifeWorldService:
             "mode": "managed" if intervention or status == "resolved_with_management" else "autonomous",
             "result": result, "tone": outcome_tone,
             "selected_action": str(intervention.get("action")) if intervention else None,
+            "selected_action_label": self._intervention_view(str(intervention["action"]))["label"] if intervention else None,
+            "selected_action_label_zh": self._intervention_view(str(intervention["action"]))["label_zh"] if intervention else None,
             "participant_reactions": reactions,
             "consequences": consequences,
             "aftermath": aftermath,
