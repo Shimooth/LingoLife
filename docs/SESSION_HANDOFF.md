@@ -1,10 +1,12 @@
 # LingoLife 双设备与 Codex 交接手册
 
-最后更新：2026-09-07（Asia/Shanghai）
+最后更新：2026-09-10（Asia/Shanghai）
 
 这是公司 Mac、家用 Windows 和所有 Codex 会话的唯一交接入口。每次换设备前更新“当前交接状态”，提交并推送本文件；另一台设备只相信远端 Git、当前工作树和实时检查，不根据旧聊天猜测状态。
 
 本文只能记录可提交的非敏感信息。密码、私钥、API Key、Cookie、Token、数据库内容和 `.env` 的值不得写入本文、Git、Codex 提示词或终端命令参数。
+
+Git 提交约定：今后的提交标题与正文统一使用中文，必要的文件名、标识符和产品名保留英文；不重写历史提交。仓库根目录 `AGENTS.md` 同步记录此规则，Mac 与 Windows 均遵循。
 
 ## 1. 当前交接状态
 
@@ -13,6 +15,7 @@
 | 上一工作设备 | 公司 Mac |
 | Git 仓库 | `git@github.com:Shimooth/LingoLife.git` |
 | 主分支 | `main` |
+| 2026-09-10 文档交接 | `docs/PLAYER_JOURNEY_AND_SYSTEMS.md` 已改为玩家视角的五张 PNG 图解，涵盖入住、生活循环、共餐设计、聊天体验和优化顺序；明确区分现状与建议。原完整技术内容保留于 `docs/PLAYER_JOURNEY_TECHNICAL_REFERENCE.md`，图片 SVG 和生成脚本也随本轮提交。仅文档与协作约定变动，不部署；后续玩法建议从图解文档第 5 节继续 |
 | 已推送应用提交 | `b37d83bf6347040d6c3b760c2a66bbd0fcae93b3`；发布验收记录由后续仅文档提交补充，拉取时以 origin/main 为准 |
 | 已部署提交 | `b37d83bf6347040d6c3b760c2a66bbd0fcae93b3`，2026-09-07（Asia/Shanghai）已验证 |
 | 2026-09-06 本地后续改动 | 会话按游戏日与行动实例隔离，旧消息保留历史；新玩家旅程文档；账号级进城实操引导（跟随→真实故事→旁观/介入→结果确认），集中双语结果卡及移动端统一滚动；新增 `docs/CITY_PRACTICE_GUIDE.md`；本轮尚未提交部署 |
@@ -224,7 +227,7 @@ cd ../ && npm --prefix web run lint
 npm --prefix web run typecheck
 npm --prefix web run build
 git add <本次明确修改的文件>
-git commit -m "<类型>: <清楚描述>"
+git commit -m "<中文类型>：<清楚的中文描述>"
 git push origin HEAD
 ```
 
@@ -251,7 +254,7 @@ git rev-parse '@{u}'
 ```bash
 git switch -c wip/<简短主题>
 git add <本次相关文件>
-git commit -m "wip: <当前做到哪里>"
+git commit -m "进行中：<用中文说明当前做到哪里>"
 git push -u origin HEAD
 ```
 
