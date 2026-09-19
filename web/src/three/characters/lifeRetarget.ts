@@ -2,7 +2,7 @@ import {AnimationClip, AnimationMixer, Group, Object3D, Quaternion, QuaternionKe
 import {clone} from 'three/examples/jsm/utils/SkeletonUtils.js'
 import type {CharacterFamily} from './characterAssets'
 
-export type LifeMotion='Idle_A'|'Sit_Chair_Down'|'Sit_Chair_Idle'|'Sit_Chair_StandUp'|'Waving'|'Interact'|'Use_Item'|'Chop'|'Chopping'|'Holding_A'|'Holding_B'|'Working_A'|'Eating'|'Reading'
+export type LifeMotion='Idle_A'|'Sit_Chair_Down'|'Sit_Chair_Idle'|'Sit_Chair_StandUp'|'Waving'|'Interact'|'Use_Item'|'Chop'|'Chopping'|'Holding_A'|'Holding_B'|'Working_A'|'Eating'|'Reading'|'Seated_Interact'
 export type LifeMotionLibrary={version:number;packs:{nodes:{name:string;children:number[];position:number[];quaternion:number[];scale:number[]}[];roots:number[];clips:ReturnType<typeof AnimationClip.toJSON>[]}[]}
 const clean=PropertyBinding.sanitizeNodeName
 const maps:Record<CharacterFamily,Record<string,string>>={
@@ -17,9 +17,9 @@ export function retargetLifeMotion(library:LifeMotionLibrary,target:Group,family
  let entries=cache.get(target)
  if(!entries){entries=new Map();cache.set(target,entries)}
  const hit=entries.get(name);if(hit)return hit
- if(name==='Eating'||name==='Reading'){
+ if(name==='Eating'||name==='Reading'||name==='Seated_Interact'){
   const seated=retargetLifeMotion(library,target,family,'Sit_Chair_Idle')
-  const upper=retargetLifeMotion(library,target,family,name==='Eating'?'Use_Item':'Holding_B')
+  const upper=retargetLifeMotion(library,target,family,name==='Eating'?'Use_Item':name==='Seated_Interact'?'Interact':'Holding_B')
   const arm=(track:{name:string})=>/Arm|arm|Hand|hand/.test(track.name)
   const result=new AnimationClip(`life:${name}`,-1,[...seated.tracks.filter(track=>!arm(track)),...upper.tracks.filter(arm)])
   entries.set(name,result);return result

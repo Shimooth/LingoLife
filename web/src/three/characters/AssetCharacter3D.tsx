@@ -13,6 +13,7 @@ import {
 import type { Character3DProps, CharacterMotion } from './types'
 import {LifeRigAnimation} from './LifeRigAnimation'
 import {LifeHandProp} from './LifeHandProp'
+import {CharacterFace} from './CharacterFace'
 
 const oneShotMotions = new Set<CharacterMotion>(['happy', 'jump', 'push'])
 const cityJumpSequences = {
@@ -39,6 +40,7 @@ function useCharacterAnimation(
   // Actions must belong to this skeleton, including when only a Chibi outfit changes.
   // useAnimations caches actions by clip name and can retain the previous root.
   const mixer = useMemo(() => new AnimationMixer(model), [model])
+  const evaluatedPose = useRef(false)
   const actions = useMemo(() => {
     const bound: Record<string, AnimationAction> = {}
     clips.forEach(clip => Object.defineProperty(bound, clip.name, { get: () => mixer.clipAction(clip, model) }))
@@ -48,6 +50,7 @@ function useCharacterAnimation(
   useEffect(() => () => {
     mixer.stopAllAction()
     mixer.uncacheRoot(model)
+    evaluatedPose.current = false
   }, [mixer, model])
   const previousMotion = useRef<CharacterMotion | undefined>(undefined)
   const candidates = family === 'chibi' && motion === 'crouch'
@@ -88,11 +91,18 @@ function useCharacterAnimation(
       }
       const sequenceContinues = index < sequence.length - 1
       const oneShot = sequenceContinues || loopOverride === false || (loopOverride === undefined && oneShotMotions.has(motion))
-      next.reset().setEffectiveTimeScale(Math.max(.2, speed)).fadeIn(index ? Math.min(.1, transition) : transition)
+      next.reset().setEffectiveTimeScale(Math.max(.2, speed))
+      // A fade from zero total weight exposes the asset's bind/T pose. The
+      // first clip establishes a full pose immediately; only transitions blend.
+      if (evaluatedPose.current) next.fadeIn(index ? Math.min(.1, transition) : transition)
       next.clampWhenFinished = false
       next.setLoop(oneShot ? LoopOnce : LoopRepeat, oneShot ? 1 : Infinity)
       next.play()
       started.add(next)
+      if (!evaluatedPose.current) {
+        mixer.update(0)
+        evaluatedPose.current = true
+      }
     }
     const onFinished = (event: AnimationMixerEventMap['finished']) => {
       if (event.action === exitCrouchAction) {
@@ -166,8 +176,9 @@ function NativeAnimation({clips,model,family,props}:{clips:AnimationClip[];model
 function RigPlayback({clips,model,family,props}:{clips:AnimationClip[];model:Group;family:'chibi'|'city';props:Character3DProps}) {
  const native=<NativeAnimation clips={clips} model={model} family={family} props={props}/>
  return <>
-  {props.lifeMotion?<Suspense fallback={native}><LifeRigAnimation model={model} family={family} motion={props.lifeMotion} attention={props.lifeAttention} handTarget={props.lifeHandTarget} paused={props.animationPaused}/></Suspense>:native}
+  {props.lifeMotion?<Suspense fallback={native}><LifeRigAnimation model={model} family={family} motion={props.lifeMotion} attention={props.lifeAttention} handTarget={props.lifeHandTarget} performancePose={props.lifePerformancePose} paused={props.animationPaused}/></Suspense>:native}
   {props.lifeProp&&<LifeHandProp model={model} family={family} kind={props.lifeProp}/>}
+  <CharacterFace model={model} props={props}/>
  </>
 }
 

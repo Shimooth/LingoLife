@@ -1,0 +1,4 @@
+.encounter-resident-name{display:block;max-width:132px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:5px 11px;border-radius:999px;border:1px solid #ffffffb8;background:#fffaf0e8;color:#657268;font:600 11px/1.4 system-ui;box-shadow:0 4px 12px #32433a15;transition:background .25s,color .25s}
+.encounter-resident-name.is-speaking{background:#456e5f;color:#fff;border-color:#789b8a}
+@media(max-width:650px){.encounter-resident-name{max-width:94px;font-size:10px}}
+@media(prefers-reduced-motion:reduce){.encounter-resident-name{transition:none}}

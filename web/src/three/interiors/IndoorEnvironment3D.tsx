@@ -1,10 +1,13 @@
 import {useGLTF} from '@react-three/drei'
 import {useThree} from '@react-three/fiber'
-import {Component,Suspense,useMemo,type ReactNode} from 'react'
+import {Component,Suspense,useEffect,useMemo,type ReactNode} from 'react'
 import * as THREE from 'three'
 import type {InteriorTheme} from './interiorThemes'
 import type {WorldLayoutInteriorPlacement} from '../../worldLayout'
 import type {HouseholdLifeFacts} from '../../types'
+import {furnitureContactTexture} from '../rendering/grounding'
+import {TimberFloor} from './TimberFloor'
+import {LivingRoomAccents} from './LivingRoomAccents'
 import {
  SHARED_HOME_PRIVATE_SPACES,sharedHomeDefaultPlacements,
  type SharedHomePrivateSpace,type SharedHomeRoomKind,
@@ -172,7 +175,7 @@ function InteriorAsset({placement}:{placement:Placement}){
    const materials=original.map(source=>{
     const material=source.clone()
     if(material instanceof THREE.MeshStandardMaterial){
-     material.roughness=Math.min(.72,material.roughness??.62)
+     material.roughness=/rug|couch|armchair|pillow/.test(placement.asset)?.92:/lamp|fridge|stove|sink/.test(placement.asset)?.48:.72
      material.metalness=Math.min(.04,material.metalness??0)
      material.envMapIntensity=.72
      if(material.map){material.map.anisotropy=anisotropy;material.map.needsUpdate=true}
@@ -182,8 +185,21 @@ function InteriorAsset({placement}:{placement:Placement}){
    child.material=Array.isArray(child.material)?materials:materials[0]
   })
   return clone
- },[anisotropy,scene])
- return <primitive object={object} position={placement.position} rotation={[0,placement.rotation??0,0]} scale={placement.scale??1}/>
+ },[anisotropy,scene,placement.asset])
+ useEffect(()=>()=>object.traverse(child=>{
+  if(child instanceof THREE.Mesh)(Array.isArray(child.material)?child.material:[child.material]).forEach(material=>material.dispose())
+ }),[object])
+ const footprint=useMemo(()=>{
+  const bounds=new THREE.Box3().setFromObject(object),size=bounds.getSize(new THREE.Vector3()),center=bounds.getCenter(new THREE.Vector3())
+  return {width:size.x*1.18,depth:size.z*1.18,x:center.x,z:center.z}
+ },[object])
+ const grounded=placement.position[1]<.01&&!/floor|rug|mirror/.test(placement.asset)
+ return <group position={placement.position} rotation={[0,placement.rotation??0,0]} scale={placement.scale??1}>
+  <primitive object={object}/>
+  {grounded&&<mesh name="furniture-contact" position={[footprint.x,-.018,footprint.z]} rotation-x={-Math.PI/2} raycast={()=>null}>
+   <planeGeometry args={[footprint.width,footprint.depth]}/><meshBasicMaterial map={furnitureContactTexture()} transparent opacity={.22} depthWrite={false} polygonOffset polygonOffsetFactor={-1} toneMapped={false}/>
+  </mesh>}
+ </group>
 }
 
 function MissingInteriorAsset({placement}:{placement:Placement}){
@@ -214,6 +230,20 @@ function WindowAssembly({theme}:{theme:InteriorTheme}){
  return <group position={[centerX,2.02,-3.105]}>
   <mesh castShadow><boxGeometry args={[width+.26,height+.26,.1]}/><meshStandardMaterial color={colors.trim} roughness={.68}/></mesh>
   <mesh position-z={.058}><planeGeometry args={[width,height]}/><meshStandardMaterial color={colors.sky} emissive={colors.sky} emissiveIntensity={bathroom?.09:.16} roughness={bathroom?.48:.24}/></mesh>
+  {!bathroom&&<group name="painted-cloud-city-through-window" position-z={.075}>
+   {/* A tiny low-poly skyline matches the city asset language, never a photographic backdrop. */}
+   {[-.38,-.13,.16,.38].map((offset,index)=>{
+    const buildingHeight=height*[.36,.53,.3,.44][index],buildingWidth=width*.2
+    return <group key={offset} position={[width*offset,-height/2+buildingHeight/2,.005+index*.001]}>
+     <mesh><planeGeometry args={[buildingWidth,buildingHeight]}/><meshBasicMaterial color={['#a7bab4','#b4c2b4','#b8c5bd','#9eb7b2'][index]} toneMapped={false}/></mesh>
+     <mesh position={[0,buildingHeight/2,.002]}><planeGeometry args={[buildingWidth+.025,.025]}/><meshBasicMaterial color="#dce3cf" toneMapped={false}/></mesh>
+     {[0,1].map(row=><mesh key={row} position={[0,buildingHeight*(.2-row*.35),.003]}><planeGeometry args={[buildingWidth*.52,.025]}/><meshBasicMaterial color="#e5e6cd" toneMapped={false}/></mesh>)}
+    </group>
+   })}
+   {[-.23,.3].map((x,index)=><group key={x} position={[x*width,height*(index?.25:.33),.02]}>
+    {[-.085,0,.085].map((offset,part)=><mesh key={offset} position={[offset,part===1?.025:0,0]} scale={[1,.55,.08]}><sphereGeometry args={[.09,10,6]}/><meshBasicMaterial color="#e8f0e5" toneMapped={false}/></mesh>)}
+   </group>)}
+  </group>}
   <mesh position={[0,0,.12]} castShadow><boxGeometry args={[.075,height+.02,.055]}/><meshStandardMaterial color={colors.trim} roughness={.7}/></mesh>
   <mesh position={[0,0,.12]} rotation-z={Math.PI/2} castShadow><boxGeometry args={[.075,width+.02,.055]}/><meshStandardMaterial color={colors.trim} roughness={.7}/></mesh>
   <mesh position={[0,-height/2-.12,.08]} castShadow><boxGeometry args={[width+.45,.12,.32]}/><meshStandardMaterial color={colors.trim} roughness={.78}/></mesh>
@@ -394,7 +424,7 @@ function RoomShell({theme,preview,occupiedPrivateSlots}:{theme:InteriorTheme;pre
  return <group>
   <mesh position={[0,-.16,-.35]} receiveShadow><boxGeometry args={[10.72,.2,7.32]}/><meshStandardMaterial color={colors.deep} roughness={.95}/></mesh>
   <mesh position={[0,-.045,-.35]} rotation-x={-Math.PI/2} receiveShadow><planeGeometry args={[10.55,7.15]}/><meshStandardMaterial color={colors.floor} roughness={.76}/></mesh>
-  {(theme==='home_lounge'||theme==='home_bedroom')&&[-2.95,-2.08,-1.21,-.34,.53,1.4,2.27].map(z=><mesh key={z} position={[0,-.036,z]} receiveShadow><boxGeometry args={[10.4,.012,.018]}/><meshStandardMaterial color={colors.deep} transparent opacity={.22} roughness={.9}/></mesh>)}
+  {(theme==='home_lounge'||theme==='home_bedroom')&&<TimberFloor color={colors.floor}/>}
   <mesh position={[0,1.62,-3.18]} receiveShadow castShadow><boxGeometry args={[10.62,3.55,.14]}/><meshStandardMaterial color={colors.wall} roughness={.88}/></mesh>
   {theme==='home_bedroom'?<>
    <mesh position={[-5.22,1.57,-2.28]} rotation-y={Math.PI/2} receiveShadow castShadow><boxGeometry args={[3.34,3.42,.14]}/><meshStandardMaterial color={colors.trim} roughness={.9}/></mesh>
@@ -415,7 +445,7 @@ function RoomShell({theme,preview,occupiedPrivateSlots}:{theme:InteriorTheme;pre
   <mesh position={[0,.13,-3.07]} castShadow><boxGeometry args={[10.26,.18,.13]}/><meshStandardMaterial color={colors.trim} roughness={.76}/></mesh>
   <mesh position={[-5.11,.13,-.4]} rotation-y={Math.PI/2} castShadow><boxGeometry args={[5.28,.18,.13]}/><meshStandardMaterial color={colors.wall} roughness={.82}/></mesh>
   {theme!=='home_bedroom'&&<WindowAssembly theme={theme}/>}
-  {preview&&<group position={[-1.42,2.22,-3.085]}>
+  {preview&&theme!=='home_lounge'&&<group position={[-1.42,2.22,-3.085]}>
    <mesh castShadow><boxGeometry args={[1.42,.92,.1]}/><meshStandardMaterial color={colors.trim} roughness={.8}/></mesh>
    <mesh position-z={.056}><planeGeometry args={[1.14,.65]}/><meshStandardMaterial color={theme==='home_bathroom'?'#70a8a5':colors.accent} roughness={.82}/></mesh>
   </group>}
@@ -453,5 +483,6 @@ export function IndoorEnvironment3D({theme,mode='encounter',placements,occupiedP
   <RoomShell theme={theme} preview={preview} occupiedPrivateSlots={occupiedPrivateSlots}/>
   {sceneAssets.filter(item=>!(cooking&&item.id==='kitchen-kettle')&&!(householdLife&&!householdLife.shared_meals.length&&item.id==='kitchen-meal')).map(placement=><InteriorAssetBoundary key={placement.id} placement={placement}><Suspense fallback={<MissingInteriorAsset placement={placement}/>}><InteriorAsset placement={placement}/></Suspense></InteriorAssetBoundary>)}
   {theme==='home_kitchen'&&<KitchenActivity assets={sceneAssets} life={householdLife} cooking={cooking} reducedMotion={reducedMotion}/>}
+  {theme==='home_lounge'&&<LivingRoomAccents placements={placements}/>}
  </group>
 }

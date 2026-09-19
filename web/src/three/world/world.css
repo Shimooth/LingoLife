@@ -69,3 +69,9 @@
 .world3d-resident-dock .world3d-resident-trouble{position:absolute;z-index:2;top:50%;right:6px;display:grid;width:24px;height:24px;min-height:24px;grid-template:none;place-items:center;padding:0;border:2px solid #fff;border-radius:50%;color:#fff8ef;background:#d17855;box-shadow:0 4px 10px rgba(94,52,38,.2);font:900 12px/1 ui-rounded,system-ui;transform:translateY(-50%);transition:transform .18s,background .18s}.world3d-resident-dock .world3d-resident-trouble:hover{color:#fff;background:#bc6043;transform:translateY(-50%) scale(1.08)}.world3d-resident-trouble:focus-visible{outline:3px solid rgba(209,120,85,.35);outline-offset:2px}
 @media(max-width:720px){.world3d-resident-entry{flex:0 0 156px;max-width:156px;scroll-snap-align:start}.world3d-resident-dock>.world3d-resident-button.is-overview{flex:0 0 100px;scroll-snap-align:start}.world3d-resident-entry>.world3d-resident-button{min-height:46px}.world3d-resident-dock .world3d-resident-trouble{flex:none;min-height:24px}}
 @media(prefers-reduced-motion:reduce){.world3d-resident-dock .world3d-resident-trouble{transition:none}}
+
+.world3d-resident-avatar .character-portrait{display:block;width:34px;height:34px;overflow:hidden;border-radius:12px;background:#e9e2d2}
+.world3d-resident-avatar .character-portrait img{display:block;width:100%;height:100%;object-fit:cover;transform:scale(1.65);transform-origin:50% 15%}
+.world3d-resident-dock{background:#fffaf0ed;box-shadow:0 8px 28px #25433c20;border:1px solid #ffffffb3}
+.world3d-resident-dock .world3d-resident-button{min-height:48px}
+.world3d-controls button{min-height:44px}

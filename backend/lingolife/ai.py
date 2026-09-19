@@ -257,6 +257,24 @@ class DeepSeekProvider:
                  if key in {"prompt_tokens", "completion_tokens", "total_tokens"} and isinstance(value, int)}
         return {"script": json.loads(choice["message"]["content"]), "usage": usage}
 
+    def author_pair_memory(self, contract: dict) -> dict:
+        from .pair_memory import SYSTEM_PROMPT
+        with httpx.Client(timeout=min(20, self.settings.deepseek_timeout)) as client:
+            response = client.post(self.endpoint, headers=self.headers, json={
+                'model': self.settings.deepseek_model, 'thinking': {'type': 'disabled'},
+                'messages': [{'role': 'system', 'content': SYSTEM_PROMPT},
+                             {'role': 'user', 'content': json.dumps(contract, ensure_ascii=False)}],
+                'response_format': {'type': 'json_object'}, 'max_tokens': 1000, 'temperature': .2,
+            })
+            response.raise_for_status()
+            payload = response.json()
+        choice = payload['choices'][0]
+        if choice.get('finish_reason') != 'stop':
+            raise ValueError('incomplete_memory_selection')
+        usage = {key: value for key, value in (payload.get('usage') or {}).items()
+                 if key in {'prompt_tokens', 'completion_tokens', 'total_tokens'} and isinstance(value, int)}
+        return {'script': json.loads(choice['message']['content']), 'usage': usage}
+
     def _dialogue(self, message: str, history: list[dict], context: dict[str, Any],
                   on_chunk: Callable[[str], None] | None) -> str:
         payload = {"model": self.settings.deepseek_model,
@@ -389,6 +407,11 @@ class ResilientProvider:
         if not self.expression_available:
             raise RuntimeError("expression_provider_unavailable")
         return self.primary.author_expression(contract)
+
+    def author_pair_memory(self, contract: dict) -> dict:
+        if not callable(getattr(self.primary, 'author_pair_memory', None)):
+            raise RuntimeError('memory_provider_unavailable')
+        return self.primary.author_pair_memory(contract)
 
     def reply(self, message: str, stats: Stats, history: list[dict],
               context: dict[str, Any] | None = None,

@@ -1,0 +1,40 @@
+/* World-first chrome: keep existing settings/collapse controls, return space to the city. */
+.city-shell{padding:0;background:#d8e5df}
+.city-screen{width:100%;max-width:none;border:0;border-radius:0;box-shadow:none}
+.city-header__content{padding:12px 82px 12px 20px;gap:16px}
+.city-header__brand .eyebrow,.city-header__brand>span{display:none}
+.city-header__brand h1{margin:0;font:750 clamp(18px,2vw,24px)/1.2 ui-rounded,"SF Pro Rounded",system-ui;color:#344e44;letter-spacing:-.035em}
+@media(max-width:760px){
+ .city-header__content{padding:calc(10px + env(safe-area-inset-top)) 62px 10px 12px;gap:9px}
+ .city-header__brand h1{font-size:17px}
+}
+/* Canvas projection owns these values. It updates on resize and camera changes. */
+.conversation-stage-3d .conversation-stage-3d__speech-layer{left:var(--speech-left,7%);right:auto;top:var(--speech-top,44px);width:var(--speech-width,86%);max-width:none;height:auto;max-height:var(--speech-maxHeight,190px)}
+.conversation-stage-3d .world-speech__surface{max-height:var(--speech-maxHeight,190px)}
+.conversation-stage-3d .world-speech{max-height:var(--speech-maxHeight,190px)}
+.conversation-stage-3d[data-speech-placement="beside"] .conversation-stage-3d__speech-layer--npc .world-speech::after{left:auto;right:-12px;top:28px;bottom:auto;width:16px;height:22px;transform:none;clip-path:polygon(0 0,100% 50%,0 100%);background:#fffaf2}
+.conversation-stage-3d[data-speech-placement="above"] .conversation-stage-3d__speech-layer--npc .world-speech::after{left:var(--speech-tailX,50%);background:#fffaf2}
+.conversation-stage-3d[data-speech-placement="above"] .conversation-stage-3d__speech-layer{top:auto;bottom:var(--speech-bottom);height:auto}
+.conversation-stage-3d[data-speech-placement="beside"] .conversation-stage-3d__speech-layer--player{left:18px;top:52px}
+.conversation-stage-3d .conversation-stage-3d__speech-layer{transition:left .18s ease,top .18s ease,bottom .18s ease}
+.conversation-stage-3d.is-reduced-motion .conversation-stage-3d__speech-layer{transition:none}
+@media(prefers-reduced-motion:reduce){.conversation-stage-3d .conversation-stage-3d__speech-layer{transition:none}}
+.world-speech__surface{backdrop-filter:none;background:#fffaf2;box-shadow:0 12px 32px #2c231b26,0 2px 6px #2c231b0d}
+.world-speech button{min-height:44px;padding:8px 12px;font-size:11px}
+.world-speech p{font-family:ui-rounded,"SF Pro Rounded",system-ui;line-height:1.55}
+.world-speech strong{color:#6a806d}
+.world-speech.is-translated .world-speech__surface{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px 12px}
+.world-speech.is-translated .world-speech__message{grid-column:1;grid-row:1;min-width:0}
+.world-speech.is-translated .world-speech__message p{max-height:76px}
+.world-speech.is-translated .world-speech__translation{grid-column:2;grid-row:1;min-width:0;max-height:100px;margin:0;padding:0 0 0 10px;border-top:0;border-left:1px solid #81967b40;font-size:12px;line-height:1.5}
+.world-speech.is-translated .world-speech__surface>button{grid-column:1/-1;grid-row:2;justify-self:start;margin:0}
+.conversation-stage-3d__speech-layer{height:clamp(160px,30%,220px);bottom:auto}
+.conversation-stage-3d .world-speech,.conversation-stage-3d .world-speech__surface{max-height:100%}
+.conversation-stage-3d .world-speech__surface{max-height:220px}
+@media(max-width:779px){
+ .conversation-stage-3d__speech-layer{top:48px;width:min(310px,86%);max-width:86%;height:clamp(140px,28%,205px)}
+ .conversation-stage-3d__speech-layer--npc{right:7%}.conversation-stage-3d__speech-layer--player{left:7%}
+ .world-speech p{max-height:90px}.world-speech__translation{max-height:72px}
+ .conversation-stage-3d .world-speech__surface{max-height:var(--speech-maxHeight,min(190px,28dvh))}
+}
+.conversation-stage-3d .world-speech,.conversation-stage-3d .world-speech__surface{max-height:var(--speech-maxHeight,190px)}

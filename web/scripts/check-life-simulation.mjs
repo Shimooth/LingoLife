@@ -1,4 +1,9 @@
 import assert from 'node:assert/strict'
+import './check-scene-dialogue.mjs'
+import './check-encounter-acting.mjs'
+import './check-shared-drink-layout.mjs'
+import './check-shared-drink-performance.mjs'
+import './check-facial-expression.mjs'
 import {readFile} from 'node:fs/promises'
 import {fileURLToPath} from 'node:url'
 import typescript from 'typescript'
@@ -113,18 +118,22 @@ const storyPanelSource=await source('../src/components/StoryThreadsPanel.tsx')
 assert.match(storyPanelSource,/structural_bonds\?\?\[\]/,'public structural bonds must be rendered in the relationship panel')
 assert.match(storyPanelSource,/filter\(bond=>bond\.active!==false\)/,'inactive structural bonds must remain hidden')
 const encounterSource=await source('../src/components/LifeStoryEncounter.tsx')
+assert.doesNotMatch(encounterSource,/记下这一刻|Remember this moment/,'players must not manually decide NPC memory retention')
+assert.match(encounterSource,/!terminal\|\|!canObserve\|\|guideStep/,'automatic read receipts must leave explicit tutorial progression intact')
 assert.match(encounterSource,/const canObserve=current\.level!==['"]thread['"]&&!observed\b/,'settled but unwitnessed moments must remain observable')
 assert.match(encounterSource,/<p lang="en">\{english\}<\/p>/,'NPC story beats must keep English as the primary dialogue')
 assert.match(encounterSource,/visibleBeats=reduce\?beats:beats\.slice\(0,revealedBeatCount\)/,'NPC interaction beats must reveal progressively unless reduced motion is requested')
 assert.match(encounterSource,/active\?\.duration_ms\?\?2400/,'authored beat duration must drive interaction playback')
-assert.match(encounterSource,/activeBeat\.speaker_id===person\.id\?activeBeat\.animation_cue/,'the active speaker must drive character animation cues')
+assert.match(encounterSource,/<EncounterResident3D[^>]*activeBeat=\{activeBeat\}/,'generic actors must receive the current beat; behavioral speaker/listener checks live in check-encounter-acting')
 assert.match(encounterSource,/performanceComplete&&!terminal/,'management choices must wait until the observable exchange has played')
 const actionLabelSource=await source('../src/components/ResidentActionLabel.tsx')
 assert.match(actionLabelSource,/raw\.visible_context/,'resident labels must consume concrete server-owned observable detail')
 assert.match(actionLabelSource,/phase_label_zh/,'resident labels must expose bilingual action phase semantics')
 assert.match(actionLabelSource,/presentation\?\.progress/,'resident labels must expose action progress semantics')
 const householdPreviewSource=await source('../src/components/HouseholdInteriorPreview.tsx')
-assert.match(householdPreviewSource,/camera\.lookAt\(0,\.84,-\.48\)/,'the household camera must frame the room instead of keeping Three’s default -Z direction')
+assert.match(householdPreviewSource,/camera\.lookAt\(next\.target\)/,'the household camera must frame its explicit room/resident target, never the default -Z direction')
+assert.match(householdPreviewSource,/orbit\.target\.lerp\(next\.target,blend\)/,'camera position and orbit target must transition together')
+assert.match(householdPreviewSource,/manual\.current\|\|!next\.moving/,'manual camera input must cancel automatic framing')
 assert.match(householdPreviewSource,/HouseholdRestingResident/,'physical sleeping/showering residents must remain visible with covering')
 assert.match(householdPreviewSource,/!privateAction\(target\)/,'observing private activity must not enable interruption')
 assert.match(householdPreviewSource,/reducedMotion=\{Boolean\(reduce\)\}/,'the household cutaway must respect reduced-motion preferences')
@@ -134,5 +143,7 @@ assert.match(expressionSource,/raw\.visible_context\?\.topic/,'hobby expressions
 assert.ok(expressionSource.indexOf('if(troubleSignal)')<expressionSource.indexOf("action?.status==='traveling'"),'visible trouble must take priority over an ordinary journey emote')
 
 await import('./check-shared-home.mjs')
+// Run the CPU-heavy real-rig checks after the short network-deadline fixtures finish.
+await import('./check-drink-rig-contact.mjs')
 
 console.log('Life simulation frontend guard passed (13 actions, staged NPC scenes, shared-home editing, romance consent, v2 precedence, version safety, single-timer schedule).')

@@ -2,6 +2,7 @@ import { AnimationClip, Color, Mesh, MeshStandardMaterial, Object3D, PropertyBin
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import type { AvatarConfig } from '../../types'
 import { CHIBI_ACCESSORIES, CHIBI_HAIR, CHIBI_OUTFITS, resolveChibiAccessory, resolveChibiHair, resolveChibiOutfit } from './characterAssets'
+import { prepareCharacterFace } from './facialGeometry'
 
 export function disposeCharacterInstance(model: Group): void {
   const skeletons = new Set<Skeleton>()
@@ -9,6 +10,7 @@ export function disposeCharacterInstance(model: Group): void {
     if (!(object instanceof Mesh)) return
     const materials = Array.isArray(object.material) ? object.material : [object.material]
     materials.forEach(material => material.dispose())
+    if (object.geometry.userData.lingolifeFaceOwned) object.geometry.dispose()
     if (object instanceof SkinnedMesh) skeletons.add(object.skeleton)
   })
   skeletons.forEach(skeleton => skeleton.dispose())
@@ -24,7 +26,7 @@ const optionalChibiNodes = new Set([
 function cloneMaterial(material: Material): Material {
   const copy = material.clone()
   if (copy instanceof MeshStandardMaterial) {
-    copy.roughness = Math.max(copy.roughness, .82)
+    copy.roughness = /hair|eye|shoe/i.test(material.name) ? .62 : /skin|face/i.test(material.name) ? .76 : .88
     copy.metalness = 0
   }
   return copy
@@ -88,6 +90,7 @@ export function prepareChibi(source: Group, avatar: Pick<AvatarConfig,'hair'|'ha
     if (object) object.visible = true
   })
   tintObject(model.getObjectByName('character_low'), avatar.skin, .5)
+  prepareCharacterFace(model, 'chibi')
   return model
 }
 
@@ -102,6 +105,7 @@ export function prepareCity(source: Group, hairColor: string): Group {
       }
     })
   })
+  prepareCharacterFace(model, 'city')
   return model
 }
 

@@ -11,6 +11,9 @@ import {TroubleBubble} from '../../components/TroubleBubble'
 import {visibleOnCityMap} from '../../life/spatialPresence'
 import './world.css'
 import type {WorldLayoutDocument} from '../../worldLayout'
+import {AdaptiveResolution} from '../rendering/SceneLook'
+import {initialQuality,VISUAL_BUDGETS,type VisualTier} from '../rendering/visualQuality'
+import {CharacterPortrait} from '../../components/CharacterPortrait'
 
 export type WorldObserver3DProps={
  characters:readonly CityCharacter[]
@@ -34,8 +37,6 @@ export type WorldObserver3DProps={
  className?:string
 }
 
-const HIGH_DPR:[number,number]=[1,1.75]
-const LOW_DPR:[number,number]=[1,1.25]
 const WEBGL_OPTIONS={antialias:true,alpha:false,powerPreference:'high-performance' as const}
 
 type Copy={
@@ -117,13 +118,8 @@ export function WorldObserver3D({characters,landmarks=DEFAULT_WORLD_LANDMARKS,fo
  const [sceneReady,setSceneReady]=useState(false),[introPhase,setIntroPhase]=useState<IntroPhase>('loading')
  const [introVariant]=useState<IntroVariant>(chooseIntroVariant)
  const quality=qualityMode==='low'?'low':'high'
- const postProcessing=useMemo(()=>{
-  if(typeof window==='undefined'||quality==='low')return false
-  const coarsePointer=window.matchMedia('(pointer: coarse)').matches
-  const concurrency=navigator.hardwareConcurrency||4
-  const memory=(navigator as Navigator&{deviceMemory?:number}).deviceMemory??8
-  return !coarsePointer&&concurrency>=6&&memory>=4
- },[quality])
+ const [visualTier,setVisualTier]=useState<VisualTier>(()=>initialQuality(qualityMode).tier)
+ const postProcessing=VISUAL_BUDGETS[visualTier].postProcessing
  const [selectedLandmark,setSelectedLandmark]=useState<CityLandmark|null>(null)
  const [dismissedActiveLandmarkId,setDismissedActiveLandmarkId]=useState<string>()
  const previousActiveLandmarkId=useRef(activeLandmarkId)
@@ -193,19 +189,20 @@ export function WorldObserver3D({characters,landmarks=DEFAULT_WORLD_LANDMARKS,fo
    <span className="world3d-time world3d-time--floating"><i aria-hidden>{timeSlot==='morning'?'☀':timeSlot==='afternoon'?'◐':'☾'}</i>{copy.time[timeSlot]}</span>
    <div className="world3d-stage">
     <WorldIntro phase={introPhase} variant={introVariant} copy={copy} reducedMotion={reducedMotion} onRetry={()=>window.location.reload()} onFallback={()=>setWebglAvailable(false)}/>
-    <Canvas orthographic camera={{position:[38,36,44],zoom:25,near:.025,far:220}} dpr={quality==='high'?HIGH_DPR:LOW_DPR} shadows={quality==='high'} frameloop={paused||reducedMotion?'demand':'always'} gl={WEBGL_OPTIONS}
+    <Canvas orthographic camera={{position:[38,36,44],zoom:25,near:.025,far:220}} dpr={Math.min(window.devicePixelRatio||1,VISUAL_BUDGETS[visualTier].dpr)} shadows="percentage" frameloop={paused||reducedMotion?'demand':'always'} gl={WEBGL_OPTIONS}
      onCreated={({gl})=>{gl.setClearColor(timeSlot==='evening'?'#21384f':timeSlot==='morning'?'#579bb9':'#3f86aa',1);gl.outputColorSpace='srgb';gl.toneMapping=THREE.ACESFilmicToneMapping;gl.toneMappingExposure=.88;gl.domElement.addEventListener('webglcontextlost',event=>{event.preventDefault();setWebglAvailable(false)},{once:true})}}
      onPointerMissed={()=>setSelectedLandmark(null)} fallback={<WorldFallback characters={characters} landmarks={landmarks} language={language} onCharacterInteract={onCharacterInteract} onLandmarkClick={onLandmarkClick}/>}>
      <WorldFrameLoopControl paused={paused}/>
+     <AdaptiveResolution mode={qualityMode} paused={paused||reducedMotion||!sceneReady} onTier={setVisualTier}/>
      <Suspense fallback={null}>
-      <WorldEffects timeSlot={timeSlot} quality={quality} reducedMotion={reducedMotion} postProcessing={postProcessing}/>
+      <WorldEffects timeSlot={timeSlot} quality={quality} reducedMotion={reducedMotion} postProcessing={postProcessing} shadowSize={VISUAL_BUDGETS[visualTier].shadowSize}/>
       <WorldScene characters={characters} landmarks={sceneLandmarks} followedCharacterId={followedCharacterId} serverTime={serverTime} language={language} timeSlot={timeSlot} reducedMotion={reducedMotion} selectedLandmarkId={activeLandmarkId!==dismissedActiveLandmarkId?activeLandmarkId:selectedLandmark?.id} focus={externalFocus??focus} focusVersion={focusVersion+(activeLandmarkId!==dismissedActiveLandmarkId&&activeLandmarkId?hashString(activeLandmarkId):0)} viewMode={viewMode} quality={quality} layout={layout} onCharacterClick={selectCharacter} onCharacterEvent={eventId=>onEventOpen?.(eventId)} onCharacterTrouble={onTroubleOpen} onHouseholdOpen={onHouseholdOpen} onJourneyElapsed={onJourneyElapsed} onLandmarkSelect={selectLandmark}/>
       <SceneFrameGate onReady={revealScene}/>
      </Suspense>
     </Canvas>
     <nav className="world3d-resident-dock" aria-label={copy.residents}>
      <button type="button" className={'world3d-resident-button is-overview '+(!followedCharacterId?'is-active':'')} onClick={showOverview}><span className="world3d-resident-avatar" aria-hidden>⌂</span><b>{copy.overview}</b></button>
-     {characters.map(character=><div className={character.troubleSignal?'world3d-resident-entry has-trouble':'world3d-resident-entry'} key={character.id}><button type="button" className={'world3d-resident-button '+(character.id===followedCharacterId?'is-active':'')} onClick={()=>selectCharacter(character.id)}><span className="world3d-resident-avatar" aria-hidden>{character.name.slice(0,1)}<i data-state={character.worldAction?.state??'idle'}/></span><b title={character.name}>{character.name}</b>{!visibleOnCityMap(character)&&<small className="world3d-presence-label">{language==='zh'?'室内 · ':'Inside · '}{character.location.place}</small>}<ResidentActionLabel action={character.lifeAction} language={language} intent={character.visibleIntent} intentZh={character.visibleIntentZh} compact className="world3d-resident-dock__action"/></button>{character.troubleSignal&&onTroubleOpen&&<button type="button" className="world3d-resident-trouble" onClick={()=>onTroubleOpen(character.id)} aria-label={language==='zh'?character.troubleSignal.summary_zh?.trim()||character.name+'似乎遇到了麻烦':character.troubleSignal.summary?.trim()||character.name+' seems troubled'}>?</button>}</div>)}
+     {characters.map(character=><div className={character.troubleSignal?'world3d-resident-entry has-trouble':'world3d-resident-entry'} key={character.id}><button type="button" className={'world3d-resident-button '+(character.id===followedCharacterId?'is-active':'')} onClick={()=>selectCharacter(character.id)}><span className="world3d-resident-avatar" aria-hidden>{character.avatar?<CharacterPortrait avatar={character.avatar}/>:character.name.slice(0,1)}<i data-state={character.worldAction?.state??'idle'}/></span><b title={character.name}>{character.name}</b>{!visibleOnCityMap(character)&&<small className="world3d-presence-label">{language==='zh'?'室内 · ':'Inside · '}{character.location.place}</small>}<ResidentActionLabel action={character.lifeAction} language={language} intent={character.visibleIntent} intentZh={character.visibleIntentZh} compact className="world3d-resident-dock__action"/></button>{character.troubleSignal&&onTroubleOpen&&<button type="button" className="world3d-resident-trouble" onClick={()=>onTroubleOpen(character.id)} aria-label={language==='zh'?character.troubleSignal.summary_zh?.trim()||character.name+'似乎遇到了麻烦':character.troubleSignal.summary?.trim()||character.name+' seems troubled'}>?</button>}</div>)}
     </nav>
     <div className="world3d-controls" aria-label={copy.title}><button type="button" onClick={showOverview} className={!focus&&!externalFocus&&!followedCharacterId?'is-active':''}><span aria-hidden>⌂</span>{copy.overview}</button>{!followedCharacterId&&<button type="button" onClick={toggleView}><span aria-hidden>{viewMode==='isometric'?'⊤':'◇'}</span>{viewMode==='isometric'?copy.top:copy.isometric}</button>}</div>
     {followedCharacter&&<aside className="world3d-follow-card"><button className="world3d-follow-card__close" type="button" onClick={showOverview} aria-label={copy.close}>×</button><span aria-hidden>{followedCharacter.name.slice(0,1)}<i data-state={followedCharacter.worldAction?.state??'idle'}/></span><div><small>{copy.follow}</small><h3>{followedCharacter.name}</h3><ResidentActionLabel action={followedCharacter.lifeAction} language={language} intent={followedCharacter.visibleIntent} intentZh={followedCharacter.visibleIntentZh} compact showStatus className="world3d-follow-card__action"/>{followedCharacter.troubleSignal&&<TroubleBubble signal={followedCharacter.troubleSignal} language={language} onOpen={onTroubleOpen?()=>onTroubleOpen(followedCharacter.id):undefined} className="world3d-follow-card__trouble"/>}<p>{followedCharacter.location.place||copy.status[followedCharacter.worldAction?.state??'idle']}</p><nav><button type="button" onClick={()=>onCharacterInteract(followedCharacter.id)}>{copy.talk}</button>{followedCharacter.householdId&&onHouseholdOpen&&<button type="button" onClick={()=>onHouseholdOpen(followedCharacter.householdId!)}>{language==='zh'?'查看住宅':'View home'}</button>}{followedCharacter.worldAction?.event_id&&followedCharacter.worldAction.state!=='event_pending'&&<button type="button" className="is-event" onClick={()=>openCharacterEvent(followedCharacter)}>{copy.viewEvent}</button>}</nav></div></aside>}

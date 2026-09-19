@@ -21,6 +21,8 @@ export function HouseholdLifeResident({resident,anchor,language,reducedMotion,pa
  const [seconds,setSeconds]=useState(0)
  const action=resident.currentAction?.source==='life'?resident.currentAction:undefined
  const active=action?.status==='performing'
+ const jointLabel=active&&action.targetNpcId&&['read','practice_hobby'].includes(action.type)
+  ?(language==='zh'?action.raw.visible_intent_zh:action.raw.visible_intent):undefined
  const expression=deriveResidentExpression({npcId:resident.id,action:resident.currentAction,animationCue:resident.animationCue,observableState:resident.observableState})
  const seated=active&&seatedAction(action?.type)&&/eat|read|tv|rest|seat|sofa/.test(anchor.id)
  const wasSeated=useRef(seated)
@@ -75,7 +77,7 @@ export function HouseholdLifeResident({resident,anchor,language,reducedMotion,pa
    animation={moving?'walk':expression.motion} lifeMotion={motion} lifeAttention={partner&&seconds%14<5?Math.max(-.45,Math.min(.45,Math.atan2(Math.sin(attention),Math.cos(attention)))):0}
    lifeProp={!moving&&seconds>=2?beat?.prop:undefined} lifeHandTarget={contact} animationPaused={reducedMotion} motionScale={.2}/>
   <Html center position={[0,1.8,0]} zIndexRange={[8,5]}>
-   <div className={`household-life-label${selected?' is-selected':''}`}><b>{resident.name}</b><span>{moving?(language==='zh'?'走到那边去':'Heading over'):active?(seconds<2&&seated?(language==='zh'?'先坐下来':'Taking a seat'):beat?.label[language]??(language==='zh'?'忙着自己的事':'Going about the day')):language==='zh'?'稍等片刻':'Taking a moment'}</span></div>
+   <div className={`household-life-label${selected?' is-selected':''}`}><b>{resident.name}</b><span>{moving?(language==='zh'?'走到那边去':'Heading over'):active?(seconds<2&&seated?(language==='zh'?'先坐下来':'Taking a seat'):jointLabel??beat?.label[language]??(language==='zh'?'忙着自己的事':'Going about the day')):language==='zh'?'稍等片刻':'Taking a moment'}</span></div>
   </Html>
  </group>
 }

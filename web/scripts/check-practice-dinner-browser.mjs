@@ -15,7 +15,7 @@ try{
  await delay(800)
  const bounds=await page.evaluate(`(()=>{const r=document.querySelector('.life-story-encounter__next button').getBoundingClientRect();return {top:r.top,bottom:r.bottom,height:r.height,viewport:innerHeight}})()`)
  assert.ok(bounds.top>=0&&bounds.bottom<=bounds.viewport&&bounds.height>=44,'Guide action must be visible without scrolling the story')
- assert.match(await page.evaluate(`document.querySelector('.life-story-encounter__next button').textContent`),/记下这一刻/)
+ assert.match(await page.evaluate(`document.querySelector('.life-story-encounter__next button').textContent`),/查看结果/)
  await click('.life-story-encounter__next button')
  await waitFor(page,`document.querySelector('.life-story-encounter__next button').textContent.includes('完成引导')`)
  if(process.env.QA_SCREENSHOT){const shot=await page.call('Page.captureScreenshot',{format:'png'});await writeFile(process.env.QA_SCREENSHOT,Buffer.from(shot.data,'base64'))}

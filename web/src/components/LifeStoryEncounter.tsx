@@ -1,16 +1,21 @@
 import {Suspense,useEffect,useMemo,useRef,useState} from 'react'
 import {AnimatePresence,motion,useReducedMotion} from 'motion/react'
-import {Canvas} from '@react-three/fiber'
+import {Canvas,useThree} from '@react-three/fiber'
 import {ContactShadows,PerspectiveCamera} from '@react-three/drei'
+import {EncounterResident3D} from '../three/characters/EncounterResident3D'
+import {SharedDrinkPerformance3D} from '../three/characters/SharedDrinkPerformance3D'
+import {isSharedDrinkStage} from '../three/characters/sharedDrinkPerformance'
+import {resolveSharedDrinkLayout,type SharedDrinkLayout} from '../three/interiors/sharedDrinkLayout'
 import {defaultAvatar} from '../avatar'
 import type {AvatarConfig,LifeInterventionOption,LifeStory,LifeStoryBeat} from '../types'
 import type {LifeLanguage} from '../life/lifeActionCatalog'
-import {deriveLifeStoryParticipantExpression} from '../life/characterExpression'
-import {CharacterEmote,DirectedCharacter3D,type CharacterMotion} from '../three/characters'
+import {conciseSceneContext} from '../life/encounterActing'
 import {IndoorEnvironment3D,INTERIOR_THEME_COPY,interiorThemeFor,type InteriorTheme} from '../three/interiors'
 import type {WorldLayoutRoom} from '../worldLayout'
 import './LifeStoryEncounter.css'
-import {StoryOutcomeCard} from './StoryOutcomeCard'
+import {AdaptiveResolution,SceneLighting,SceneLook} from '../three/rendering/SceneLook'
+import {useVisualBudget} from '../three/rendering/useVisualBudget'
+import {StoryCompletionNotice} from './StoryCompletionNotice'
 import {useSceneDialogue,type SceneWriter} from '../life/useSceneDialogue'
 
 const ROLE_COPY:Record<string,[string,string]>={visitor:['来访者','Visitor'],unavailable_host:['正忙的居民','Busy resident'],host:['被拜访者','Host'],cook:['做饭的人','Cook'],diner:['用餐的人','Diner'],owner:['物品主人','Owner'],borrower:['借用者','Borrower'],initiator:['发起者','Initiator'],affected_resident:['当事人','Resident'],alone:['独处中','On their own']}
@@ -29,6 +34,8 @@ type Props={
  guideStep?:string
  guideBusy?:boolean
  guideFailed?:boolean
+ reducedMotionOverride?:boolean
+ performancePreviewTime?:number
  onGuideComplete?:()=>Promise<void>
  onGuideRefresh?:()=>void
 }
@@ -79,40 +86,40 @@ const levelLabel=(story:LifeStory,language:LifeLanguage)=>{
  return language==='zh'?'城市里的生活片段':'A MOMENT IN THE CITY'
 }
 
-function LifeStoryCast3D({story,participants,avatars,reducedMotion,theme,language,layoutRoom,activeBeat}:{story:LifeStory;participants:{id:string;name:string}[];avatars?:Record<string,AvatarConfig>;reducedMotion:boolean;theme:InteriorTheme;language:LifeLanguage;layoutRoom?:WorldLayoutRoom;activeBeat?:LifeStoryBeat}){
+function LifeStoryCamera({drinkLayout}:{drinkLayout?:SharedDrinkLayout}){
+ const size=useThree(state=>state.size)
+ if(drinkLayout){
+  const target=drinkLayout.target,base=drinkLayout.cameraPosition,factor=size.width<600?1.18:1
+  const position=base.map((value,index)=>target[index]+(value-target[index])*factor) as [number,number,number]
+  return <PerspectiveCamera makeDefault position={position} onUpdate={camera=>camera.lookAt(...target)} fov={37} near={.1} far={45}/>
+ }
+ return <PerspectiveCamera makeDefault position={[0,2.35,size.width<600?9.5:7.8]} onUpdate={camera=>camera.lookAt(0,1.05,.15)} fov={37} near={.1} far={35}/>
+}
+
+function LifeStoryCast3D({story,participants,avatars,reducedMotion,theme,layoutRoom,activeBeat,previewTime}:{story:LifeStory;participants:{id:string;name:string}[];avatars?:Record<string,AvatarConfig>;reducedMotion:boolean;theme:InteriorTheme;language:LifeLanguage;layoutRoom?:WorldLayoutRoom;activeBeat?:LifeStoryBeat;previewTime?:number}){
+ const visualBudget=useVisualBudget()
  const cast=participants.slice(0,3),count=cast.length
- // Keep the authored furniture readable and reserve the right side for the
- // story card. The cast remains in a clear foreground lane instead of being
- // hidden behind tables, shelves, or UI.
- const positions=count===1?[-1.55]:count===2?[-2.45,-.55]:[-2.95,-1.5,-.05]
- const expressions=cast.map((person,index)=>deriveLifeStoryParticipantExpression(story,person.id,index))
+ const drinkLayout=useMemo(()=>resolveSharedDrinkLayout(layoutRoom?.placements),[layoutRoom?.placements])
+ const staging=story.presentation?.staging
+ const drink=isSharedDrinkStage(staging)&&drinkLayout.usable&&staging.participant_ids.every(id=>participants.some(person=>person.id===id))
+ const castAvatars=Object.fromEntries(cast.map((person,index)=>[person.id,avatars?.[person.id]??fallbackAvatar(person.id,index)]))
  return <div className="life-story-encounter__cast-3d" aria-hidden>
-  <Canvas dpr={[1,1.3]} shadows gl={{antialias:true,alpha:true,powerPreference:'low-power'}}>
-   <PerspectiveCamera makeDefault position={[0,2.42,8.9]} fov={37} near={.1} far={28}/>
-   <ambientLight intensity={1.15}/><hemisphereLight args={['#fff6df','#627a72',1.45]}/>
-   <directionalLight position={[-4,6,5]} intensity={2.05} color="#fff0d8" castShadow shadow-mapSize={[512,512]}/>
-   <pointLight position={[3,2.4,2]} intensity={5.5} distance={8} color="#f1a67d"/>
+  <Canvas dpr={visualBudget.dpr} shadows="percentage" gl={{antialias:true,alpha:true,powerPreference:'low-power'}}>
+   <LifeStoryCamera drinkLayout={drink?drinkLayout:undefined}/>
+   <SceneLook/><SceneLighting portrait/><AdaptiveResolution onTier={visualBudget.onTier}/>
    <Suspense fallback={null}><IndoorEnvironment3D theme={theme} placements={layoutRoom?.placements}/></Suspense>
-   {cast.map((person,index)=>{
-    const authoredCue=activeBeat?(activeBeat.speaker_id===person.id?activeBeat.animation_cue:activeBeat.speaker_id?'listen':activeBeat.animation_cue):story.presentation?.beats?.find(beat=>beat.speaker_id===person.id)?.animation_cue
-    const animation=(authoredCue??expressions[index].motion) as CharacterMotion
-    const x=positions[index]??0,rotation=x===0?0:x<0?.42:-.42
-    return <group key={person.id} position={[x,-.15,.42+(index===1&&count===3?.12:0)]} rotation={[0,rotation,0]}>
-     <DirectedCharacter3D avatar={avatars?.[person.id]??fallbackAvatar(person.id,index)} animation={animation} performance={story.presentation?.performance} performanceMode="encounter" performanceKey={`${story.id}:${story.status}:${activeBeat?.id??activeBeat?.phase??'scene'}:${animation}`} performanceVariant={index} reducedMotion={reducedMotion} name={person.name} seed={person.id} scale={count===3?.65:.78}/>
-    </group>
-   })}
+   {drink?<SharedDrinkPerformance3D key={`${story.id}:${staging.phase}`} staging={staging} participants={cast} participantAvatars={castAvatars} activeBeat={activeBeat} reducedMotion={reducedMotion} placements={layoutRoom?.placements} previewTime={previewTime}/>:cast.map((person,index)=><EncounterResident3D key={person.id} story={story} person={person} index={index} count={count} avatar={castAvatars[person.id]} activeBeat={activeBeat} reducedMotion={reducedMotion}/>)}
    <ContactShadows position={[0,-.24,.15]} opacity={.29} scale={7.4} blur={2.5} far={4}/>
   </Canvas>
-  <div className="life-story-encounter__emotes">{cast.map((person,index)=><span key={`${person.id}:${expressions[index].key}`} title={expressions[index].label[language]}><CharacterEmote expression={expressions[index]} language={language} size={35} decorative/></span>)}</div>
  </div>
 }
 
-export function LifeStoryEncounter({story,language='zh',locationName,locationImage,participantAvatars,layoutRooms=[],onClose,onObserve,onIntervene,onDialogue,guideStep,guideBusy,guideFailed,onGuideComplete,onGuideRefresh}:Props){
- const reduce=useReducedMotion(),closeRef=useRef<HTMLButtonElement>(null),storyIdRef=useRef(story.id),bodyRef=useRef<HTMLDivElement>(null),outcomeRef=useRef<HTMLDivElement>(null),previousStatus=useRef<LifeStory['status']>(story.status)
+export function LifeStoryEncounter({story,language='zh',locationName,participantAvatars,layoutRooms=[],onClose,onObserve,onIntervene,onDialogue,guideStep,guideBusy,guideFailed,onGuideComplete,onGuideRefresh,reducedMotionOverride,performancePreviewTime}:Props){
+ const systemReducedMotion=useReducedMotion(),reduce=reducedMotionOverride??systemReducedMotion,closeRef=useRef<HTMLButtonElement>(null),storyIdRef=useRef(story.id)
  const [current,setCurrent]=useState(story),[busy,setBusy]=useState(''),[error,setError]=useState(''),[observedLocally,setObservedLocally]=useState(Boolean(story.observed_at)),[revealedBeatCount,setRevealedBeatCount]=useState(reduce?(story.presentation?.beats?.length??0):Math.min(1,story.presentation?.beats?.length??0))
  useEffect(()=>{const changed=storyIdRef.current!==story.id;storyIdRef.current=story.id;setCurrent(story);setObservedLocally(Boolean(story.observed_at));if(changed){setError('');setRevealedBeatCount(reduce?(story.presentation?.beats?.length??0):Math.min(1,story.presentation?.beats?.length??0))}},[reduce,story])
  const dialogue=useSceneDialogue(current,onDialogue)
- const presentation=dialogue.enabled?dialogue.result?.presentation:current.presentation
+ const presentation=useMemo(()=>dialogue.enabled?{...current.presentation,...dialogue.result?.presentation,beats:dialogue.result?.presentation.beats??[]}:current.presentation,[current.presentation,dialogue.enabled,dialogue.result?.presentation])
  useEffect(()=>{setRevealedBeatCount(1)},[dialogue.key,dialogue.result?.cache_key])
  useEffect(()=>{closeRef.current?.focus()},[])
  useEffect(()=>{const close=(event:globalThis.KeyboardEvent)=>{if(event.key==='Escape'&&!busy)onClose()};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close)},[busy,onClose])
@@ -135,15 +142,17 @@ export function LifeStoryEncounter({story,language='zh',locationName,locationIma
  // An AI request or long exchange must not consume a limited intervention window.
  const performanceComplete=dialogue.enabled||revealedBeatCount>=beats.length
  const choicesRef=useRef<HTMLDivElement>(null)
-
+ const autoWitnessed=useRef(new Set<string>())
+ // Watching is a player-facing read receipt, never a command to create NPC memory.
  useEffect(()=>{
-  if(terminal&&!TERMINAL.has(previousStatus.current)){
-   const scroller=bodyRef.current,outcome=outcomeRef.current
-   if(scroller&&outcome)scroller.scrollTo({top:Math.max(0,scroller.scrollTop+outcome.getBoundingClientRect().top-scroller.getBoundingClientRect().top-12),behavior:reduce?'instant':'smooth'})
-   outcomeRef.current?.focus({preventScroll:true})
-  }
-  previousStatus.current=current.status
- },[current.status,terminal,reduce])
+  if(!terminal||!canObserve||guideStep||dialogue.loading||revealedBeatCount<beats.length||autoWitnessed.current.has(current.id))return
+  autoWitnessed.current.add(current.id)
+  let active=true
+  void onObserve(current).then(result=>{if(active){setCurrent(result);setObservedLocally(true)}}).catch(()=>{
+   // A failed read receipt must not block the scene or invent a memory.
+  })
+  return()=>{active=false}
+ },[terminal,canObserve,guideStep,dialogue.loading,revealedBeatCount,beats.length,current,onObserve])
 
  useEffect(()=>{
   if(reduce){setRevealedBeatCount(beats.length);return}
@@ -174,28 +183,24 @@ export function LifeStoryEncounter({story,language='zh',locationName,locationIma
     <div><small>{levelLabel(current,language)}{locationName?` · ${locationName}`:''}</small><h2 id="life-story-title">{title.primary}</h2></div>
     <button ref={closeRef} type="button" onClick={onClose} disabled={Boolean(busy)} aria-label={language==='zh'?'关闭事件详情':'Close story details'}>×</button>
    </header>
-   <div ref={bodyRef} className="life-story-encounter__scroll">
-   <section className="life-story-encounter__scene" data-interior-theme={interiorTheme} style={locationImage?{backgroundImage:`linear-gradient(180deg,rgba(229,240,233,.26),rgba(105,137,128,.5)),url("${locationImage}")`}:undefined}>
+   <StoryCompletionNotice story={current} language={language} ready={terminal&&!dialogue.loading&&(reduce||revealedBeatCount>=beats.length)} delay={beats.length?Math.min(4200,Math.max(1800,activeBeat?.duration_ms??2400)):300}/>
+   <div className="life-story-encounter__scroll">
+   <section className="life-story-encounter__scene" data-interior-theme={interiorTheme}>
     <span className="life-story-encounter__scene-kind">{interiorCopy}</span>
     <div className="life-story-encounter__cast" aria-label={language==='zh'?'参与者':'Participants'}>
-     <LifeStoryCast3D story={{...current,presentation}} participants={participants} avatars={participantAvatars} reducedMotion={Boolean(reduce)} theme={interiorTheme} language={language} layoutRoom={authoredRoom} activeBeat={activeBeat}/>
-     <div className="life-story-encounter__cast-names">{participants.slice(0,3).map((person,index)=><motion.b key={person.id} initial={reduce?false:{opacity:0,y:8}} animate={{opacity:1,y:0}} transition={{delay:reduce?0:index*.08}}>{person.name}{ROLE_COPY[dialogue.result?.roles[person.id]??'']&&<small>{ROLE_COPY[dialogue.result?.roles[person.id]??''][language==='zh'?0:1]}</small>}</motion.b>)}</div>
+     <LifeStoryCast3D story={{...current,presentation}} participants={participants} avatars={participantAvatars} reducedMotion={Boolean(reduce)} theme={interiorTheme} language={language} layoutRoom={authoredRoom} activeBeat={activeBeat} previewTime={performancePreviewTime}/>
+     <div className="life-story-encounter__cast-names is-accessible-only">{participants.slice(0,3).map(person=><b key={person.id}>{person.name}{ROLE_COPY[dialogue.result?.roles[person.id]??'']&&<small>{ROLE_COPY[dialogue.result?.roles[person.id]??''][language==='zh'?0:1]}</small>}</b>)}</div>
      {participants.length>3&&<span className="life-story-encounter__more">+{participants.length-3}</span>}
-    </div>
-    <div className="life-story-encounter__summary">
-
-     <p>{summary.primary}</p>
     </div>
    </section>
    <section className="life-story-encounter__body">
+    <p className="life-story-encounter__context">{conciseSceneContext(summary.primary)}</p>
     {guideStep&&<section className="life-story-encounter__guide" aria-label={language==='zh'?'引导提示':'Guide hint'}><p>{language==='zh'?(guideStep==='result'?'看看他们的回应。':'听听他们怎么说，再选一个回应。'):(guideStep==='result'?'See how they responded.':'Listen, then choose a response.')}</p>{guideFailed&&<button type="button" disabled={guideBusy} onClick={onGuideRefresh}>{language==='zh'?'重试同步':'Retry sync'}</button>}</section>}
 
-    {canObserve&&terminal&&<button type="button" className="life-story-encounter__observe is-terminal" disabled={Boolean(busy)} onClick={()=>void observe()}><span aria-hidden>◉</span><b>{busy==='observe'?(language==='zh'?'正在记录…':'Recording…'):(language==='zh'?'记下这一刻':'Remember this moment')}</b></button>}
 
     {current.level==='thread'&&aftermath.primary&&<div className="life-story-encounter__thread-note"><b>{language==='zh'?'目前留下的痕迹':'What remains so far'}</b><p>{aftermath.primary}</p></div>}
     {beats.length>0&&<div className="life-story-encounter__beats" aria-live="polite"><AnimatePresence initial={false}>{visibleBeats.map((beat,index)=>{const personIndex=participants.findIndex(item=>item.id===beat.speaker_id),person=personIndex>=0?participants[personIndex]:undefined,english=beat.text?.trim()||beat.translation_zh?.trim()||'',translation=language==='zh'&&beat.translation_zh?.trim()!==english?beat.translation_zh?.trim():'';return <motion.blockquote key={beat.id??`${beat.speaker_id??'narrator'}-${index}`} className={`${personIndex%2===1?'is-right ':''}${index===visibleBeats.length-1?'is-active':''}`} initial={reduce?false:{opacity:0,y:14,scale:.975}} animate={{opacity:1,y:0,scale:1}} transition={{type:'spring',stiffness:320,damping:27}}><b>{person?.name??(language==='zh'?'现场':'At the scene')}{beat.addressee_id&&<small> → {participants.find(item=>item.id===beat.addressee_id)?.name}</small>}</b><p lang="en">{english}</p>{translation&&<small lang="zh-CN">{translation}</small>}</motion.blockquote>})}</AnimatePresence></div>}
-    {dialogue.enabled&&(dialogue.loading||dialogue.failed||dialogue.result?.source==='fallback')&&<div className="life-story-encounter__writer" role="status">{dialogue.loading?(language==='zh'?'对话加载中…':'Loading dialogue…'):dialogue.result?.reason==='budget'&&dialogue.result.retryable===false?(language==='zh'?'今日对白额度已用完':'Daily dialogue limit reached'):<><span>{language==='zh'?'对白未加载':'Dialogue unavailable'}</span><button type="button" onClick={dialogue.retry}>{language==='zh'?'重试':'Retry'}</button></>}</div>}
-    {terminal&&<div ref={outcomeRef} tabIndex={-1}><StoryOutcomeCard story={current} language={language}/></div>}
+    {dialogue.enabled&&(dialogue.loading||dialogue.failed||dialogue.result?.source==='fallback')&&<div className="life-story-encounter__writer" role="status">{dialogue.loading?<><span>{language==='zh'?'对话加载中…':'Loading dialogue…'}</span><button type="button" onClick={dialogue.cancel}>{language==='zh'?'跳过等待':'Skip waiting'}</button></>:dialogue.result?.reason==='budget'&&dialogue.result.retryable===false?(language==='zh'?'今日对白额度已用完':'Daily dialogue limit reached'):<><span>{dialogue.failure==='timeout'?(language==='zh'?'连接超时':'Connection timed out'):dialogue.failure==='changed'?(language==='zh'?'事情有了新进展':'The situation has changed'):dialogue.failure==='cancelled'?(language==='zh'?'已跳过对白':'Dialogue skipped'):(language==='zh'?'对白未加载':'Dialogue unavailable')}</span><button type="button" onClick={dialogue.retry}>{language==='zh'?'重试':'Retry'}</button></>}</div>}
     <div ref={choicesRef}/><AnimatePresence mode="wait" initial={false}>
      {performanceComplete&&!terminal&&<motion.div key="open" className="life-story-encounter__choices" initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-6}}>
       {canObserve&&<button type="button" className="life-story-encounter__observe" disabled={Boolean(busy)} onClick={()=>void observe()}><span aria-hidden>◉</span><b>{busy==='observe'?(language==='zh'?'正在记录…':'Recording…'):(language==='zh'?'观察这一刻':'Witness this moment')}</b></button>}
@@ -209,7 +214,7 @@ export function LifeStoryEncounter({story,language='zh',locationName,locationIma
    </div>
    {guideStep&&<footer className="life-story-encounter__next" aria-label={language==='zh'?'引导下一步':'Next guide step'}>
     <small aria-live="polite">{guideFailed?(language==='zh'?'同步失败':'Sync failed'):terminal?(language==='zh'?'看看后续':'See what happened'):observed?(language==='zh'?'等待后续':'Waiting for the outcome'):language==='zh'?'选择下一步':'Choose your next step'}</small>
-    {guideFailed?<button disabled={guideBusy} onClick={onGuideRefresh}>{language==='zh'?'重试同步':'Retry sync'}</button>:guideStep==='result'?<button disabled={guideBusy} onClick={()=>void onGuideComplete?.()}>{language==='zh'?'我看到了后果 · 完成引导':'I see the consequences · Finish guide'}</button>:canObserve?<button disabled={Boolean(busy)||Boolean(guideBusy)||(!terminal&&!performanceComplete)} onClick={()=>void observe()}>{busy?(language==='zh'?'正在记录…':'Recording…'):terminal?(language==='zh'?'记下这一刻 · 查看后果':'Remember this moment · See consequences'):!performanceComplete?(language==='zh'?'正在观看交流…':'Watching the exchange…'):language==='zh'?'观察这一刻 · 不替他们决定':'Witness · Leave the decision to them'}</button>:<button onClick={onClose}>{language==='zh'?'继续逛城市，等待结果':'Explore while the outcome unfolds'}</button>}
+    {guideFailed?<button disabled={guideBusy} onClick={onGuideRefresh}>{language==='zh'?'重试同步':'Retry sync'}</button>:guideStep==='result'?<button disabled={guideBusy} onClick={()=>void onGuideComplete?.()}>{language==='zh'?'我看到了后果 · 完成引导':'I see the consequences · Finish guide'}</button>:canObserve?<button disabled={Boolean(busy)||Boolean(guideBusy)||(!terminal&&!performanceComplete)} onClick={()=>void observe()}>{busy?(language==='zh'?'正在同步…':'Syncing…'):terminal?(language==='zh'?'查看结果':'See what happened'):!performanceComplete?(language==='zh'?'正在观看交流…':'Watching the exchange…'):language==='zh'?'继续观察':'Keep watching'}</button>:<button onClick={onClose}>{language==='zh'?'继续逛城市，等待结果':'Explore while the outcome unfolds'}</button>}
     {!terminal&&performanceComplete&&current.management?.can_intervene&&options.length>0&&<button className="is-secondary" onClick={()=>choicesRef.current?.scrollIntoView({behavior:reduce?'instant':'smooth',block:'start'})}>{language==='zh'?'看看可以怎么帮忙':'See ways to help'}</button>}
    </footer>}
   </motion.article>

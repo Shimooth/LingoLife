@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict'
+import {readFileSync} from 'node:fs'
+const previewSource=readFileSync(new URL('../src/components/HouseholdInteriorPreview.tsx',import.meta.url),'utf8')
+assert.doesNotMatch(previewSource,/脚下金色圆圈|共享住宅实时切面|className="household-resident-focus"/)
+assert.match(previewSource,/className="household-focus-actions"/,'functional locate/talk controls must survive the copy cleanup')
 import {householdResidentRoom,privateHouseholdActivity} from '../src/life/householdLocation.ts'
 const rooms=[{id:'shared-kitchen',kind:'kitchen'},{id:'shared-lounge',kind:'living_room'}]
 const resident={id:'aria',isHome:true,roomId:'kitchen',currentAction:{source:'life',type:'read',raw:{}}}

@@ -26,3 +26,14 @@
 .life-story-encounter__writer{padding:10px 12px;border-radius:12px;background:#f1f4eb;color:#63786e;font-size:.68rem;line-height:1.6}
 .life-story-encounter__writer span{display:block;margin-top:6px}
 .life-story-encounter__writer{display:flex;align-items:center;gap:12px;padding:8px 0;background:transparent;font-size:.75rem}.life-story-encounter__writer span{margin:0}.life-story-encounter__writer button{border:1px solid #b9cfc2;border-radius:999px;background:#edf4ec;color:#46675a;padding:6px 14px;cursor:pointer}
+.life-story-encounter__scene{min-height:380px;background:#dce6de}
+.life-story-encounter__scene:after{display:none}
+.life-story-encounter__cast-names.is-accessible-only{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;padding:0}
+.life-story-encounter__context{margin:0;color:#6e786e;font-size:.8rem;line-height:1.65;text-wrap:pretty}
+.life-story-encounter__beats p{font-size:.9rem;line-height:1.6}
+.life-story-encounter__beats small{font-size:.75rem;line-height:1.6}
+.life-story-encounter{grid-template-columns:minmax(0,1fr)}
+.life-story-encounter>article{min-width:0;max-width:100%}
+.life-story-encounter__body,.life-story-encounter__beats{min-width:0;grid-template-columns:minmax(0,1fr)}
+.life-story-encounter__beats blockquote{min-width:0;overflow-wrap:anywhere}
+@media(max-width:650px){.life-story-encounter__scene{min-height:330px}.life-story-encounter__context{font-size:.78rem}.life-story-encounter__beats blockquote{width:90%}}

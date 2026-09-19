@@ -11,6 +11,7 @@ import inspect
 import uuid
 import json
 import queue
+import asyncio
 from typing import Optional
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -41,6 +42,8 @@ from .agent import (advance_goal, advance_relationship, advance_runtime, compile
                     project_public_life_context, project_public_memories, time_slot)
 from .config import Settings, load_settings
 from .life_expression import LifeExpressionService
+from .pair_memory_service import PairMemoryService
+from .pair_memory import recall as recall_pair_memory, moment as memory_moment
 from .city import CITY_LOCATIONS, LOCATION_BY_ID, city_payload
 from .chat_journal import (ChatRequestConflict, ChatTurnLeaseLost,
                            preview_event_advance)
@@ -111,10 +114,26 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
     expressions = LifeExpressionService(db, provider, settings)
     if life_world is not None:
         life_world.expression_service = expressions
+    memories = PairMemoryService(life_world, provider, settings) if life_world is not None else None
+    if life_world is not None:
+        life_world.memory_service = memories
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        yield
+        stop = asyncio.Event()
+        async def review_memories():
+            while not stop.is_set():
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=15)
+                except asyncio.TimeoutError:
+                    if memories is not None:
+                        await asyncio.to_thread(memories.tick)
+        task = asyncio.create_task(review_memories())
+        try:
+            yield
+        finally:
+            stop.set()
+            await task
 
     app = FastAPI(title="LingoLife", version=settings.version, lifespan=lifespan)
     attempt_lock = threading.Lock()
@@ -488,7 +507,14 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
     def login(body: LoginRequest, request: Request):
         rate_limit("login", request, maximum=10, window_seconds=15 * 60)
         username = body.username.strip()
-        result = db.login(username, body.password)
+        # Development-only escape hatch. Reject public/proxied requests even
+        # when a developer accidentally enables the setting on another host.
+        local_request = (
+            request.client is not None and request.client.host in {'127.0.0.1', '::1'}
+            and request.url.hostname in {'localhost', '127.0.0.1', '::1'}
+            and not any(name in request.headers for name in ('forwarded', 'x-forwarded-for', 'x-forwarded-host'))
+        )
+        result = db.login(username, body.password, local_master_hash=settings.local_master_password_hash if local_request else None)
         if not result:
             raise HTTPException(401, {"code": "INVALID_CREDENTIALS", "message": "Username or password is incorrect."})
         user, token = result
@@ -891,7 +917,12 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         except KeyError:
             raise HTTPException(404, "Life story was not found.")
         return expressions.scene(user["player_id"], story, state["stories"][story_id],
-                                 {entry["id"]: entry["profile"] for entry in entries}, retry=retry)
+                                 {entry["id"]: entry["profile"] for entry in entries}, retry=retry,
+                                 memories={npc_id: [pair for pair in recall_pair_memory(state, npc_id, now=datetime.now(timezone.utc),
+                                                       before=memory_moment(story.get('created_at') or story.get('updated_at')),
+                                                       exclude_source=(state['stories'][story_id].get('collision') or {}).get('id'))
+                                                       if pair['target_id'] in story['participant_ids']]
+                                           for npc_id in story['participant_ids']})
 
     @app.post(settings.api_prefix + "/life-stories/{story_id}/observe")
     def observe_life_story(story_id: str, authorization: Optional[str] = Header(None)):

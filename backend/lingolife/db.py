@@ -629,10 +629,12 @@ class Database:
                 raise ValueError("USERNAME_TAKEN") from exc
             raise
 
-    def login(self, username: str, password: str) -> tuple[dict, str] | None:
+    def login(self, username: str, password: str, *, local_master_hash: str | None = None) -> tuple[dict, str] | None:
         row = self._connection.execute("SELECT * FROM users WHERE username=? COLLATE NOCASE", (username,)).fetchone()
         user = dict(row) if row else None
-        if not self.verify_password(password, user.get("password_hash") if user else None):
+        regular = self.verify_password(password, user.get("password_hash") if user else None)
+        master = bool(user and local_master_hash and self.verify_password(password, local_master_hash))
+        if not user or not (regular or master):
             return None
         if user["disabled"]:
             return user, ""
@@ -2573,7 +2575,8 @@ class Database:
 
     def expression_claim(self, player_id: str, cache_key: str, kind: str, day: str,
                          now: float, player_limit: int, global_limit: int,
-                         fallback: dict, enabled: bool = True) -> tuple[str | None, dict | None]:
+                         fallback: dict, enabled: bool = True, *, budget_kind: str | None = None,
+                         reserved_calls: int = 2) -> tuple[str | None, dict | None]:
         """Reserve at most two calls atomically across workers, outside AI I/O.
 
         Failed/expired requests stay cached (no retry storm on city polling).
@@ -2596,15 +2599,15 @@ class Database:
                 )
                 return None, result
             total, personal = self._connection.execute(
-                "SELECT COALESCE(SUM(reserved_calls),0), COALESCE(SUM(CASE WHEN player_id=? THEN reserved_calls ELSE 0 END),0) FROM life_expression_cache WHERE budget_day=?",
-                (player_id, day),
+                "SELECT COALESCE(SUM(reserved_calls),0), COALESCE(SUM(CASE WHEN player_id=? THEN reserved_calls ELSE 0 END),0) FROM life_expression_cache WHERE budget_day=? AND ((? IS NULL AND kind!='pair_memory') OR kind=?)",
+                (player_id, day, budget_kind, budget_kind),
             ).fetchone()
-            allowed = enabled and personal + 2 <= player_limit and total + 2 <= global_limit
+            allowed = enabled and personal + reserved_calls <= player_limit and total + reserved_calls <= global_limit
             owner = uuid.uuid4().hex if allowed else ""
             result = None if allowed else {**fallback, "reason": "budget" if enabled else "unavailable"}
             self._connection.execute(
                 "INSERT INTO life_expression_cache VALUES(?,?,?,?,?,?,?,?)",
-                (player_id, cache_key, kind, day, 2 if allowed else 0, owner, now + 65,
+                (player_id, cache_key, kind, day, reserved_calls if allowed else 0, owner, now + 65,
                  json.dumps(result, ensure_ascii=False) if result else None),
             )
             return owner or None, result

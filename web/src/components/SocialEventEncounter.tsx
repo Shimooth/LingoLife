@@ -1,12 +1,15 @@
 import {motion,useReducedMotion} from 'motion/react'
 import {Canvas} from '@react-three/fiber'
 import {ContactShadows,PerspectiveCamera} from '@react-three/drei'
+import {CharacterOverhead} from '../three/characters/CharacterOverhead'
 import {useEffect,useMemo,useState} from 'react'
 import {defaultAvatar} from '../avatar'
 import {deriveSocialParticipantExpression} from '../life/characterExpression'
 import {CharacterEmote,DirectedCharacter3D} from '../three/characters'
 import type {AvatarConfig,SocialAction,SocialInteraction} from '../types'
 import './SocialEventEncounter.css'
+import {AdaptiveResolution,SceneLighting,SceneLook} from '../three/rendering/SceneLook'
+import {useVisualBudget} from '../three/rendering/useVisualBudget'
 
 const actionLabels:Record<'zh'|'en',Record<SocialAction,string>>={
  zh:{mediate:'帮忙调解',encourage:'鼓励他们',give_space:'给彼此空间',let_them_handle_it:'让他们自己处理'},
@@ -67,17 +70,18 @@ const fallbackAvatar=(id:string,index:number):AvatarConfig=>{
 }
 
 function EncounterCast3D({event,avatars,reducedMotion}:{event:SocialInteraction;avatars?:Record<string,AvatarConfig>;reducedMotion:boolean}){
+ const visualBudget=useVisualBudget()
  const traveling=event.status==='traveling'
  return <div className="social-encounter__cast-3d" aria-hidden>
-  <Canvas dpr={[1,1.45]} gl={{antialias:true,alpha:true}}>
+  <Canvas shadows="percentage" dpr={visualBudget.dpr} gl={{antialias:true,alpha:true}}>
    <PerspectiveCamera makeDefault position={[0,2.05,7]} fov={35} near={.1} far={24}/>
-   <ambientLight intensity={1.2}/><hemisphereLight args={['#fff5dc','#657a72',1.55]}/>
-   <directionalLight position={[-4,6,5]} intensity={2.2} color="#fff0d5" castShadow/>
-   <pointLight position={[3,2.5,2]} intensity={7} distance={8} color="#f2a97b"/>
+   <SceneLook/><SceneLighting portrait/><AdaptiveResolution onTier={visualBudget.onTier}/>
    {event.participants.slice(0,2).map((person,index)=>{
     const expression=deriveSocialParticipantExpression(event,person.id,index)
     return <group key={person.id} position={[index?1.34:-1.34,-.1,index?.05:0]} rotation={[0,index?-.48:.48,0]}>
+     <CharacterOverhead label={<CharacterEmote expression={expression} size={30} decorative/>}>
      <DirectedCharacter3D avatar={avatars?.[person.id]??fallbackAvatar(person.id,index)} animation={expression.motion} performanceMode={traveling?'journey':'encounter'} performanceKey={`${event.id}:${event.status}:${expression.key}`} performanceVariant={index} reducedMotion={reducedMotion} name={person.name} seed={person.id} scale={.8}/>
+     </CharacterOverhead>
     </group>
    })}
    <ContactShadows position={[0,-.2,0]} opacity={.3} scale={6} blur={2.4} far={4}/>
@@ -106,7 +110,6 @@ export function SocialEventEncounter({event,locationName,locationImage,participa
    <header><div><small>{zh?'正在发生 · ': 'HAPPENING NOW · '}{locationName||current.location_id}</small><h2>{zh?'居民之间的生活片段':'A moment between residents'}</h2></div><button type="button" onClick={onClose} aria-label={zh?'关闭':'Close'}>×</button></header>
 	   <section className="social-encounter__stage" style={locationImage?{backgroundImage:`linear-gradient(180deg,rgba(216,235,223,.66),rgba(185,216,214,.88)),url("${locationImage}")`}:undefined}>
 	    <EncounterCast3D event={current} avatars={participantAvatars} reducedMotion={Boolean(reduce)}/>
-	    <div className="social-encounter__emotes" aria-hidden>{current.participants.slice(0,2).map((person,index)=>{const expression=deriveSocialParticipantExpression(current,person.id,index);return <CharacterEmote key={`${person.id}:${expression.key}`} expression={expression} language={language} size={36} decorative/>})}</div>
 	    <div className="social-encounter__cast">{current.participants.map((person,index)=><span key={person.id}><b>{person.name}</b>{index===0&&<em>×</em>}</span>)}</div>
     {resolved?<div className="social-encounter__beats">{lines.map((line,index)=><motion.blockquote key={`${line.speaker}-${index}`} initial={reduce?false:{opacity:0,y:12,scale:.96}} animate={{opacity:1,y:0,scale:1}} transition={{delay:reduce?0:index*.22}} className={index%2?'is-right':''}><b>{line.speaker}</b><p>{line.text}</p>{zh&&<small>{line.zh}</small>}</motion.blockquote>)}</div>:<div className="social-encounter__preview"><span aria-hidden>{current.status==='traveling'?'➜':'!'}</span><h3>{previewCopy.title}</h3><p>{previewCopy.summary}</p></div>}
    </section>

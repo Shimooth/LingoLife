@@ -7,6 +7,7 @@ import {HouseholdDinnerPanel} from './HouseholdDinnerPanel'
 import type {HouseholdResidentVisual} from './householdVisuals'
 import type {WorldLayoutRoom} from '../worldLayout'
 import './HouseholdInspector.css'
+import {CharacterPortrait} from './CharacterPortrait'
 
 type Props={residentFocus?:HouseholdResidentFocus;household:Household|null;gameDate?:string;language?:LifeLanguage;residentNames?:Record<string,string>;residentVisuals?:HouseholdResidentVisual[];layoutRooms?:readonly WorldLayoutRoom[];onClose:()=>void;onMemberSelect?:(npcId:string)=>void;onDinnerCommand?:(action:'propose'|'cleanup')=>Promise<void>;className?:string}
 
@@ -37,7 +38,7 @@ function RoomSection({room,resources,language}:{room:HouseholdRoom;resources:Hou
 }
 
 export function HouseholdInspector({residentFocus,household,gameDate,language='zh',residentNames={},residentVisuals=[],layoutRooms=[],onClose,onMemberSelect,onDinnerCommand,className=''}:Props){
- const [expanded,setExpanded]=useState(false)
+ const [expanded,setExpanded]=useState(true)
  const [focus,setFocus]=useState(residentFocus)
  useEffect(()=>{setFocus(residentFocus)},[residentFocus])
  const [kitchenRequest,setKitchenRequest]=useState(0)
@@ -48,12 +49,13 @@ export function HouseholdInspector({residentFocus,household,gameDate,language='z
  const privateRooms=new Map(members.flatMap(member=>typeof member==='string'||!member.private_room_id?[]:[[member.npc_id,member.private_room_id] as const]))
  const boundResidentVisuals=residentVisuals.map(resident=>({...resident,privateRoomId:privateRooms.get(resident.id)??resident.privateRoomId}))
  return <aside className={`household-inspector ${expanded?'is-life-expanded':''} ${className}`.trim()} role="dialog" aria-modal="true" aria-label={language==='zh'?'住宅概况':'Household overview'}>
-  <header><div><small>{language==='zh'?'2～8 人共同生活':'2–8 RESIDENTS LIVING TOGETHER'}</small><h2>{household?.name??(language==='zh'?'正在打开住宅…':'Opening the household…')}</h2><p>{language==='zh'?'一套正式住宅：连贯的共享客厅、厨房与浴室，以及 8 间固定归属的私人卧室。':'One complete residence: connected lounge, kitchen and bathroom, plus eight resident-owned private bedrooms.'}</p></div><button type="button" onClick={onClose} aria-label={language==='zh'?'关闭':'Close'}>×</button></header>
+  <header><div><h2>{household?.name??(language==='zh'?'住宅':'Home')}</h2></div><button type="button" onClick={onClose} aria-label={language==='zh'?'关闭':'Close'}>×</button></header>
+  {household&&<nav className="household-cast-strip" aria-label={language==='zh'?'选择居民':'Choose resident'}>{boundResidentVisuals.map(resident=><button key={resident.id} type="button" aria-pressed={focus?.id===resident.id} onClick={()=>setFocus(previous=>({id:resident.id,request:(previous?.request??0)+1}))}><CharacterPortrait avatar={resident.avatar}/><span>{resident.name}</span><i className={resident.isHome===false?'is-away':''}/></button>)}</nav>}
   {household&&<HouseholdInteriorPreview rooms={resourceRooms} resources={resources} language={language} residents={boundResidentVisuals} layoutRooms={layoutRooms} life={household?.life} kitchenRequest={kitchenRequest} residentFocus={focus} onMemberInteract={onMemberSelect}/>}
-  {household&&<button type="button" className="household-expand" aria-pressed={expanded} onClick={()=>setExpanded(value=>!value)}>{expanded?(language==='zh'?'返回住宅概况':'Back to overview'):(language==='zh'?'放大看看他们的生活':'Watch life up close')}</button>}
+  {household&&<button type="button" className="household-expand" aria-expanded={!expanded} onClick={()=>setExpanded(value=>!value)}>{expanded?(language==='zh'?'共餐与住宅详情 ↑':'Meals & household details ↑'):(language==='zh'?'返回房间 ↓':'Back to the room ↓')}</button>}
   {household?<div className="household-inspector__body">
    <HouseholdDinnerPanel gameDate={gameDate} dinner={household.life?.dinner} language={language} names={residentNames} onCommand={onDinnerCommand} onWatch={()=>{setKitchenRequest(value=>value+1);setExpanded(true)}}/>
-   <section className="household-members"><h3>{language==='zh'?'住在这里的人':'Residents'}</h3><div>{members.map(member=>{const name=member.name||residentNames[member.npc_id]||member.npc_id;return onMemberSelect?<button type="button" key={member.npc_id} onClick={()=>setFocus(previous=>({id:member.npc_id,request:(previous?.request??0)+1}))}><span>{name.slice(0,1)}</span><b>{name}</b><small>{language==='zh'?'定位这位居民':'Locate this resident'}</small></button>:<article key={member.npc_id}><span>{name.slice(0,1)}</span><b>{name}</b></article>})}</div></section>
+   <section className="household-members"><h3>{language==='zh'?'居民':'Residents'}</h3><div>{members.map(member=>{const name=member.name||residentNames[member.npc_id]||member.npc_id;return onMemberSelect?<button type="button" key={member.npc_id} onClick={()=>setFocus(previous=>({id:member.npc_id,request:(previous?.request??0)+1}))}><span>{name.slice(0,1)}</span><b>{name}</b></button>:<article key={member.npc_id}><span>{name.slice(0,1)}</span><b>{name}</b></article>})}</div></section>
    <div className="household-rooms">{resourceRooms.length?resourceRooms.map(room=><RoomSection key={room.id} room={room} resources={resources.filter(resource=>resource.room_id===room.id||(room.resource_ids??[]).includes(resource.id))} language={language}/>):<p className="household-inspector__quiet">{language==='zh'?'住宅房间还在准备中，居民资料已经可以查看。':'The rooms are still being prepared, but the residents are available.'}</p>}</div>
   </div>:<div className="household-inspector__loading" role="status"><i/><p>{language==='zh'?'正在看看家里发生了什么…':'Checking what is happening at home…'}</p></div>}
  </aside>

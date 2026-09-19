@@ -71,6 +71,15 @@ def _collision_story_id(state):
                 if record.get("collision"))
 
 
+def test_legacy_resident_without_editable_profile_does_not_block_story_loading():
+    engine, profiles, state = _world()
+    old_inventory = deepcopy(state['residents']['emma']['personal_inventory'])
+    remaining = {'alex': profiles['alex']}
+    result = engine.advance(state, remaining, now=NOW + timedelta(seconds=1))
+    assert result['residents']['emma']['personal_inventory'] == old_inventory
+    assert result['residents']['alex']['current_action'] is not None
+
+
 def _reopen_intervention(state, story_id, *, now=NOW, extra_actions=()):
     result = deepcopy(state)
     story = result["stories"][story_id]["story"]
@@ -871,7 +880,18 @@ def test_thirty_day_soak_remains_json_ready_bounded_and_keeps_every_npc_acting()
                for item in state["resources"] if item["kind"] == "kitchen")
     channels = [pair["channels"] for pair in state["relationships"].values()]
     assert any(value["friendship"] in {"friend", "close_friend"} for value in channels)
-    assert any(value["conflict"] != "none" for value in channels)
+    # Joint sessions change the trajectory; a dispute may have cooled by the
+    # exact day-30 snapshot. Require real harmful evidence during the run, not
+    # an arbitrary permanent feud among warm/quiet residents at the deadline.
+    assert any(
+        sum(int(edge.get('evidence_counts', {}).get(kind, 0))
+            for kind in ('conflict', 'boundary_violation', 'neglect', 'hostile_act')) > 0
+        for pair in state['relationships'].values()
+        for edge in (pair['a_to_b'], pair['b_to_a'])
+    )
+    assert len(state.get('shared_activities', {})) <= 65
+    assert all(len(resident.get('shared_activity_history', [])) <= 12
+               for resident in state['residents'].values())
     assert any(value["rivalry"] != "none" for value in channels)
     assert all(resident["current_action"] for resident in state["residents"].values())
     assert all(resident["current_action"]["status"] not in {"completed", "abandoned", "interrupted"}

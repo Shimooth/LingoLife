@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -9,6 +9,7 @@ import yaml
 
 @dataclass(frozen=True)
 class Settings:
+    local_master_password_hash: str | None = field(default=None, repr=False)
     version: str = "0.1.0"
     api_prefix: str = "/api/v1"
     database_url: str = "sqlite:///./data/lingolife.db"
@@ -26,6 +27,8 @@ class Settings:
     expression_daily_limit: int = 48
     expression_global_daily_limit: int = 1000
     expression_max_tokens: int = 2000
+    pair_memory_daily_limit: int = 8
+    pair_memory_global_daily_limit: int = 200
     admin_password: str | None = None
     admin_session_secret: str | None = None
     admin_cookie_secure: bool = True
@@ -50,6 +53,7 @@ def load_settings(path: str | None = None) -> Settings:
     database_url = os.getenv(database.get("url_env", "DATABASE_URL"), database.get("development_url", Settings.database_url))
     key = os.getenv(ai.get("api_key_env", "DEEPSEEK_API_KEY"))
     return Settings(
+        local_master_password_hash=os.getenv('LINGOLIFE_LOCAL_MASTER_PASSWORD_HASH') if os.getenv('LINGOLIFE_ENV') == 'development' else None,
         version=str(app.get("version", Settings.version)),
         api_prefix=str(app.get("api_prefix", Settings.api_prefix)),
         database_url=database_url,
@@ -64,6 +68,8 @@ def load_settings(path: str | None = None) -> Settings:
         deepseek_temperature=float(ai.get("temperature", Settings.deepseek_temperature)),
         deepseek_retry_count=int(ai.get("retry_count", Settings.deepseek_retry_count)),
         expression_daily_limit=max(0, int(os.getenv("EXPRESSION_DAILY_LIMIT", Settings.expression_daily_limit))),
+        pair_memory_daily_limit=max(0, int(os.getenv("PAIR_MEMORY_DAILY_LIMIT", Settings.pair_memory_daily_limit))),
+        pair_memory_global_daily_limit=max(0, int(os.getenv("PAIR_MEMORY_GLOBAL_DAILY_LIMIT", Settings.pair_memory_global_daily_limit))),
         expression_global_daily_limit=max(0, int(os.getenv("EXPRESSION_GLOBAL_DAILY_LIMIT", Settings.expression_global_daily_limit))),
         expression_max_tokens=max(256, min(3000, int(os.getenv("EXPRESSION_MAX_TOKENS", Settings.expression_max_tokens)))),
         admin_password=os.getenv("ADMIN_PASSWORD"),

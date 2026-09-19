@@ -16,6 +16,7 @@ type WorldEffectsProps={
  quality:Quality
  reducedMotion:boolean
  postProcessing:boolean
+ shadowSize?:number
 }
 
 type Palette={
@@ -46,8 +47,8 @@ function RendererTuning({palette,quality}:{palette:Palette;quality:Quality}){
   gl.outputColorSpace=THREE.SRGBColorSpace
   gl.toneMapping=THREE.ACESFilmicToneMapping
   gl.toneMappingExposure=palette.exposure
-  gl.shadowMap.enabled=quality==='high'
-  gl.shadowMap.type=THREE.PCFSoftShadowMap
+  gl.shadowMap.enabled=true
+  gl.shadowMap.type=THREE.PCFShadowMap
   gl.shadowMap.autoUpdate=true
   return ()=>{
    gl.toneMapping=previousToneMapping
@@ -99,15 +100,16 @@ function SkyBackdrop({palette}:{palette:Palette}){
 
 type CloudPuff={position:[number,number,number];scale:[number,number,number];rotation:number}
 
-function createCloudPuffs(clusterCount:number):CloudPuff[]{
+function createCloudPuffs(clusterCount:number,distant=false):CloudPuff[]{
  const localOffsets:readonly [number,number,number][]= [
   [0,0,1],[-1.65,-.08,.78],[1.7,.05,.72],[-.72,.52,.58],[.82,-.48,.62],
  ]
  return Array.from({length:clusterCount},(_,cluster)=>{
   const angle=(cluster/clusterCount)*Math.PI*2+(cluster%2)*.08
   const wave=Math.sin(cluster*12.9898)*.5+.5
-  const baseX=Math.cos(angle)*(WORLD_WIDTH*.5+8+wave*5.8)
-  const baseZ=Math.sin(angle)*(WORLD_DEPTH*.5+6+(1-wave)*4.6)
+  const radius=distant?1.65:1
+  const baseX=Math.cos(angle)*(WORLD_WIDTH*.5+8+wave*5.8)*radius
+  const baseZ=Math.sin(angle)*(WORLD_DEPTH*.5+6+(1-wave)*4.6)*radius
   const tangentX=-Math.sin(angle)
   const tangentZ=Math.cos(angle)
   const radialX=Math.cos(angle)
@@ -115,10 +117,10 @@ function createCloudPuffs(clusterCount:number):CloudPuff[]{
   return localOffsets.map(([along,outward,size],part)=>({
    position:[
     baseX+tangentX*along+radialX*outward,
-    -2.65+(part%3)*.24+(cluster%2)*.09,
+    (distant?-9:-3.1)+(part%3)*.24+(cluster%2)*.09,
     baseZ+tangentZ*along+radialZ*outward,
    ] as [number,number,number],
-   scale:[(2.45+(part%3)*.34)*size,(.92+(part%2)*.16)*size,(1.75+((part+cluster)%3)*.28)*size] as [number,number,number],
+   scale:[(distant?5:2.6)*(1+(part%3)*.14)*size,(distant?.95:1.12)*size,(distant?3.7:2.1)*(1+((part+cluster)%3)*.14)*size] as [number,number,number],
    rotation:angle+part*.17,
   }))
  }).flat()
@@ -126,10 +128,12 @@ function createCloudPuffs(clusterCount:number):CloudPuff[]{
 
 function CloudRim({palette,quality,reducedMotion}:{palette:Palette;quality:Quality;reducedMotion:boolean}){
  const group=useRef<THREE.Group>(null)
- const puffs=useMemo(()=>createCloudPuffs(quality==='high'?11:8),[quality])
+ const puffs=useMemo(()=>[...createCloudPuffs(quality==='high'?13:10),...createCloudPuffs(quality==='high'?16:10,true)],[quality])
  useFrame(({clock})=>{
   if(reducedMotion||!group.current)return
   group.current.position.y=Math.sin(clock.elapsedTime*.18)*.16
+  group.current.position.x=Math.sin(clock.elapsedTime*.035)*2.1
+  group.current.position.z=Math.sin(clock.elapsedTime*.026)*1.25
  })
  return <group ref={group} renderOrder={-20}>
   <Instances limit={puffs.length} frustumCulled>
@@ -149,18 +153,18 @@ function StudioEnvironment({palette,quality}:{palette:Palette;quality:Quality}){
  </Environment>
 }
 
-function WorldLighting({palette,quality}:{palette:Palette;quality:Quality}){
+function WorldLighting({palette,quality,shadowSize}:{palette:Palette;quality:Quality;shadowSize:number}){
  const shadowWidth=Math.max(36,WORLD_WIDTH*.68)
  const shadowDepth=Math.max(28,WORLD_DEPTH*.82)
  return <>
   <ambientLight intensity={.12} color={palette.horizon}/>
   <hemisphereLight args={[palette.sunFill,palette.groundBounce,.56]}/>
   <directionalLight
-   castShadow={quality==='high'}
+   castShadow
    position={[-34,46,-28]}
    intensity={2.05}
    color={palette.sun}
-   shadow-mapSize={[quality==='high'?2048:768,quality==='high'?2048:768]}
+   shadow-mapSize={[shadowSize,shadowSize]}
    shadow-bias={-.00018}
    shadow-normalBias={.035}
    shadow-radius={quality==='high'?3.2:1.4}
@@ -181,7 +185,7 @@ function WorldLighting({palette,quality}:{palette:Palette;quality:Quality}){
  * cannot turn the world into the opaque white veil seen in the old prototype.
  */
 function WorldPostProcessing(){
- const {gl,scene,camera,size}=useThree()
+ const {gl,scene,camera,size,viewport}=useThree()
  const chain=useMemo(()=>{
   const composer=new EffectComposer(gl)
   const renderPass=new RenderPass(scene,camera)
@@ -214,9 +218,9 @@ function WorldPostProcessing(){
   return {composer,gtaoPass,smaaPass,outputPass}
  },[camera,gl,scene])
  useEffect(()=>{
-  chain.composer.setPixelRatio(Math.min(1.35,gl.getPixelRatio()))
+  chain.composer.setPixelRatio(Math.min(1.5,viewport.dpr))
   chain.composer.setSize(size.width,size.height)
- },[chain,gl,size.height,size.width])
+ },[chain,gl,size.height,size.width,viewport.dpr])
  useEffect(()=>()=>{
   chain.gtaoPass.dispose()
   chain.smaaPass.dispose()
@@ -227,7 +231,7 @@ function WorldPostProcessing(){
  return null
 }
 
-export function WorldEffects({timeSlot,quality,reducedMotion,postProcessing}:WorldEffectsProps){
+export function WorldEffects({timeSlot,quality,reducedMotion,postProcessing,shadowSize=2048}:WorldEffectsProps){
  const palette=PALETTES[timeSlot]
  const {gl}=useThree()
  return <>
@@ -235,7 +239,7 @@ export function WorldEffects({timeSlot,quality,reducedMotion,postProcessing}:Wor
   <SkyBackdrop palette={palette}/>
   <CloudRim palette={palette} quality={quality} reducedMotion={reducedMotion}/>
   <StudioEnvironment palette={palette} quality={quality}/>
-  <WorldLighting palette={palette} quality={quality}/>
+  <WorldLighting palette={palette} quality={quality} shadowSize={shadowSize}/>
   {postProcessing&&gl.capabilities.isWebGL2&&<WorldPostProcessing/>}
  </>
 }

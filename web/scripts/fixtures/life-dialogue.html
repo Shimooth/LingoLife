@@ -24,12 +24,17 @@ function Demo(){
  window.qaSetMode=value=>{mode=value};window.qaSwitch=()=>setStory({...base,id:'second'});window.qaPoll=()=>setStory(value=>({...value,updated_at:new Date().toISOString()}));window.qaLanguage=()=>setLang(value=>value==='zh'?'en':'zh');
  const writer=React.useCallback(async(id,signal)=>{
   requests.push(id);const {outcome,aftermath}=storyRef.current;
+  if(mode==='hang')return new Promise(()=>{});
   await new Promise(resolve=>setTimeout(resolve,mode==='slow'?4500:1000));
   // Deliberately ignore abort: the hook must still reject late completions.
   if(mode==='error')throw Error('Synthetic transport failure');
   return makeResult(id,outcome,aftermath);
  },[]);
- return open?h(LifeStoryEncounter,{story,language:lang,onDialogue:writer,onClose:()=>setOpen(false),onObserve:async()=>{const next={...story,observed_at:'seen'};setStory(next);return next},onIntervene:async()=>{const next={...story,status:'resolved_with_management',outcome:{mode:'managed',result:'accepted',selected_action:'give_space',participant_reactions:[],consequences:[],aftermath:'They agreed to talk later.',aftermath_zh:'他们决定稍后再聊。'},aftermath:'They agreed to talk later.'};setStory(next);return next}}):h('p',null,'Closed');
+ return h(React.Fragment,null,h('nav',{style:{position:'fixed',zIndex:1000,top:4,left:4,display:'flex',gap:4}},
+  ...[['正常对白','normal'],['模拟断网','error'],['模拟无响应','hang']].map(([label,value])=>h('button',{key:value,onClick:()=>{mode=value;setStory({...base,id:'qa-'+Date.now()});setOpen(true)}},label)),
+  h('button',{onClick:()=>setStory(value=>({...value,updated_at:new Date().toISOString()}))},'模拟世界刷新'),
+  h('button',{onClick:()=>setOpen(true)},'重新打开'),h('button',{onClick:()=>setLang(value=>value==='zh'?'en':'zh')},'切换语言')),
+  open?h(LifeStoryEncounter,{story,language:lang,onDialogue:writer,onClose:()=>setOpen(false),onObserve:async()=>{const next={...story,observed_at:'seen'};setStory(next);return next},onIntervene:async()=>{const next={...story,status:'resolved_with_management',outcome:{mode:'managed',result:'accepted',selected_action:'give_space',participant_reactions:[],consequences:[{kind:'relationship',tone:'positive',text:'Charles and Guai feel a little more at ease.',translation_zh:'Charles 和 Guai 相处时比之前自然了一点。'}],aftermath:'They agreed to talk later.',aftermath_zh:'他们决定稍后再聊。'},aftermath:'They agreed to talk later.'};setStory(next);return next}}):h('p',null,'Closed'));
 }
 createRoot(document.getElementById('root')).render(h(Demo));
 </script></body></html>

@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>创建角色验收 · LingoLife</title></head>
+<body><div id="root"></div>
+<script type="module">
+import React from 'react';import {createRoot} from 'react-dom/client';
+import {OnboardingFlow} from '/src/components/OnboardingFlow.tsx';
+import '/src/styles.css';import '/src/ThreeIntegration.css';import '/src/visualPolish.css';
+// Isolated component preview: no account, API, AI, or saved-game writes.
+createRoot(document.getElementById('root')).render(React.createElement(OnboardingFlow,{
+ language:'zh',minimum:2,maximum:8,introAcknowledged:true,saving:false,error:'',
+ onAcknowledgeIntro:async()=>{},onComplete:()=>{},
+}));
+</script></body></html>

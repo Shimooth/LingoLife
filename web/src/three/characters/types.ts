@@ -72,6 +72,11 @@ export type Character3DProps = {
   lifeAttention?: number
   lifeHandTarget?: [number,number,number]
   lifeProp?: 'cup'|'spoon'|'utensil'|'book'|'cloth'
+  /** Stable frame-updated pose, used only for authored contact performances. */
+  lifePerformancePose?: {time:number;handTarget?:[number,number,number];seatHeight?:number;seatWeight?:number;bodyLean?:number}
+  faceExpression?: 'neutral'|'happy'|'displeased'|'sleepy'|'curious'
+  faceAttention?: number
+  faceSpeaking?: boolean
   animationTransitionMs?: number
   motionScale?: number
 }

@@ -27,6 +27,7 @@ from .life_world import LifeWorldEngine
 from .household_life import public_home_life
 from .spatial_presence import spatial_presence
 from . import dinner as dinner_life
+from . import shared_activities
 
 
 def story_attention_budget(resident_count: int) -> dict[str, Any]:
@@ -300,6 +301,7 @@ class LifeWorldService:
         self.engine = LifeWorldEngine(timezone_name=timezone_name)
         self._lock = threading.RLock()
         self.expression_service = None
+        self.memory_service = None
 
     def _refresh_layout_contract(self) -> None:
         active = self.db.get_world_layout()
@@ -389,6 +391,8 @@ class LifeWorldService:
         profile_map = _profiles(profile_entries)
         if not profile_map:
             raise ValueError("a life world requires at least one resident")
+        if self.memory_service is not None:
+            self.memory_service.register(player_id, profile_map)
         with self._lock:
             self._refresh_layout_contract()
             for _attempt in range(3):
@@ -746,6 +750,7 @@ class LifeWorldService:
                 location_id=str(raw_action.location_id or action_location_id),
                 resource_kind=str(resource.get("kind") or "") or None,
             )
+            shared_activities.annotate_observable(state, npc_id, raw_action, observable, target_name)
             if observable["visible_context"].get("visibility") == "private":
                 action.update({"location_id": authoritative_home_id,
                                "target_resource_id": None, "target_npc_id": None})
@@ -949,6 +954,7 @@ class LifeWorldService:
             location_id=str(action.location_id or public_location_id),
             resource_kind=str(resource.get("kind") or "") or None,
         )
+        shared_activities.annotate_observable(state, npc_id, action, observable, target_name)
         stories = [story for story in self._story_views(state, profile_map, now=_utc(now))
                    if npc_id in story["participant_ids"]][:5]
         relationships = []
@@ -1105,7 +1111,11 @@ class LifeWorldService:
         if not changes:
             changes = list((record.get("resolution") or {}).get("relationship_changes") or [])
         positive = negative = False
+        dimension_changes: dict[str, list[int]] = {}
         for raw in changes:
+            for dimension, delta in raw.items():
+                if dimension in {"familiarity", "trust", "affinity", "respect", "comfort", "tension", "resentment"}:
+                    dimension_changes.setdefault(dimension, []).append(int(delta))
             for dimension in ("familiarity", "trust", "affinity", "respect", "comfort"):
                 delta = int(raw.get(dimension, 0))
                 positive = positive or delta > 0
@@ -1117,11 +1127,22 @@ class LifeWorldService:
         if not positive and not negative:
             return None
         if positive and negative:
-            text = f"{cast_en} feel closer in some ways, though some tension remains."
-            text_zh, tone = f"{cast_zh}在某些方面更亲近了，但仍有一些紧张没有消散。", "mixed"
+            text = f"This exchange brought {cast_en} a little closer in some respects, but also created friction."
+            text_zh, tone = f"{cast_zh}在这次来往中多了一点亲近，也留下了摩擦。", "mixed"
         elif positive:
-            text = f"The relationship between {cast_en} feels warmer and steadier after this."
-            text_zh, tone = f"这件事之后，{cast_zh}之间的关系显得更温暖、更稳定。", "positive"
+            # A familiarity gain is not proof of mutual trust, forgiveness or a stable bond.
+            phrases = {
+                "familiarity": ("became a little more familiar with one another", "比之前熟悉了一点"),
+                "trust": ("gained a little trust through this exchange", "在这件事上多了一点信任"),
+                "affinity": ("felt a little more fondness through this exchange", "在这次来往中多了一点好感"),
+                "respect": ("gained a little respect through this exchange", "在这件事上多了一点认可"),
+                "comfort": ("felt a little more at ease with each other", "相处时比之前自在了一点"),
+                "tension": ("had less tension between them after this exchange", "这次来往中的紧张感减轻了一点"),
+                "resentment": ("had a little less lingering resentment after this exchange", "积着的不满减轻了一点"),
+            }
+            strongest = max(dimension_changes, key=lambda key: max(abs(v) for v in dimension_changes[key]))
+            phrase = phrases[strongest]
+            text, text_zh, tone = f"{cast_en} {phrase[0]}.", f"{cast_zh}{phrase[1]}。", "positive"
         else:
             text = f"The relationship between {cast_en} carries more visible tension after this."
             text_zh, tone = f"这件事之后，{cast_zh}之间留下了更明显的紧张感。", "negative"
@@ -1208,6 +1229,14 @@ class LifeWorldService:
             self._resource_consequence(state, record, topic),
             self._wellbeing_consequence(record),
         ) if value]
+        # Show what each person actually chose, not the same pressure-reduction
+        # sentence for every autonomous scene. Managed outcomes retain their
+        # actual intervention effects rather than replaying the earlier choices.
+        if not intervention and not relationship_state:
+            from .life_result_copy import response_consequence
+            concrete = response_consequence(record, profiles)
+            if concrete:
+                consequences = [concrete] + [item for item in consequences if item["kind"] != "wellbeing"]
         if relationship_state == "dating":
             aftermath = f"{cast_en} chose to begin dating. Their relationship is now openly acknowledged."
             aftermath_zh = f"{cast_zh}决定开始约会，这段关系现在已经被公开确认。"
@@ -1408,11 +1437,28 @@ class LifeWorldService:
                              or ("observed" if story.get("observed_at") and status == "open" else status))
             actions = [str(value) for value in story.get("intervention_actions", [])]
             outcome = self._outcome_view(state, record, story, profiles, cast_en, cast_zh, topic)
+            activity = (state.get('shared_activities') or {}).get(facts.get('activity_id'))
+            if activity:
+                activity_view = shared_activities.public(activity)
+                title, title_zh = activity_view['title'], activity_view['title_zh']
+                summary = f"{cast_en} · {activity_view['subject']}. {activity_view['summary']}"
+                summary_zh = f"{cast_zh} · {activity_view['subject_zh']}。{activity_view['summary_zh']}"
+                if outcome:
+                    activity_fact = {'kind': 'shared_activity', 'text': activity_view['summary'],
+                                     'translation_zh': activity_view['summary_zh'], 'phase': activity_view['phase']}
+                    outcome = {**outcome, 'aftermath': activity_view['summary'],
+                               'aftermath_zh': activity_view['summary_zh'],
+                               'consequences': [activity_fact] + [value for value in outcome['consequences']
+                                   if value['kind'] == 'relationship' or outcome['mode'] == 'managed']}
             interaction = self._interaction_presentation(
                 record, topic=topic, participant_ids=participant_ids,
                 profiles=profiles, relationships=state.get("relationships") or {},
                 can_intervene=public_status == "awaiting_management", outcome=outcome,
             )
+            if activity:
+                stage = shared_activities.staging(activity)
+                if stage:
+                    interaction = {**interaction, 'staging': stage}
             trouble = None
             if story.get("trouble_signal"):
                 band = str((story.get("visible_facts") or {}).get("severity_band") or "medium")
@@ -1444,8 +1490,8 @@ class LifeWorldService:
                                "actions": [self._intervention_view(action) for action in actions]},
                 "presentation": {
                     **interaction,
-                    "subject": f"{TOPIC_COPY.get(topic, (title, title_zh, '', ''))[0]} · {location_copy['label']}",
-                    "subject_zh": f"{TOPIC_COPY.get(topic, (title, title_zh, '', ''))[1]} · {location_copy['label_zh']}",
+                    "subject": f"{title} · {location_copy['label']}",
+                    "subject_zh": f"{title_zh} · {location_copy['label_zh']}",
                     "location": location_copy,
                 },
                 "outcome": outcome,

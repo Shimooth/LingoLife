@@ -3,6 +3,8 @@ import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import type { AvatarConfig } from '../../types'
 import { CITY_ANIMATION_URL, getCharacterPreset } from './characterAssets'
 import { clipsForModel, disposeCharacterInstance, prepareChibi, prepareCity } from './characterModel'
+import {ACESFilmicToneMapping,SRGBColorSpace} from 'three'
+import {STUDIO_LOOK} from '../rendering/visualQuality'
 
 // One offscreen renderer, serialized work, small WebP output. Never one Canvas per card.
 const results = new Map<string, string>()
@@ -58,11 +60,14 @@ async function renderPortrait(avatar: AvatarConfig): Promise<string> {
     const camera = new OrthographicCamera(-height * 216 / 256 / 2, height * 216 / 256 / 2, height / 2, -height / 2, .01, 100)
     camera.position.set(center.x, center.y + size.y * .035, center.z + Math.max(5, size.z * 4))
     camera.lookAt(center)
-    scene.add(new AmbientLight('#ffffff', 1.65), new HemisphereLight('#fff7ec', '#826f70', 1.6))
-    const key = new DirectionalLight('#fff4df', 2.2); key.position.set(-3, 6, 5); scene.add(key)
-    const fill = new DirectionalLight('#bdd5ff', .75); fill.position.set(4, 2, 3); scene.add(fill)
+    scene.add(new AmbientLight('#fff5e9', STUDIO_LOOK.ambient), new HemisphereLight(STUDIO_LOOK.fillColor, STUDIO_LOOK.groundColor, STUDIO_LOOK.hemisphere))
+    const key = new DirectionalLight(STUDIO_LOOK.keyColor, STUDIO_LOOK.key); key.position.set(-3.5, 8, 5); scene.add(key)
+    const fill = new DirectionalLight(STUDIO_LOOK.fillColor, STUDIO_LOOK.fill); fill.position.set(5, 3, 3); scene.add(fill)
+    const face = new DirectionalLight('#fff4e4', .65); face.position.set(0, 2, 7); scene.add(face)
+    const rim = new DirectionalLight('#ffdfb2', .9); rim.position.set(1, 5, -4); scene.add(rim)
     clearTimeout(releaseTimer)
     renderer ??= new WebGLRenderer({ alpha: true, antialias: true })
+    renderer.outputColorSpace=SRGBColorSpace;renderer.toneMapping=ACESFilmicToneMapping;renderer.toneMappingExposure=STUDIO_LOOK.exposure
     renderer.setSize(216, 256, false)
     renderer.setClearColor(0x000000, 0)
     renderer.render(scene, camera)

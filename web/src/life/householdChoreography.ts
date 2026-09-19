@@ -7,6 +7,7 @@ export const HOME_BEATS:Partial<Record<LifeActionType,readonly HouseholdBeat[]>>
  prepare_food:[beat('Working_A',11,'正在处理食材','Preparing ingredients','utensil'),beat('Idle_A',2.5,'停下来看看火候','Checking the cooking'),beat('Use_Item',6,'尝尝味道','Checking the flavor','utensil'),beat('Working_A',9,'继续准备这顿饭','Continuing the meal','utensil')],
  eat:[beat('Eating',9,'慢慢吃着饭','Enjoying the meal','spoon'),beat('Sit_Chair_Idle',4,'放下餐具，歇一会儿','Pausing between bites'),beat('Eating',7,'吃一口，再喝点水','Taking another bite','cup')],
  read:[beat('Reading',16,'读到有意思的地方','Reading a passage','book'),beat('Sit_Chair_Idle',4,'抬头想了想','Thinking about the book')],
+ practice_hobby:[beat('Working_A',10,'动手试一试','Giving it a try'),beat('Idle_A',4,'停下来想想','Pausing to think'),beat('Interact',4,'换个做法再试试','Trying another approach')],
  use_television:[beat('Sit_Chair_Idle',13,'靠着坐一会儿','Settling in to watch'),beat('Reading',3,'调整手里的遥控器','Adjusting the remote')],
  clean_shared_space:[beat('Working_A',8,'擦拭，再检查一下','Wiping the surface','cloth'),beat('Idle_A',3,'看看还有哪里没收拾','Checking the remaining mess')],
  leave_dishes:[beat('Holding_A',4,'把餐具放到一边','Setting the dishes aside'),beat('Interact',3,'整理一下手边的东西','Moving things out of the way')],
@@ -27,7 +28,7 @@ export function residentSeed(id:string){let hash=0;for(const c of id)hash=(Math.
 /** Visual attention is not a new conversation or a relationship result.
  * Both residents must already be present, and only real social actions initiate it. */
 export function attentionPartner(actor:{id:string;type?:LifeActionType;targetNpcId?:string},others:readonly {id:string;type?:LifeActionType}[]):string|undefined{
- if(!['talk_to_resident','seek_company'].includes(actor.type??''))return undefined
+ if(!['talk_to_resident','seek_company','read','practice_hobby'].includes(actor.type??''))return undefined
  if(actor.targetNpcId)return others.find(other=>other.id===actor.targetNpcId)?.id
  return undefined
 }

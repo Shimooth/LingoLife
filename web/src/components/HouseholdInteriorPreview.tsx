@@ -1,5 +1,5 @@
-import {Suspense,useEffect,useLayoutEffect,useMemo,useState,type CSSProperties} from 'react'
-import {Canvas,useThree} from '@react-three/fiber'
+import {Suspense,useEffect,useLayoutEffect,useMemo,useState,useRef,type ComponentRef,type RefObject,type CSSProperties} from 'react'
+import {Canvas,useThree,useFrame} from '@react-three/fiber'
 import {ContactShadows,Html,PerspectiveCamera,OrbitControls} from '@react-three/drei'
 import {useLiveReducedMotion as useReducedMotion} from '../life/useLiveReducedMotion'
 import * as THREE from 'three'
@@ -8,13 +8,16 @@ import {householdResidentRoom as residentRoom,privateHouseholdActivity as privat
 import type {LifeLanguage} from '../life/lifeActionCatalog'
 import {attentionPartner} from '../life/householdChoreography'
 import {
- IndoorEnvironment3D,INTERIOR_THEME_COPY,interiorThemeFor,
+ IndoorEnvironment3D,interiorThemeFor,
  resolveSharedHomePrivateSpaces,resolveIndoorResidentAnchors,
 } from '../three/interiors'
 import {HouseholdLifeResident} from './HouseholdLifeResident'
 import {HouseholdRestingResident} from './HouseholdRestingResident'
-import type {HouseholdResidentVisual} from './householdVisuals'
+import {householdDrinkPlacements,householdSharedDrink,type HouseholdResidentVisual} from './householdVisuals'
+import {SharedDrinkPerformance3D} from '../three/characters/SharedDrinkPerformance3D'
 import type {WorldLayoutRoom} from '../worldLayout'
+import {AdaptiveResolution,SceneLighting,SceneLook} from '../three/rendering/SceneLook'
+import {useVisualBudget} from '../three/rendering/useVisualBudget'
 
 type Props={
  rooms:HouseholdRoom[]
@@ -38,35 +41,45 @@ const roomName=(room:HouseholdRoom|undefined,language:LifeLanguage)=>{
  return language==='zh'?room.name_zh?.trim()||ROOM_COPY[room.kind]?.zh||room.kind.replaceAll('_',' '):room.name?.trim()||ROOM_COPY[room.kind]?.en||room.kind.replaceAll('_',' ')
 }
 
-function HouseholdCamera({privateSuite,focus}:{privateSuite:boolean;focus?:readonly number[]}){
+function HouseholdCamera({privateSuite,focus,overview,controls,request,manual,reducedMotion}:{privateSuite:boolean;focus?:readonly number[];overview?:readonly number[];controls:RefObject<ComponentRef<typeof OrbitControls>|null>;request:string;manual:RefObject<boolean>;reducedMotion:boolean}){
  const camera=useThree(state=>state.camera),width=useThree(state=>state.size.width),height=useThree(state=>state.size.height)
  const focusX=focus?.[0],focusZ=focus?.[2]
+ const overviewX=overview?.[0],overviewZ=overview?.[2],overviewSpan=overview?.[3]??0
+ const destination=useRef({position:new THREE.Vector3(),target:new THREE.Vector3(),moving:false,initialized:false})
+ const lastRequest=useRef('')
  useLayoutEffect(()=>{
-  if(privateSuite&&focusX!==undefined&&focusZ!==undefined){
-   camera.position.set(focusX+2.8,5.2,focusZ+4.8)
-   camera.lookAt(focusX,.45,focusZ)
+  const identity=`${request}:${focusX}:${focusZ}`
+  if(manual.current&&identity===lastRequest.current)return
+  lastRequest.current=identity
+  const next=destination.current
+  if(focusX!==undefined&&focusZ!==undefined){
+   next.position.set(focusX+(privateSuite?2.8:3.8),privateSuite?5.2:4.6,focusZ+(privateSuite?4.8:6.2))
+   next.target.set(focusX,privateSuite?.45:.85,focusZ)
+  }else if(!privateSuite&&width<600&&overviewX!==undefined&&overviewZ!==undefined){
+   // A narrow overview frames the residents together, not the empty centre of the room.
+   const fit=Math.max(1,(overviewSpan+1.6)/(4.5*width/Math.max(1,height)))
+   next.target.set(overviewX,.85,overviewZ)
+   next.position.set(overviewX+3.8*fit,.85+3.75*fit,overviewZ+6.2*fit)
   }else if(privateSuite){
-   camera.position.set(width<420?5.6:6.6,width<420?9.6:6.4,width<420?17:9.3)
-   camera.lookAt(0,.35,-.12)
+   next.position.set(width<420?5.6:6.6,width<420?9.6:6.4,width<420?17:9.3)
+   next.target.set(0,.35,-.12)
   }else{
-   const fit=Math.max(1,1.55/(width/Math.max(1,height)))
-   camera.position.set(5.45*fit,.84+(3.5-.84)*fit,-.48+(7.2+.48)*fit)
-   camera.lookAt(0,.84,-.48)
+   const fit=Math.max(1,Math.min(1.18,1.35/(width/Math.max(1,height))))
+   next.position.set(width<600?4.5:6.4*fit,width<600?5.4:5.6*fit,width<600?8.2:8.6*fit)
+   next.target.set(width<600?-1:-.2,.6,-.25)
   }
-  if(camera instanceof THREE.PerspectiveCamera){camera.fov=privateSuite?(width<420?48:40):(width<420?43:36);camera.updateProjectionMatrix()}
- },[camera,privateSuite,width,height,focusX,focusZ])
- return null
-}
-
-function HouseholdRendering(){
- const gl=useThree(state=>state.gl)
- useLayoutEffect(()=>{
-  const previousToneMapping=gl.toneMapping,previousExposure=gl.toneMappingExposure,previousColorSpace=gl.outputColorSpace
-  gl.toneMapping=THREE.ACESFilmicToneMapping
-  gl.toneMappingExposure=1.08
-  gl.outputColorSpace=THREE.SRGBColorSpace
-  return ()=>{gl.toneMapping=previousToneMapping;gl.toneMappingExposure=previousExposure;gl.outputColorSpace=previousColorSpace}
- },[gl])
+  if(camera instanceof THREE.PerspectiveCamera){camera.fov=width<420?44:38;camera.updateProjectionMatrix()}
+  manual.current=false
+  next.moving=true
+  if(!next.initialized||reducedMotion){camera.position.copy(next.position);camera.lookAt(next.target);controls.current?.target.copy(next.target);next.initialized=true}
+ },[camera,privateSuite,width,height,focusX,focusZ,overviewX,overviewZ,overviewSpan,controls,manual,request,reducedMotion])
+ useFrame((_,delta)=>{
+  const next=destination.current,orbit=controls.current
+  if(manual.current||!next.moving||!orbit)return
+  const blend=reducedMotion?1:1-Math.exp(-7*Math.min(delta,.05))
+  camera.position.lerp(next.position,blend);orbit.target.lerp(next.target,blend);orbit.update()
+  if(camera.position.distanceToSquared(next.position)<.00001&&orbit.target.distanceToSquared(next.target)<.00001)next.moving=false
+ })
  return null
 }
 
@@ -76,7 +89,10 @@ const preferredRoom=(rooms:HouseholdRoom[],resources:HouseholdResource[],residen
 }
 
 export function HouseholdInteriorPreview({rooms,resources,language,residents=[],layoutRooms=[],life,kitchenRequest=0,residentFocus,onMemberInteract}:Props){
+ const visualBudget=useVisualBudget()
  const reduce=useReducedMotion()
+ const controls=useRef<ComponentRef<typeof OrbitControls>>(null),manualCamera=useRef(false)
+ const [locateRequest,setLocateRequest]=useState(0)
  const [selectedId,setSelectedId]=useState(()=>preferredRoom(rooms,resources,residents))
  const [tracking,setTracking]=useState(Boolean(residentFocus))
  const target=residents.find(resident=>resident.id===residentFocus?.id)
@@ -93,36 +109,37 @@ export function HouseholdInteriorPreview({rooms,resources,language,residents=[],
  const theme=interiorThemeFor({roomKind})
  const privateSuite=theme==='home_bedroom'
  const authoredRoom=layoutRooms.find(room=>room.id===selected?.id)??layoutRooms.find(room=>room.kind===roomKind)
- const occupied=useMemo(()=>resources.filter(resource=>(resource.room_id===selected?.id||(selected?.resource_ids??[]).includes(resource.id))&&(resource.state.occupied_by?.length??0)>0).length,[resources,selected])
  const visibleResidents=useMemo(()=>residents.filter(resident=>resident.isHome!==false&&residentRoom(resident,rooms,resources)===selected?.id).slice(0,8),[residents,resources,rooms,selected?.id])
+ const drinkPlacements=useMemo(()=>householdDrinkPlacements(authoredRoom?.placements),[authoredRoom?.placements])
+ const liveDrink=useMemo(()=>householdSharedDrink(visibleResidents,roomKind,drinkPlacements),[visibleResidents,roomKind,drinkPlacements])
  const residentAnchors=useMemo(()=>resolveIndoorResidentAnchors(roomKind,visibleResidents.map(resident=>({
   id:resident.id,actionType:resident.currentAction?.source==='life'?resident.currentAction.type:null,
- })),residents,authoredRoom?.placements),[authoredRoom?.placements,roomKind,visibleResidents,residents])
+ })),residents,authoredRoom?.placements).map((anchor,index)=>{
+  const drinkIndex=liveDrink?.staging.participant_ids.indexOf(visibleResidents[index].id)??-1
+  const seat=drinkIndex>=0?liveDrink?.layout.seats[drinkIndex]:undefined
+  return seat?{id:`shared-drink-seat:${visibleResidents[index].id}`,position:seat.position,rotation:seat.rotation}:anchor
+ }),[authoredRoom?.placements,roomKind,visibleResidents,residents,liveDrink])
  const privateAssignments=useMemo(()=>resolveSharedHomePrivateSpaces(residents.slice(0,8).map(resident=>({
   id:resident.id,privateRoomId:resident.privateRoomId,
  }))),[residents])
  const residentsById=useMemo(()=>new Map(residents.map(resident=>[resident.id,resident])),[residents])
- const bedroomFocus=privateSuite?residentAnchors[visibleResidents.findIndex(resident=>resident.id===residentFocus?.id)]?.position:undefined
- const cameraTarget:[number,number,number]=bedroomFocus?[bedroomFocus[0],.45,bedroomFocus[2]]:privateSuite?[0,.35,-.12]:[0,.84,-.48]
- const themeCopy=INTERIOR_THEME_COPY[theme][language]
+ const bedroomFocus=tracking?residentAnchors[visibleResidents.findIndex(resident=>resident.id===residentFocus?.id)]?.position:undefined
+ const selectedDrinkSeat=liveDrink?.layout.seats[liveDrink.staging.participant_ids.indexOf(residentFocus?.id??'')]
+ const overview=useMemo(()=>{
+  if(!residentAnchors.length)return undefined
+  const xs=residentAnchors.map(anchor=>anchor.position[0]),zs=residentAnchors.map(anchor=>anchor.position[2])
+  const minX=Math.min(...xs),maxX=Math.max(...xs),minZ=Math.min(...zs),maxZ=Math.max(...zs)
+  return [(minX+maxX)/2,0,(minZ+maxZ)/2,Math.hypot(maxX-minX,maxZ-minZ)]
+ },[residentAnchors])
  const selectedName=roomName(selected,language)
- const occupancyCopy=visibleResidents.length?(language==='zh'?`${visibleResidents.length} 人在这里`:`${visibleResidents.length} here`):occupied?(language==='zh'?`${occupied} 处正在使用`:`${occupied} in use`):''
- const stateCounts=visibleResidents.reduce<Record<string,number>>((counts,resident)=>{const action=resident.currentAction?.source==='life'?resident.currentAction:undefined;const state=action?.status==='performing'?(action.type==='sleep'?'sleep':action.type==='rest_alone'?'rest':action.type==='shower'?'shower':'busy'):'transition';counts[state]=(counts[state]??0)+1;return counts},{})
- const stateNames:Record<string,string>=language==='zh'?{sleep:'睡觉',rest:'休息',shower:'洗澡',busy:'活动中',transition:'准备或移动中'}:{sleep:'sleeping',rest:'resting',shower:'showering',busy:'active',transition:'preparing or moving'}
- const detailCopy=[themeCopy===selectedName?'':themeCopy,occupancyCopy,...Object.entries(stateCounts).map(([state,count])=>language==='zh'?`${count} 人${stateNames[state]}`:`${count} ${stateNames[state]}`)].filter(Boolean).join(' · ')
- const focusCopy=target?(target.isHome===false?(language==='zh'?'已离开住宅，当前位置请到地图查看。':'Has left home. View their current location on the map.'):targetRoom?(language==='zh'?`现在位于${roomName(rooms.find(room=>room.id===targetRoom),language)}，脚下金色圆圈为所选居民。`:`Currently in ${roomName(rooms.find(room=>room.id===targetRoom),language)}. The selected resident has a gold ring.`):(language==='zh'?'正在同步具体位置…':'Updating their location…')):(language==='zh'?'正在同步居民位置…':'Updating resident location…')
  return <>
-  {residentFocus&&<div className="household-resident-focus" role="status"><div><b>{target?.name??(language==='zh'?'定位居民':'Locating resident')}</b><p>{focusCopy}</p></div>{targetRoom&&<button type="button" onClick={()=>{setTracking(true);setSelectedId(targetRoom)}}>{language==='zh'?'定位':'Locate'}</button>}{target&&onMemberInteract&&!privateAction(target)&&<button type="button" onClick={()=>onMemberInteract(target.id)}>{target.isHome===false?(language==='zh'?'回地图':'Map'):(language==='zh'?'交谈':'Talk')}</button>}</div>}
  <section className={`household-interior-preview${privateSuite?' is-private-suite':''}`} aria-label={language==='zh'?'住宅室内预览':'Household interior preview'}>
   <div className="household-interior-preview__canvas" aria-hidden>
-   <Canvas dpr={[1,1.75]} shadows gl={{antialias:true,alpha:true,localClippingEnabled:true,powerPreference:'high-performance'}}>
+   <Canvas dpr={visualBudget.dpr} shadows="percentage" gl={{antialias:true,alpha:true,localClippingEnabled:true,powerPreference:'high-performance'}}>
     <PerspectiveCamera makeDefault position={[5.45,3.5,7.2]} fov={36} near={.1} far={28}/>
-    <HouseholdCamera privateSuite={privateSuite} focus={bedroomFocus}/><HouseholdRendering/>
-    <OrbitControls target={cameraTarget} enableDamping={!reduce} dampingFactor={.12} minDistance={3.5} maxDistance={24} minPolarAngle={.25} maxPolarAngle={Math.PI*.48}/>
-    <ambientLight intensity={.48}/><hemisphereLight args={['#fff3d5','#3e625b',.92]}/>
-    <directionalLight position={[-4.5,7.5,6]} intensity={3.15} color="#ffe7c5" castShadow shadow-mapSize={[1024,1024]} shadow-bias={-.00035}/>
-    <directionalLight position={[5,4,-2]} intensity={1.1} color="#b7e1dd"/>
-    <pointLight position={[3.4,2.7,1.5]} intensity={2.7} distance={9} color="#efaa78"/>
+    <OrbitControls ref={controls} onStart={()=>{manualCamera.current=true}} enableDamping={!reduce} dampingFactor={.12} minDistance={3.5} maxDistance={24} minPolarAngle={.25} maxPolarAngle={Math.PI*.48}/>
+    <HouseholdCamera privateSuite={privateSuite} focus={bedroomFocus} overview={overview} controls={controls} request={`${selectedId}:${residentFocus?.request??0}:${locateRequest}:${kitchenRequest}`} manual={manualCamera} reducedMotion={Boolean(reduce)}/><SceneLook/><AdaptiveResolution onTier={visualBudget.onTier}/>
+    <SceneLighting/>
     <Suspense fallback={null}><IndoorEnvironment3D theme={theme} mode="preview" placements={authoredRoom?.placements} occupiedPrivateSlots={privateAssignments.map(assignment=>assignment.slot)} householdLife={life} cooking={visibleResidents.some(resident=>resident.currentAction?.source==='life'&&resident.currentAction.type==='prepare_food'&&resident.currentAction.status==='performing')} reducedMotion={Boolean(reduce)}/></Suspense>
     {privateSuite&&privateAssignments.map(assignment=>{
      const resident=residentsById.get(assignment.residentId),[minX,maxX,minZ,maxZ]=assignment.space.bounds
@@ -132,7 +149,12 @@ export function HouseholdInteriorPreview({rooms,resources,language,residents=[],
       <div className="private-bedroom-label" style={{'--private-room-accent':assignment.space.accent} as CSSProperties}><span>{assignment.slot}</span><b>{resident?.name??assignment.residentId}</b></div>
      </Html>
     })}
+    {liveDrink&&<Suspense fallback={null}><SharedDrinkPerformance3D key={liveDrink.id} staging={liveDrink.staging} participants={liveDrink.residents.map(person=>({id:person.id,name:person.name}))} participantAvatars={Object.fromEntries(liveDrink.residents.map(person=>[person.id,person.avatar]))} placements={drinkPlacements} reducedMotion={Boolean(reduce)}/></Suspense>}
+    {selectedDrinkSeat&&<mesh name="shared-drink-selected-resident" position={[selectedDrinkSeat.position[0],selectedDrinkSeat.position[1]-.039,selectedDrinkSeat.position[2]]} rotation-x={-Math.PI/2}>
+     <ringGeometry args={[.32,.37,40]}/><meshBasicMaterial color="#e5b45f" transparent opacity={.75} depthWrite={false}/>
+    </mesh>}
     {visibleResidents.map((resident,index)=>{
+     if(liveDrink?.staging.participant_ids.includes(resident.id))return null
      const anchor=residentAnchors[index]
      const action=resident.currentAction?.source==='life'?resident.currentAction:undefined
      const partnerId=attentionPartner({id:resident.id,type:action?.type,targetNpcId:action?.targetNpcId},visibleResidents.map(other=>({id:other.id})))??visibleResidents.find(other=>other.currentAction?.source==='life'&&other.currentAction.status==='performing'&&other.currentAction.targetNpcId===resident.id)?.id
@@ -147,7 +169,7 @@ export function HouseholdInteriorPreview({rooms,resources,language,residents=[],
    {life.shared_meals.length>0&&<span>♨ {language==='zh'?`${residentsById.get(life.shared_meals[0].prepared_by)?.name??'室友'} 留了 ${life.shared_meals.length} 份可以分享的饭菜`:`${residentsById.get(life.shared_meals[0].prepared_by)?.name??'A roommate'} left ${life.shared_meals.length} portions to share`}</span>}
    {life.dirty_dishes_count>0&&<span>◫ {language==='zh'?'水槽边还有待收拾的餐具':'There are still dishes to clean'}</span>}
   </div>}
-  <div className="household-interior-preview__caption"><div><small>{language==='zh'?'共享住宅实时切面':'LIVE SHARED-HOME CUTAWAY'}</small><b>{selectedName}</b>{detailCopy&&<span>{detailCopy}</span>}</div>{rooms.length>1&&<nav aria-label={language==='zh'?'切换房间':'Choose a room'}>{rooms.map(room=><button type="button" key={room.id} className={room.id===selected?.id?'is-active':''} onClick={()=>{setTracking(false);setSelectedId(room.id)}} aria-pressed={room.id===selected?.id}>{roomName(room,language)}</button>)}</nav>}</div>
+  <div className="household-interior-preview__caption"><div><b>{selectedName}</b>{residentFocus&&<div className="household-focus-actions">{targetRoom&&<button type="button" aria-label={language==='zh'?'定位所选居民':'Locate selected resident'} onClick={()=>{setTracking(true);setSelectedId(targetRoom);setLocateRequest(value=>value+1)}}>{language==='zh'?'定位':'Locate'}</button>}{target&&onMemberInteract&&!privateAction(target)&&<button type="button" onClick={()=>onMemberInteract(target.id)}>{target.isHome===false?(language==='zh'?'回地图':'Map'):(language==='zh'?'交谈':'Talk')}</button>}</div>}</div>{rooms.length>1&&<nav aria-label={language==='zh'?'切换房间':'Choose a room'}>{rooms.map(room=><button type="button" key={room.id} className={room.id===selected?.id?'is-active':''} onClick={()=>{setTracking(false);setSelectedId(room.id)}} aria-pressed={room.id===selected?.id}>{roomName(room,language)}</button>)}</nav>}</div>
  </section>
  </>
 }

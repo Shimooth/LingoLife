@@ -15,6 +15,7 @@ import {
 import {cameraDampingAlpha,cameraPoseSettled,followCameraZoom,followViewOffset,topViewOffset} from './worldCamera'
 import {buildPedestrianRoute,buildPedestrianRouteForRoads,samplePedestrianRoute,type PedestrianRoute} from './worldNavigation'
 import {residentSidewalkOffset,uniformBuildingScale} from './worldTransforms'
+import {trafficRoutes} from './ambientTraffic'
 import type {WorldLayoutBuilding,WorldLayoutDocument,WorldLayoutPlacement} from '../../worldLayout'
 
 type Quality='low'|'high'
@@ -138,6 +139,40 @@ function AssetObject({model,item,castShadow=false,receiveShadow=false}:{model:Ka
  return <primitive object={object} position={item.position} rotation={[0,item.rotation,0]} scale={item.scale}/>
 }
 
+function AmbientTraffic({roads,reducedMotion}:{roads:readonly RoadTilePlacement[];reducedMotion:boolean}){
+ const groups=useRef<(THREE.Group|null)[]>([]),elapsed=useRef(0)
+ const routes=useMemo(()=>trafficRoutes(roads).map(route=>{
+  const curve=new THREE.CatmullRomCurve3(route.points.map(([x,z])=>new THREE.Vector3(x,.47,z)),route.closed,'catmullrom',.1)
+  return {...route,curve,length:curve.getLength()}
+ }),[roads])
+ const fleet=useMemo(()=>routes.flatMap((route,routeIndex)=>{
+  // Bounded fleet: all three gateways in both directions, plus local circulation.
+  const count=route.closed?3:2
+  return Array.from({length:count},(_,index)=>({route,index,count,offset:(index+(routeIndex%3)*.19)/count,model:(['car_taxi','car_sedan','car_hatchback'] as const)[(index+routeIndex)%3]}))
+ }),[routes])
+ const scratch=useMemo(()=>({position:new THREE.Vector3(),tangent:new THREE.Vector3()}),[])
+ useFrame((_,delta)=>{
+  if(!routes.length||reducedMotion)return
+  elapsed.current+=Math.min(delta,.05)
+  groups.current.forEach((group,index)=>{
+   if(!group||!fleet[index])return
+   const vehicle=fleet[index],{route}=vehicle
+   const t=(elapsed.current*1.45/route.length+vehicle.offset)%1
+   route.curve.getPointAt(t,scratch.position);route.curve.getTangentAt(t,scratch.tangent)
+   // Stay in one lane; these are anonymous background vehicles, not resident actions.
+   group.position.copy(scratch.position)
+   group.position.x+=scratch.tangent.z*.39;group.position.z-=scratch.tangent.x*.39
+   group.rotation.y=Math.atan2(scratch.tangent.x,scratch.tangent.z)
+   group.visible=true
+   // Gateway endpoints are inside cloud banks. Scale in/out there only;
+   // no visible jump from an exit back into the city.
+   group.scale.setScalar(route.closed?1:Math.min(1,t*route.length/2,(1-t)*route.length/2))
+  })
+ })
+ if(!routes.length||reducedMotion)return null
+ return <group name="ambient-road-traffic">{fleet.map(({model,route,index:slot},index)=><group key={`${route.id}-${slot}`} visible={false} ref={node=>{groups.current[index]=node}}><AssetObject model={model} item={{id:`ambient-${index}`,position:[0,0,0],rotation:0,scale:1.08}} castShadow receiveShadow/></group>)}</group>
+}
+
 function AuthoredAsset({placement,quality}:{placement:WorldLayoutPlacement;quality:Quality}){
  const {scene}=useGLTF(placement.asset)
  const object=useMemo(()=>{
@@ -155,7 +190,7 @@ class AuthoredAssetBoundary extends Component<{placement:WorldLayoutPlacement;ch
 }
 
 function AuthoredAssets({placements,quality}:{placements:readonly WorldLayoutPlacement[];quality:Quality}){
- const visible=quality==='high'?placements:placements.filter((_,index)=>index%2===0)
+ const visible=placements
  return <group>{visible.map(placement=><AuthoredAssetBoundary key={placement.id} placement={placement}><Suspense fallback={null}><AuthoredAsset placement={placement} quality={quality}/></Suspense></AuthoredAssetBoundary>)}</group>
 }
 
@@ -211,7 +246,7 @@ function CameraRig({focus,focusVersion,followedCharacterId,followCameraOffset,fo
    :Math.min(size.width/(viewMode==='top'?52:56),size.height/(viewMode==='top'?35:33))*.96
   const focusFit=Math.min(52,Math.max(30,size.height/17))
   const followFit=followCameraZoom(size.width)
-  desiredZoom.current=following?followFit:focused?(viewMode==='top'?Math.min(30,focusFit):focusFit):overviewFit
+  desiredZoom.current=following?followFit:focused?(viewMode==='top'?Math.min(30,focusFit):focusFit):overviewFit*(viewMode==='top'?1.08:1.18)
   moving.current=true
   if(reducedMotion){
    camera.position.copy(desiredPosition.current)
@@ -501,17 +536,17 @@ function resolveCityLayout(landmarks:readonly CityLandmark[],characters:readonly
  }
 }
 
-function CityFabric({buildings,quality}:{buildings:readonly FabricBuildingPlacement[];quality:Quality}){
+function CityFabric({buildings}:{buildings:readonly FabricBuildingPlacement[];quality:Quality}){
  return <group>
   <AssetInstances model="base" receiveShadow items={buildings.map(building=>({id:`lot-${building.id}`,position:[building.position[0],.238,building.position[1]],rotation:building.rotation,scale:ROAD_TILE_SCALE}))}/>
-  {([...BUILDING_MODELS.residential,...BUILDING_MODELS.commercial,...BUILDING_MODELS.public] as KayKitBuildingModel[]).map(model=><StableBuildingInstances key={model} model={model} castShadow={quality==='high'} receiveShadow items={buildings.filter(building=>building.model===model).map(building=>({id:building.id,position:[building.position[0],building.y??.369,building.position[1]],rotation:building.rotation,scale:building.scale}))}/>) }
+  {([...BUILDING_MODELS.residential,...BUILDING_MODELS.commercial,...BUILDING_MODELS.public] as KayKitBuildingModel[]).map(model=><StableBuildingInstances key={model} model={model} castShadow receiveShadow items={buildings.filter(building=>building.model===model).map(building=>({id:building.id,position:[building.position[0],building.y??.369,building.position[1]],rotation:building.rotation,scale:building.scale}))}/>) }
  </group>
 }
 
-function ResidentialHomes({homes,quality,language,onSelect}:{homes:readonly HomePlacement[];quality:Quality;language:'zh'|'en';onSelect:(home:HomePlacement)=>void}){
+function ResidentialHomes({homes,language,onSelect}:{homes:readonly HomePlacement[];quality:Quality;language:'zh'|'en';onSelect:(home:HomePlacement)=>void}){
  return <group>
   <AssetInstances model="base" receiveShadow items={homes.map(home=>({id:`home-lot-${home.character.id}`,position:[home.position[0],.238,home.position[2]],rotation:home.rotation,scale:ROAD_TILE_SCALE}))}/>
-  {BUILDING_MODELS.residential.map(model=><StableBuildingInstances key={model} model={model} castShadow={quality==='high'} receiveShadow items={homes.filter(home=>home.model===model).map(home=>({id:`home-${home.character.id}`,position:home.position,rotation:home.rotation,scale:home.scale}))}/>) }
+  {BUILDING_MODELS.residential.map(model=><StableBuildingInstances key={model} model={model} castShadow receiveShadow items={homes.filter(home=>home.model===model).map(home=>({id:`home-${home.character.id}`,position:home.position,rotation:home.rotation,scale:home.scale}))}/>) }
   {homes.map(home=><Html key={`home-label-${home.character.id}`} center position={[home.position[0],home.position[1]+BUILDING_HEIGHT[home.model]*home.scale+.58,home.position[2]]} zIndexRange={[24,2]}>
    <button type="button" className="world3d-home" onClick={event=>{event.stopPropagation();onSelect(home)}} aria-label={language==='zh'?'共享住宅':'Shared home'}><span aria-hidden>⌂</span>{language==='zh'?'共享住宅':'Shared home'}<small>{language==='zh'?`${home.residents.length} 位居民`:`${home.residents.length} residents`}</small></button>
   </Html>)}
@@ -555,9 +590,9 @@ function Trees({quality,occupiedPositions,authored}:{quality:Quality;occupiedPos
  </group>
 }
 
-function LandmarkModelInstances({model,items,quality,onHover,onSelect}:{model:KayKitBuildingModel;items:readonly LandmarkPlacement[];quality:Quality;onHover:(id?:string)=>void;onSelect:(landmark:CityLandmark)=>void}){
+function LandmarkModelInstances({model,items,onHover,onSelect}:{model:KayKitBuildingModel;items:readonly LandmarkPlacement[];quality:Quality;onHover:(id?:string)=>void;onSelect:(landmark:CityLandmark)=>void}){
  const {geometry,material}=useKayKitMesh(model)
- return <Instances geometry={geometry} material={material} limit={items.length} castShadow={quality==='high'} receiveShadow>
+ return <Instances geometry={geometry} material={material} limit={items.length} castShadow receiveShadow>
   {items.map(item=><group key={item.landmark.id} position={item.position} rotation={[0,item.rotation,0]} scale={item.scale}>
    <Instance
     scale={1}
@@ -773,6 +808,7 @@ export function WorldScene({characters,landmarks,followedCharacterId,serverTime,
   <CityFabric buildings={layout.fillerBuildings} quality={quality}/>
   <ResidentialHomes homes={layout.homePlacements} quality={quality} language={language} onSelect={home=>{const householdId=home.character.householdId;if(householdId&&onHouseholdOpen)onHouseholdOpen(householdId);else onCharacterClick(home.character.id)}}/>
   <StreetLife quality={quality} occupiedPositions={layout.occupiedPositions} authored={worldLayout?.city.props}/>
+  <AmbientTraffic roads={authoredRoads.length?authoredRoads:ROAD_TILES} reducedMotion={reducedMotion}/>
   <Trees quality={quality} occupiedPositions={layout.occupiedPositions} authored={worldLayout?.city.decorations}/>
   <LandmarkBuildings placements={layout.landmarkPlacements} selectedId={selectedLandmarkId} hoveredId={hoveredLandmarkId} language={language} night={night} quality={quality} onHover={setHoveredLandmarkId} onSelect={onLandmarkSelect}/>
   {characterNavigation.map(({character,origin,route,parcelIndex,parcelCount})=><CharacterMarker key={character.id} character={character} lot={origin} parcelIndex={parcelIndex} parcelCount={parcelCount} route={route} active={character.id===followedCharacterId} actors={actors} serverTime={serverTime} reducedMotion={reducedMotion} language={language} onClick={()=>onCharacterClick(character.id)} onEvent={onCharacterEvent} onTrouble={onCharacterTrouble?()=>onCharacterTrouble(character.id):undefined} onJourneyElapsed={onJourneyElapsed}/>)}

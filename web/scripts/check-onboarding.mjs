@@ -16,6 +16,13 @@ const constantRandom=value=>()=>value
 if(ONBOARDING_ARCHETYPE_COUNT<ONBOARDING_MAX_RESIDENTS)fail('there are fewer distinct archetypes than the maximum resident count')
 
 const defaultResidents=createOnboardingResidents(undefined,constantRandom(0))
+// Every natural-language preset is Chinese; IDs/enums remain API-compatible.
+for(let index=0;index<ONBOARDING_ARCHETYPE_COUNT;index++){
+ const {profile}=createOnboardingResidents(2,constantRandom(index/ONBOARDING_ARCHETYPE_COUNT))[0]
+ for(const field of ['name','relationship','occupation','personality','interests','likes','dislikes','quirks','habits','boundaries','longTermGoal']){
+  for(const value of [profile[field]].flat())if(!/\p{Script=Han}/u.test(value)||/[a-z]/i.test(value))fail(`${field} is not a Chinese default: ${value}`)
+ }
+}
 if(defaultResidents.length!==ONBOARDING_MIN_RESIDENTS)fail('the default household does not begin with two residents')
 if(!onboardingResidentsAreValid(defaultResidents))fail('default resident profiles are invalid')
 const socialContract=(await import('../src/onboardingProfiles.ts')).buildOnboardingSocialContract(defaultResidents,[{leftKey:defaultResidents[0].key,rightKey:defaultResidents[1].key,leftRole:'parent',rightRole:'child'}],[{id:'shared-test',participantKeys:[defaultResidents[0].key,defaultResidents[1].key],kind:'shared_project',summary:'They once made something together.',tone:'warm'}])

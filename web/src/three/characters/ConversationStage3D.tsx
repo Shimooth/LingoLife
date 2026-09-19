@@ -1,7 +1,10 @@
 import { Suspense, useRef, useState, type ReactNode } from 'react'
-import { Canvas, useFrame } from '@react-three/fiber'
-import { ContactShadows, Html, PerspectiveCamera } from '@react-three/drei'
-import { MathUtils, Mesh, type Group, type Material } from 'three'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import { ContactShadows, PerspectiveCamera } from '@react-three/drei'
+import { Box3, MathUtils, Mesh, Vector3, type Group, type Material } from 'three'
+import {CharacterOverhead} from './CharacterOverhead'
+import {speechPlacement} from './speechPlacement'
+import {visibleCharacterBounds} from './visibleCharacterBounds'
 import { deriveAnimationExpression } from '../../life/characterExpression'
 import { CharacterEmote } from './CharacterEmote'
 import { DirectedCharacter3D } from './DirectedCharacter3D'
@@ -10,6 +13,8 @@ import './characters.css'
 import {IndoorEnvironment3D} from '../interiors'
 import {selectSceneSpeech} from '../../conversationOpening'
 import {StreetConversationEnvironment} from './StreetConversationEnvironment'
+import {AdaptiveResolution,SceneLighting,SceneLook} from '../rendering/SceneLook'
+import {useVisualBudget} from '../rendering/useVisualBudget'
 
 type Palette = { sky: string; horizon: string; floor: string; accent: string; light: string }
 
@@ -32,6 +37,40 @@ function inferAtmosphere(locationKind?: string): ConversationAtmosphere {
   if (/office|studio|school|university|hospital/.test(kind)) return 'office'
   if (/evening|night|music|theatre|theater/.test(kind)) return 'evening'
   return 'neutral'
+}
+
+function ConversationCamera(){
+ const size=useThree(state=>state.size)
+ return <PerspectiveCamera makeDefault position={[0,2.1,size.width/Math.max(1,size.height)<.8?8.6:7.2]} fov={37} near={.1} far={40}/>
+}
+
+function NpcPlacement({children}:{children:ReactNode}){
+ const size=useThree(state=>state.size)
+ const group=useRef<Group>(null)
+ const scratch=useRef({head:new Vector3(),foot:new Vector3(),box:new Box3(),part:new Box3(),last:'',elapsed:1})
+ const aspect=size.width/Math.max(1,size.height)
+ useFrame(({camera,gl},delta)=>{
+  if(!group.current)return
+  scratch.current.elapsed+=delta
+  if(scratch.current.elapsed<.12)return
+  scratch.current.elapsed=0
+  const stage=gl.domElement.closest<HTMLElement>('.conversation-stage-3d')
+  if(!stage)return
+  const {head,foot,box}=scratch.current
+  visibleCharacterBounds(group.current,box,scratch.current.part)
+  if(box.isEmpty())return
+  box.getCenter(head);foot.copy(head);head.y=box.max.y+.2;foot.y=box.min.y
+  head.project(camera);foot.project(camera)
+  const x=(head.x+1)*size.width/2,y=(1-head.y)*size.height/2
+  const bubbleHeight=stage.querySelector<HTMLElement>('.world-speech__surface')?.offsetHeight||180
+  const {mode,...placement}=speechPlacement(size.width,size.height,x,y,Math.abs(foot.y-head.y)*size.height/2,bubbleHeight)
+  const signature=mode+Object.values(placement).map(Math.round).join(':')
+  if(signature===scratch.current.last)return
+  scratch.current.last=signature
+  stage.dataset.speechPlacement=mode
+  for(const [key,value] of Object.entries(placement))stage.style.setProperty(`--speech-${key}`,`${Math.round(value)}px`)
+ })
+ return <group ref={group} position={[aspect<.8?.05:aspect<1.3?.7:1.48,.02,-.28]} rotation={[0,-.16,0]}>{children}</group>
 }
 
 function ObserverPresence({ accent }: { accent: string }) {
@@ -70,7 +109,7 @@ function SpeechBubble({ line, name, side, language, translationVisible, onToggle
   const translationLabel = translationVisible
     ? (language === 'zh' ? '收起翻译' : 'Hide translation')
     : (language === 'zh' ? '查看翻译' : 'Show translation')
-  return <article className={`world-speech world-speech--${side}`}>
+  return <article className={`world-speech world-speech--${side}${translationVisible&&line.translation?' is-translated':''}`}>
     <div className="world-speech__surface">
       <div className="world-speech__message" role="status" aria-live={line.streaming ? 'polite' : 'off'} aria-atomic="true">
         <strong>{name}</strong>
@@ -83,6 +122,7 @@ function SpeechBubble({ line, name, side, language, translationVisible, onToggle
 }
 
 export function ConversationStage3D({ npcAvatar, playerAvatar, showPlayerAvatar = false, npcName, playerName, place, locationKind, atmosphere: requestedAtmosphere, npcAnimation, playerAnimation, performance, performanceKey, liveSpeech, messages = [], language = 'zh', showTranslation, onTranslationChange, className = '', reducedMotion = false, sceneryMode = false, interiorPlacements }: ConversationStage3DProps) {
+ const visualBudget=useVisualBudget()
   const [internalTranslation, setInternalTranslation] = useState(false)
   const atmosphere = requestedAtmosphere ?? inferAtmosphere(locationKind)
   const palette = atmospheres[atmosphere]
@@ -111,27 +151,24 @@ export function ConversationStage3D({ npcAvatar, playerAvatar, showPlayerAvatar 
   const npcExpression = deriveAnimationExpression(npcMotion, `conversation:${npcName}:${lineKey}:${npcMotion}`)
   const showNpcExpression = speaker === 'npc' && !fallbackLine?.streaming && ['happy','sad','tired','jump','crouch','push'].includes(npcMotion)
   const you = playerName ?? (language === 'zh' ? '你' : 'You')
-  const compactViewport = typeof window !== 'undefined' && window.matchMedia('(max-width: 779px)').matches
 
   return <section className={`conversation-stage-3d ${sceneryMode ? 'is-scenery' : ''} ${reducedMotion ? 'is-reduced-motion' : ''} ${className}`.trim()} style={{ '--conversation-sky': palette.sky } as React.CSSProperties} aria-label={language === 'zh' ? `在${place ?? '天空之城'}与${npcName}对话` : `Conversation with ${npcName} at ${place ?? 'the Sky City'}`}>
-    <Canvas dpr={[1, 1.65]} gl={{ antialias: true, alpha: true }}>
+    <Canvas shadows="percentage" dpr={visualBudget.dpr} gl={{ antialias: true, alpha: true }}>
       {locationKind==='street'&&<color attach="background" args={['#c6dce1']}/>}
       <fog attach="fog" args={locationKind==='street'?['#c6dce1',22,38]:[palette.sky, 8, 18]} />
-      <PerspectiveCamera makeDefault position={[0, 2.1, 7.2]} fov={37} near={.1} far={40} />
-      <ambientLight intensity={1.15} />
-      <hemisphereLight args={[palette.light, palette.floor, 1.7]} />
-      <directionalLight position={[-4, 7, 6]} intensity={2.4} color={palette.light} castShadow />
-      <pointLight position={[4, 3, 2]} intensity={10} distance={9} color={palette.accent} />
+      <ConversationCamera/>
+      <SceneLook/><SceneLighting portrait/><AdaptiveResolution onTier={visualBudget.onTier}/>
       {atmosphere==='home'&&<Suspense fallback={null}><IndoorEnvironment3D theme="home_lounge" placements={interiorPlacements}/></Suspense>}
       {locationKind==='street'&&<Suspense fallback={null}><StreetConversationEnvironment/></Suspense>}
       <FadingCast hidden={sceneryMode} immediate={reducedMotion}>
         {showPlayerAvatar && playerAvatar
           ? <group position={[-1.92, -.05, 1.28]} rotation={[0, .2, 0]}><DirectedCharacter3D avatar={playerAvatar} animation={playerMotion} performanceMode={speaker === 'player' ? 'conversation_speak' : 'conversation_listen'} performanceKey={`player:${lineKey}`} reducedMotion={reducedMotion} detail="portrait" scale={1.18} name={you} seed={you} /></group>
           : <ObserverPresence accent={palette.accent} />}
-        <group position={[compactViewport ? .72 : 1.48, .02, -.28]} rotation={[0, compactViewport ? -.08 : -.16, 0]}>
+        <NpcPlacement>
+          <CharacterOverhead label={showNpcExpression&&!sceneryMode?<CharacterEmote key={npcExpression.key} expression={npcExpression} language={language} size={30} className="conversation-stage-3d__emote"/>:null}>
           <DirectedCharacter3D avatar={npcAvatar} animation={npcMotion} performance={speaker === 'npc' && !fallbackLine?.streaming ? performance : undefined} performanceMode={npcPerformanceMode} performanceKey={`npc:${lineKey}`} reducedMotion={reducedMotion} scale={1.02} name={npcName} seed={npcName} />
-          {showNpcExpression && !sceneryMode && <Html center position={[0,1.78,0]} zIndexRange={[6,4]}><CharacterEmote key={npcExpression.key} expression={npcExpression} language={language} size={34} className="conversation-stage-3d__emote" /></Html>}
-        </group>
+          </CharacterOverhead>
+        </NpcPlacement>
       </FadingCast>
       <ContactShadows position={[0, -.2, .15]} opacity={.34} scale={8} blur={2.6} far={4} />
     </Canvas>

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>原生角色表情验收</title></head>
+<body><main id="root"></main><script type="module">
+import React from 'react';import {createRoot} from 'react-dom/client';
+import {Canvas} from '@react-three/fiber';import {PerspectiveCamera} from '@react-three/drei';
+import {AssetCharacter3D} from '/src/three/characters/AssetCharacter3D.tsx';
+import {SceneLighting,SceneLook} from '/src/three/rendering/SceneLook.tsx';
+import {defaultAvatar} from '/src/avatar.ts';
+const h=React.createElement;
+function Review(){
+ const [model,setModel]=React.useState('city-01'),[expression,setExpression]=React.useState('neutral'),[paused,setPaused]=React.useState(false),[attention,setAttention]=React.useState(0);
+ const cameraY=model==='chibi'?1.75:2.42;
+ return h(React.Fragment,null,h('nav',null,
+ h('label',null,'模型 ',h('select',{value:model,onChange:e=>setModel(e.target.value)},...['city-01','city-03','city-04','chibi'].map(value=>h('option',{key:value},value)))),
+ h('label',null,'表情 ',h('select',{value:expression,onChange:e=>setExpression(e.target.value)},...['neutral','happy','displeased','sleepy','curious'].map((value,i)=>h('option',{key:value,value},['自然','开心','不满','困倦','疑惑'][i])))),
+ h('label',null,h('input',{type:'checkbox',checked:paused,onChange:e=>setPaused(e.target.checked)}),'静态对照'),
+ h('label',null,'视线 ',h('input',{type:'range',min:-1,max:1,step:.1,value:attention,onChange:e=>setAttention(Number(e.target.value))}))),
+ h('section',{style:{height:'calc(100dvh - 110px)',minHeight:350}},h(Canvas,{dpr:1.3,shadows:'percentage'},
+ h(PerspectiveCamera,{key:model,makeDefault:true,position:[0,cameraY,4],fov:24}),h(SceneLighting,{portrait:true}),h(SceneLook),
+ h(React.Suspense,{fallback:null},h(AssetCharacter3D,{avatar:{...defaultAvatar,model,hair:'hair-one',outfit:'student',accessory:'none'},animation:'idle',animationPaused:paused,seed:'face-review',faceExpression:expression,faceAttention:attention})))),
+ h('p',null,'仅本地视觉验收，不访问账号或 AI。City-04 保留原样；Chibi 只保留微小视线，不压扁眼睛或眨眼。嘴部不是口型同步。'));
+}
+createRoot(document.getElementById('root')).render(h(React.StrictMode,null,h(Review)));
+</script><style>body{margin:0;background:#d5e1d7;color:#304838;font:15px system-ui}nav{display:flex;flex-wrap:wrap;gap:16px;padding:14px}label{display:flex;align-items:center;gap:6px}select{font:inherit}p{margin:8px 16px}</style></body></html>

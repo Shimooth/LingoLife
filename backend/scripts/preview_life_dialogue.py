@@ -24,6 +24,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--live", action="store_true", help="Explicitly allow a small paid API sample")
     parser.add_argument("--borrowing", action="store_true", help="只检查三种借物冲突，最多六次模型调用")
+    parser.add_argument("--case", help="只检查指定虚构场景，不生成开场；最多两次模型调用")
     args = parser.parse_args()
     if not args.live:
         parser.error("Use --live to explicitly allow synthetic API samples")
@@ -71,7 +72,11 @@ def main():
              "Charles borrowed a personal item belonging to Guai without asking.", "Charles 没问就借走了 Guai 的私人物品。",
              {"charles": "deny_responsibility", "guai": "state_borrowing_rule"}),
         ]
+    if args.case and args.case not in {case[0] for case in cases}:
+        parser.error("--case 必须属于当前场景组；借物场景还需 --borrowing")
     for key, ids, topic, scenario, facts, en, zh, responses in cases:
+        if args.case and args.case != key:
+            continue
         story = {"id": key, "participant_ids": ids, "summary": en, "summary_zh": zh,
                  "presentation": {"location": {"label": "Library" if key == "blocked" else "Shared home"}}}
         record = {"collision": {"topic": topic, "scenario_id": scenario, "facts": facts},
@@ -84,7 +89,7 @@ def main():
         result = service.scene("synthetic-qa", story, record, profiles)
         reports.append({"case": key, "source": result["source"], "ending": result["ending_reason"],
                         "beats": [{key: beat[key] for key in ("speaker_id", "addressee_id", "text", "translation_zh")} for beat in result["presentation"]["beats"]]})
-    for npc_id in ([] if args.borrowing else profiles):
+    for npc_id in ([] if args.borrowing or args.case else profiles):
         context = {"current_action": {"type": "cook", "status": "performing", "visible_intent": "Preparing food in the shared kitchen."},
                    "conversation": {"id": "synthetic-opening-" + npc_id, "opening": {"text": "I'm preparing food.", "translation": "我在准备吃的。"}}}
         reports.append({"case": "opening-" + npc_id, **service.opening("synthetic-qa", npc_id, profiles[npc_id], context)})

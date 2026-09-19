@@ -17,6 +17,7 @@ from itertools import combinations
 from typing import Any, Iterable, Mapping, MutableMapping, Sequence, cast
 
 from .agent import compile_persona, observable_runtime_state
+from . import pair_memory
 from .life_expression import persona_snapshot
 from .collisions import (
     COLLISION_RULES_VERSION,
@@ -122,6 +123,7 @@ COLLISION_COOLDOWN_SECONDS = {
     "person_environment": 60 * 60,
 }
 from . import dinner as dinner_life
+from . import shared_activities
 
 HOME_ONLY_ACTIONS = frozenset({
     "borrow_household_item", "clean_shared_space", "leave_dishes", "sleep",
@@ -1243,6 +1245,7 @@ class LifeWorldEngine:
         last = _moment(result.get("last_advanced_at"), fallback=current)
         if current <= last:
             return result
+        pair_memory.maintain(result, last)
         profile_map = _profile_map(profiles)
         self._reconcile_residents(result, profile_map, current, home_location_mapping)
         # ``last_advanced_at`` tracks API progress while ``simulation_cursor_at``
@@ -1282,6 +1285,7 @@ class LifeWorldEngine:
                 self.clock.catch_up_blocks(last, current)
             )
         result["last_advanced_at"] = current.isoformat()
+        pair_memory.maintain(result, current)
         result["next_transition_at"] = self._next_transition(result, current)
         self._trim(result, force=True)
         result["revision"] = int(result.get("revision", 0)) + 1
@@ -1688,11 +1692,15 @@ class LifeWorldEngine:
                                  "relationship_policy": self._relationship_policy(profiles[npc_id])}
 
         for npc_id, resident in residents.items():
+            # Older saves may retain residents whose editable profile no
+            # longer exists. Keep their historical inventory; do not make
+            # loading every life story fail during label backfill.
+            profile = profiles.get(npc_id, {})
             resident.setdefault(
                 "personal_inventory",
-                self._initial_personal_inventory(npc_id, profiles[npc_id]),
+                self._initial_personal_inventory(npc_id, profile),
             )
-            defaults = {item["kind"]: item for item in self._initial_personal_inventory(npc_id, profiles[npc_id])}
+            defaults = {item["kind"]: item for item in self._initial_personal_inventory(npc_id, profile)}
             for item in resident["personal_inventory"]:
                 if isinstance(item, MutableMapping) and item.get("kind") in defaults:
                     for label_key in ("label_en", "label_zh"):
@@ -1700,7 +1708,7 @@ class LifeWorldEngine:
             # Expectations are editable public causes, unlike accumulated
             # inventory facts. Refresh them when the resident profile changes.
             resident["shared_rule_expectations"] = self._shared_rule_expectations(
-                profiles[npc_id],
+                profile,
             )
 
         # Preserve open stories, unresolved responsibilities and historical
@@ -2038,6 +2046,7 @@ class LifeWorldEngine:
             reason = f"urgent_need:{urgent_need}" if urgent_need else "active_incident"
             self._record_schedule_consequence(state, npc_id, active_block, reason, now)
         meal_action = dinner_life.hint(state, npc_id, now)
+        shared_activity = None
         if (meal_action and not urgent_need and not active_incident
                 and (not active_block or active_block.get("kind") not in {"work", "study", "sleep_window", "accepted_invitation"})):
             meal_candidate = next((item for item in decision.ranked if item.action_type == meal_action), None)
@@ -2046,6 +2055,19 @@ class LifeWorldEngine:
                 # actions. Never interrupt private activity or urgent needs.
                 meal_candidate = replace(meal_candidate, reasons=(*meal_candidate.reasons, "accepted_shared_meal"))
                 decision = self._decision_with_candidate(decision, meal_candidate, state["player_id"], npc_id)
+        activity_hint = shared_activities.hint(state, npc_id, now)
+        if (activity_hint and not meal_action and not urgent_need and not active_incident
+                and now >= shared_activities.clock(activity_hint['join_after'])
+                and (not active_block or active_block.get('kind') not in {'work', 'study', 'sleep_window', 'accepted_invitation'})):
+            activity_candidate = next((item for item in decision.ranked
+                                      if item.action_type == shared_activities.KINDS[activity_hint['kind']][2]), None)
+            if activity_candidate:
+                shared_activity = activity_hint
+                # A short shared session needs no exclusive hobby resource.
+                activity_candidate = replace(activity_candidate, target_resource_id=None,
+                    target_npc_id=next(key for key in activity_hint['participants'] if key != npc_id),
+                    reasons=(*activity_candidate.reasons, 'accepted_shared_activity'))
+                decision = self._decision_with_candidate(decision, activity_candidate, state['player_id'], npc_id)
         target_location = resident.get("current_location_id")
         coordinated_meeting: tuple[str, LifeAction] | None = None
         if decision.selected.target_resource_id in resources:
@@ -2128,6 +2150,8 @@ class LifeWorldEngine:
             and active_block.get("location_id")
         ):
             target_location = str(active_block["location_id"])
+        if shared_activity:
+            target_location = shared_activity['location_id']
         if coordinated_meeting:
             travel, journey = 0, None
         else:
@@ -2153,6 +2177,14 @@ class LifeWorldEngine:
             current_location_id=resident.get("current_location_id"),
             target_location_id=target_location, travel_seconds=travel, catalog=self.catalog,
         )
+        if shared_activity:
+            # Do not award a full hour's learning/need rewards for four minutes.
+            fraction = min(1, 240 / action.duration_seconds)
+            action = replace(action, duration_seconds=240,
+                             need_deltas={k: round(v*fraction) for k, v in action.need_deltas.items()},
+                             emotion_deltas={k: round(v*fraction) for k, v in action.emotion_deltas.items()},
+                             resource_deltas={})
+            shared_activity['assigned_actions'][npc_id] = action.id
         if meal_commitment:
             # Authored compact meal variants. These are new commitments, never
             # fast-forwarding already-running actions or awarding partial work.
@@ -2176,6 +2208,7 @@ class LifeWorldEngine:
         if coordinated_meeting and action.status == "performing":
             resident["current_location_id"] = target_location
         if action.status == "performing":
+            shared_activities.started(state, npc_id, action, now)
             dinner_life.started(state, profiles, npc_id, action, now, self.clock.game_date(now).isoformat(), period)
         resident["decision_serial"] = serial
         resident["runtime"] = runtime
@@ -2198,6 +2231,7 @@ class LifeWorldEngine:
         (arrival, completion, retry, reservation expiry, or story deadline).
         """
         elapsed = max(0, (end - start).total_seconds())
+        pair_memory.maintain(state, end)
         for npc_id in sorted(state["residents"]):
             self._decay_runtime(state["residents"][npc_id], elapsed, end)
         for key, raw in list(state["relationships"].items()):
@@ -2213,11 +2247,13 @@ class LifeWorldEngine:
         resource_map = self._resource_map(state)
         window = self.clock.decision_window(end)
         dinner_life.advance(state, profiles, end)
+        shared_activities.advance(state, end)
         for npc_id in sorted(state["residents"]):
             resident = state["residents"][npc_id]
             self._ensure_daily_plans(state, profiles, npc_id, end)
             meal_block = self._active_plan_block(resident, end)
-            if (dinner_life.ready_to_switch(state, npc_id, end)
+            if ((dinner_life.ready_to_switch(state, npc_id, end)
+                    or (not dinner_life.hint(state, npc_id, end) and shared_activities.ready_to_switch(state, npc_id, end)))
                     and not self._urgent_need(resident["runtime"])
                     and not self._has_active_incident(state, npc_id)
                     and (not meal_block or meal_block.get("kind") not in {"work", "study", "sleep_window", "accepted_invitation"})):
@@ -2328,6 +2364,7 @@ class LifeWorldEngine:
                     break
             resident["current_action"] = action.to_dict()
             if action.status == "performing":
+                shared_activities.started(state, npc_id, action, end)
                 dinner_life.started(state, profiles, npc_id, action, end, self.clock.game_date(end).isoformat(), window.period)
 
         self._process_ended_plan_blocks(state, end)
@@ -2335,6 +2372,7 @@ class LifeWorldEngine:
         dinner_life.advance(state, profiles, end)
         self._detect_and_record(state, profiles, window.key, end)
         self._settle_due_stories(state, profiles, end)
+        shared_activities.advance(state, end)
         state["simulation_cursor_at"] = end.isoformat()
         self._trim(state)
 
@@ -2618,6 +2656,7 @@ class LifeWorldEngine:
                     })
             if at_shared_home:
                 dinner_life.completed(state, resident, action, now)
+            shared_activities.completed(state, action.npc_id, action, now)
             applied.append(action.id)
             resident["completed_action_count"] = int(resident.get("completed_action_count", 0)) + 1
             state["metrics"]["completed_actions"] = int(state["metrics"].get("completed_actions", 0)) + 1
@@ -2650,9 +2689,6 @@ class LifeWorldEngine:
     def _collision_profiles(self, state: Mapping[str, Any],
                             profiles: Mapping[str, Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]:
         result = {}
-        subjective_memories = tuple(
-            item for item in state.get("memory_seeds", ()) if isinstance(item, Mapping)
-        )
         for npc_id, profile in profiles.items():
             value = dict(profile)
             persona = compile_persona(profile)
@@ -2667,10 +2703,7 @@ class LifeWorldEngine:
             }.get(str(behavior.get("pride")), 50)
             if npc_id in state["residents"]:
                 value["emotion"] = dict(state["residents"][npc_id]["runtime"].get("emotion") or {})
-            value["memory_context"] = [
-                dict(item) for item in subjective_memories
-                if str(item.get("npc_id") or "") == npc_id
-            ][-8:]
+            value["memory_context"] = pair_memory.decision_context(state, npc_id)
             result[npc_id] = value
         return result
 
@@ -2908,6 +2941,9 @@ class LifeWorldEngine:
             cooldown = timedelta(seconds=COLLISION_COOLDOWN_SECONDS[collision.kind])
             if last_occurrence is not None and now < last_occurrence + cooldown:
                 continue
+            activity = shared_activities.offer(state, collision, profiles, now)
+            if activity:
+                collision = replace(collision, facts={**collision.facts, **shared_activities.facts(activity)})
             resolution = self.collisions.resolve(collision, profiles=profile_map,
                                                  relationships=edges, settled_at=now)
             disclosure = decide_trouble_disclosure(
@@ -2933,6 +2969,19 @@ class LifeWorldEngine:
                 existing_thread_intensity=int(existing_thread.get("intensity", 0)) if existing_thread else 0,
             )
             story = story_from_collision(collision, resolution, context=context, now=now)
+            # Routine repetitions still settle, but need not take another card
+            # in the player's feed. Escalations/management windows stay visible.
+            if (not activity and story.level == 'moment' and story.status != 'intervention_window' and not story.trouble_signal
+                    and collision.severity < 35 and not existing_thread):
+                recent = [record for record in state['stories'].values()
+                          if record.get('collision') and record['story'].get('observable')
+                          and record['story'].get('level') == 'moment'
+                          and record['collision'].get('topic') == collision.topic
+                          and now - _moment(record['story']['created_at']) < timedelta(hours=6)]
+                repeated_pair = any(set(record['collision'].get('participant_ids', [])) == set(collision.participant_ids) for record in recent)
+                topic_budget_used = sum(now - _moment(record['story']['created_at']) < timedelta(hours=2) for record in recent) >= 2
+                if repeated_pair or topic_budget_used:
+                    story = replace(story, observable=False)
             story = self._offer_story_interventions(state, profiles, story, collision, resolution, now)
             if story.id not in state["stories"]:
                 # Persist the observable performance at the same time as the
@@ -3101,6 +3150,7 @@ class LifeWorldEngine:
                           instructions: Mapping[str, str], memories: Sequence[Mapping[str, str]],
                           aftermath: Sequence[Mapping[str, Any]], now: datetime,
                           profiles: Mapping[str, Mapping[str, Any]] | None) -> None:
+        shared_activities.settled(state, collision, resolution, now)
         by_action = {raw["current_action"]["id"]: raw for raw in state["residents"].values()}
         for action_id, instruction in instructions.items():
             if action_id in by_action:
@@ -3113,6 +3163,7 @@ class LifeWorldEngine:
             self._apply_autonomous_restock(state, collision, story, now)
         self._apply_relationship_evidence(state, collision, resolution, story, now,
                                           profiles or {})
+        pair_memory.capture(state, collision.to_dict(), resolution.to_dict(), memories, now)
         growth_tags = set(resolution.outcome_tags)
         if story.thread_id and "cooperation" in growth_tags:
             growth_tags.add("resolved")
@@ -3641,6 +3692,12 @@ class LifeWorldEngine:
         if cls._has_due_transition(state, after):
             return after
         candidates: list[datetime] = []
+        for activity in state.get('shared_activities', {}).values():
+            if activity['phase'] not in shared_activities.FINAL:
+                for field in ('join_after', 'deadline'):
+                    boundary = _moment(activity[field])
+                    if boundary > after:
+                        candidates.append(boundary)
         for dinner in (state.get("household_dinners") or {}).values():
             if dinner["phase"] not in dinner_life.FINAL:
                 deadline = _moment(dinner["deadline"])
