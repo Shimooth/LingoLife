@@ -455,7 +455,7 @@ def test_privacy_boundary_requires_arrival_and_real_co_location():
     assert not boundaries
 
 
-def test_behavior_facts_naturally_reach_borrowed_item_noise_and_closed_facility_scenarios():
+def test_behavior_facts_require_actual_borrowing_and_reach_noise_and_closed_facility(monkeypatch):
     profiles = _profiles()
     homes = {
         npc_id: {"household_id": f"household-{npc_id}", "location_id": f"home-{npc_id}"}
@@ -478,8 +478,16 @@ def test_behavior_facts_naturally_reach_borrowed_item_noise_and_closed_facility_
     })
 
     boundaries, environment = engine._fact_events(state, NOW)
-    assert "borrowed_item" in {item["kind"] for item in boundaries}
+    # Practising a hobby in someone else's home is not proof of taking an item.
+    assert "borrowed_item" not in {item["kind"] for item in boundaries}
     assert "noise" in {item["kind"] for item in environment}
+
+    from lingolife.life_world import stable_fraction
+    monkeypatch.setattr("lingolife.life_world.stable_fraction", lambda *parts, **kwargs:
+                        0.0 if parts[-1] == "permission-check" else stable_fraction(*parts, **kwargs))
+    emma.update(action_type="borrow_household_item", target_npc_id="alex")
+    boundaries, _ = engine._fact_events(state, NOW)
+    assert "borrowed_item" in {item["kind"] for item in boundaries}
 
     library = next(item for item in state["resources"] if item["id"] == "city-library-reading-room")
     emma.update({
@@ -490,7 +498,7 @@ def test_behavior_facts_naturally_reach_borrowed_item_noise_and_closed_facility_
     assert "facility" in {item["kind"] for item in environment}
 
 
-def test_established_friends_can_naturally_create_a_borrowed_property_story():
+def test_established_friends_create_a_borrowed_property_story_when_permission_is_skipped(monkeypatch):
     profiles = {
         "a": {"name": "A", "age": 25, "romanceEnabled": False,
               "personality": ["outgoing", "curious"], "interests": ["music"]},
@@ -509,6 +517,10 @@ def test_established_friends_can_naturally_create_a_borrowed_property_story():
     } for owner, target in (("a", "b"), ("b", "a"))]
     engine = LifeWorldEngine(timezone_name="UTC")
     initial = engine.initialize("borrow-natural", profiles, homes, seeds, edges, NOW)
+
+    from lingolife.life_world import stable_fraction
+    monkeypatch.setattr("lingolife.life_world.stable_fraction", lambda *parts, **kwargs:
+                        0.0 if parts[-1] == "permission-check" else stable_fraction(*parts, **kwargs))
 
     state = engine.advance(initial, profiles, NOW + timedelta(hours=1))
 

@@ -127,6 +127,8 @@
         {"id": "return_and_apologize", "style": "cooperative", "weight": 9, "relationship_deltas": {"trust": 1, "tension": -2, "resentment": -2}},
         {"id": "ask_retroactively", "style": "warm", "weight": 5, "relationship_deltas": {"trust": -1, "tension": 1}},
         {"id": "state_borrowing_rule", "style": "boundaried", "weight": 8, "relationship_deltas": {"comfort": -1, "tension": 1}},
+        {"id": "allow_with_reminder", "style": "patient", "weight": 5, "relationship_deltas": {"tension": -1}},
+        {"id": "ask_item_back", "style": "assertive", "weight": 6, "relationship_deltas": {"comfort": -1, "tension": 1}},
         {"id": "deny_responsibility", "style": "confrontational", "weight": 2, "relationship_deltas": {"trust": -5, "tension": 6, "resentment": 6}}
       ],
       "thread_hook": "property_boundary"

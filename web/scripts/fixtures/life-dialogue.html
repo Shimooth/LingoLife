@@ -1,0 +1,35 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Life dialogue QA</title></head><body><div id="root"></div>
+<script type="module">
+import React from 'react';import {createRoot} from 'react-dom/client';
+import {LifeStoryEncounter} from '/src/components/LifeStoryEncounter.tsx';
+import '/src/styles.css';
+const h=React.createElement;
+const base={id:'first',level:'incident',status:'awaiting_management',title:'A quiet minute',title_zh:'一点安静时间',summary:'Charles stopped by while Guai was busy.',summary_zh:'Charles 来找正在忙的 Guai。',participant_ids:['charles','guai'],participants:[{id:'charles',name:'Charles'},{id:'guai',name:'Guai'}],management:{can_intervene:true,actions:[{id:'give_space',label:'Give space',label_zh:'给彼此空间'}]},presentation:{beats:[{speaker_id:'guai',text:'OLD TEMPLATE MUST NOT APPEAR',translation_zh:'旧模板不应出现'}]}};
+const requests=[];window.qaRequests=requests;
+let mode='normal';
+const makeResult=(id,outcome,aftermath)=>({cache_key:id+(outcome?'after':'before'),revision:'fixture',status:'ready',source:mode==='fallback'?'fallback':'ai',outcome,aftermath,ending_reason:'boundary_respected',roles:{charles:'visitor',guai:'unavailable_host'},presentation:{stages:[{id:'exchange',label:'A moment',label_zh:'这一刻'}],beats:(outcome?[
+ ['charles','guai',"I'll leave you to it. See you downstairs?",'那先不打扰你了。楼下见？'],
+ ['guai','charles',"Give me ten minutes. And don't steal my chair.",'给我十分钟。还有，别抢我的椅子。']
+]:[
+ ['charles','guai',"Am I interrupting?",'我打扰到你了吗？'],
+ ['guai','charles',"A bit. I'm trying to finish this.",'有一点。我想先把这个弄完。'],
+ ['charles','guai',"Should I come back?",'那我一会儿再来？'],
+ ['guai','charles',"Please. I keep losing my place.",'拜托了。我老是忘了刚弄到哪儿。'],
+ ['charles','guai',"I'll be downstairs.",'那我在楼下。'],
+ ['guai','charles',"I'll find you when I'm done.",'弄完我就去找你。']
+]).map(([speaker_id,addressee_id,text,translation_zh],index)=>({id:id+String(Boolean(outcome))+index,speaker_id,addressee_id,text:id==='second'?'SECOND SCENE '+text:text,translation_zh,phase:'exchange',animation_cue:'talk',duration_ms:900}))}});
+function Demo(){
+ const [story,setStory]=React.useState(base),[lang,setLang]=React.useState('zh'),[open,setOpen]=React.useState(true);
+ const storyRef=React.useRef(story);storyRef.current=story;
+ window.qaSetMode=value=>{mode=value};window.qaSwitch=()=>setStory({...base,id:'second'});window.qaPoll=()=>setStory(value=>({...value,updated_at:new Date().toISOString()}));window.qaLanguage=()=>setLang(value=>value==='zh'?'en':'zh');
+ const writer=React.useCallback(async(id,signal)=>{
+  requests.push(id);const {outcome,aftermath}=storyRef.current;
+  await new Promise(resolve=>setTimeout(resolve,mode==='slow'?4500:1000));
+  // Deliberately ignore abort: the hook must still reject late completions.
+  if(mode==='error')throw Error('Synthetic transport failure');
+  return makeResult(id,outcome,aftermath);
+ },[]);
+ return open?h(LifeStoryEncounter,{story,language:lang,onDialogue:writer,onClose:()=>setOpen(false),onObserve:async()=>{const next={...story,observed_at:'seen'};setStory(next);return next},onIntervene:async()=>{const next={...story,status:'resolved_with_management',outcome:{mode:'managed',result:'accepted',selected_action:'give_space',participant_reactions:[],consequences:[],aftermath:'They agreed to talk later.',aftermath_zh:'他们决定稍后再聊。'},aftermath:'They agreed to talk later.'};setStory(next);return next}}):h('p',null,'Closed');
+}
+createRoot(document.getElementById('root')).render(h(Demo));
+</script></body></html>

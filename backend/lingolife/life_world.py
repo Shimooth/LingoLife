@@ -17,6 +17,7 @@ from itertools import combinations
 from typing import Any, Iterable, Mapping, MutableMapping, Sequence, cast
 
 from .agent import compile_persona, observable_runtime_state
+from .life_expression import persona_snapshot
 from .collisions import (
     COLLISION_RULES_VERSION,
     Collision,
@@ -1691,6 +1692,11 @@ class LifeWorldEngine:
                 "personal_inventory",
                 self._initial_personal_inventory(npc_id, profiles[npc_id]),
             )
+            defaults = {item["kind"]: item for item in self._initial_personal_inventory(npc_id, profiles[npc_id])}
+            for item in resident["personal_inventory"]:
+                if isinstance(item, MutableMapping) and item.get("kind") in defaults:
+                    for label_key in ("label_en", "label_zh"):
+                        item.setdefault(label_key, defaults[item["kind"]][label_key])
             # Expectations are editable public causes, unlike accumulated
             # inventory facts. Refresh them when the resident profile changes.
             resident["shared_rule_expectations"] = self._shared_rule_expectations(
@@ -2803,32 +2809,44 @@ class LifeWorldEngine:
                 state["residents"].get(home_owner, {}).get("personal_inventory", [])
                 if home_owner else []
             )
-            owned_item = next(
-                (item for item in owner_inventory if isinstance(item, Mapping)
-                 and bool(item.get("available", True))
-                 and str(item.get("kind") or "") in {item_kind, "personal_belonging"}),
-                None,
-            )
+            eligible_items = [item for item in owner_inventory if isinstance(item, Mapping)
+                              and bool(item.get("available", True))
+                              and str(item.get("kind") or "") in {item_kind, "personal_belonging", "hobby_supplies"}]
+            item_index = min(len(eligible_items) - 1, int(stable_fraction(action.id, home_owner or "", "borrow-item") * len(eligible_items)))
+            owned_item = eligible_items[item_index] if eligible_items else None
             owner_expectations = (
                 state["residents"].get(home_owner, {}).get("shared_rule_expectations", {})
                 if home_owner else {}
             )
-            missed_permission = (
-                action.action_type in {"practice_hobby", "borrow_household_item"}
-                or str(owner_expectations.get("borrowing") or "") == "ask_first"
-                and stable_fraction(action.id, home_owner or "", "permission-check") < .5
-                or stable_fraction(action.id, home_owner or "", "permission-check") < .28
-            )
-            if (home_owner and action.status == "performing" and item_kind and missed_permission):
+            # Wanting to borrow is not itself a boundary violation. Most
+            # residents ask; impulsive residents sometimes skip that step.
+            # Sampling is stable for the lifetime of this action, not per poll.
+            actor_rules = state["residents"][actor_id].get("shared_rule_expectations", {})
+            permission_risk = float(actor_rules.get("borrowing_lapse_risk", .12))
+            recent_boundary = any(
+                (record.get("collision") or {}).get("topic") == "borrowed_property"
+                and (record.get("collision") or {}).get("facts", {}).get("actor_id") == actor_id
+                and (record.get("collision") or {}).get("facts", {}).get("affected_id") == home_owner
+                and _moment((record.get("collision") or {}).get("occurred_at")) > now - timedelta(days=2)
+                for record in state.get("stories", {}).values()
+            ) if home_owner else False
+            if recent_boundary:
+                permission_risk *= .25
+            missed_permission = stable_fraction(action.id, home_owner or "", "permission-check") < permission_risk
+            if (home_owner and owned_item and action.status == "performing"
+                    and action.action_type == "borrow_household_item" and missed_permission):
                 boundaries.append({
                     "id": stable_id("boundary", action.id, home_owner, "borrowed-household-item"),
                     "kind": "borrowed_item", "participant_ids": [actor_id, home_owner],
                     "actor_id": actor_id, "affected_id": home_owner,
+                    "borrower_id": actor_id, "owner_id": home_owner,
                     "action_ids": [action.id, actions[home_owner].id],
                     "location_id": action.location_id,
                     "triggers": ["borrowed_without_permission", "relationship_boundary"],
                     "item_id": str((owned_item or {}).get("id") or ""),
                     "item_kind": str((owned_item or {}).get("kind") or item_kind),
+                    "item_label": str(owned_item.get("label_en") or ""),
+                    "item_label_zh": str(owned_item.get("label_zh") or ""),
                     "owner_expectation": str(owner_expectations.get("borrowing") or "ask_first"),
                     "active": True, "violated": True,
                 })
@@ -2930,6 +2948,10 @@ class LifeWorldEngine:
                     "story": story.to_dict(), "collision": collision.to_dict(),
                     "resolution": resolution.to_dict(),
                     "interaction": interaction,
+                    "expression_personas": {
+                        npc_id: persona_snapshot(profile_map.get(npc_id, {}))
+                        for npc_id in collision.participant_ids
+                    },
                     # Disclosure is a persisted decision, not a value that may
                     # reroll after a profile edit or a later conversation.
                     # It stays internal; public DTOs only project the resulting
@@ -3339,16 +3361,36 @@ class LifeWorldEngine:
         likes = [str(value).strip() for value in profile.get("likes", ())
                  if str(value).strip()]
         hobby = (interests or likes or ["personal project"])[0]
+        preference_text = " ".join(interests + likes).casefold()
+        # These labels are authored inventory facts, not inventions made by
+        # the dialogue model. Once saved, profile edits cannot rename an item.
+        hobby_label = ("notebook", "笔记本")
+        for tokens, label in (
+            (("music", "音乐"), ("headphones", "耳机")),
+            (("art", "绘画", "画画"), ("sketchbook", "速写本")),
+            (("cooking", "做饭", "烹饪"), ("measuring cup", "量杯")),
+            (("books", "reading", "阅读"), ("bookmark", "书签")),
+            (("gaming", "board game", "桌游", "赌博"), ("set of dice", "一套骰子")),
+            (("electronic", "gadget", "电子"), ("charging cable", "充电线")),
+        ):
+            if any(token in preference_text for token in tokens):
+                hobby_label = label
+                break
+        belongings = (("travel mug", "随行杯"), ("umbrella", "雨伞"),
+                      ("portable charger", "充电宝"), ("tote bag", "帆布袋"))
+        personal_label = belongings[min(len(belongings) - 1, int(stable_fraction(npc_id, "personal-item-label") * len(belongings)))]
         return [
             {
                 "id": stable_id("personal-item", npc_id, "hobby-kit"),
                 "kind": "hobby_supplies", "label_seed": hobby,
+                "label_en": hobby_label[0], "label_zh": hobby_label[1],
                 "owner_id": npc_id, "share_policy": "ask_first",
                 "storage": "private_room", "available": True,
             },
             {
                 "id": stable_id("personal-item", npc_id, "keepsake"),
                 "kind": "personal_belonging", "label_seed": (likes or ["keepsake"])[0],
+                "label_en": personal_label[0], "label_zh": personal_label[1],
                 "owner_id": npc_id, "share_policy": "ask_first",
                 "storage": "private_room", "available": True,
             },
@@ -3366,9 +3408,14 @@ class LifeWorldEngine:
                 "free_spirit": "shopping",
             }.get(role, "shopping")]
         boundaries = " ".join(str(value) for value in profile.get("boundaries", ())).casefold()
+        traits = " ".join(str(value) for value in profile.get("personality", ())).casefold()
+        borrowing_risk = .4 if any(token in traits for token in ("impulsive", "reckless", "冲动", "莽撞")) else .12
+        if any(token in boundaries for token in ("ask before", "先问", "先询问")):
+            borrowing_risk *= .4
         quiet = any(token in boundaries for token in ("quiet", "noise", "安静", "噪"))
         return {
             "borrowing": "ask_first",
+            "borrowing_lapse_risk": borrowing_risk,
             "private_space": privacy,
             "noise": "quiet" if quiet or privacy == "high" else "flexible" if privacy == "low" else "balanced",
             "cleanliness": "high" if role in {"organizer", "caretaker"} else "balanced",

@@ -40,6 +40,7 @@ from .agent import (advance_goal, advance_relationship, advance_runtime, compile
                     project_dialogue_memories, project_public_agent,
                     project_public_life_context, project_public_memories, time_slot)
 from .config import Settings, load_settings
+from .life_expression import LifeExpressionService
 from .city import CITY_LOCATIONS, LOCATION_BY_ID, city_payload
 from .chat_journal import (ChatRequestConflict, ChatTurnLeaseLost,
                            preview_event_advance)
@@ -107,6 +108,9 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
     if provider is None:
         primary = DeepSeekProvider(settings) if settings.deepseek_api_key else None
         provider = ResilientProvider(primary)
+    expressions = LifeExpressionService(db, provider, settings)
+    if life_world is not None:
+        life_world.expression_service = expressions
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -626,14 +630,14 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         return Response(status_code=204)
 
     @app.get(settings.api_prefix + "/room")
-    def room(npc_id: str = "emma", authorization: Optional[str] = Header(None)):
+    def room(npc_id: str = "emma", author_opening: bool = False, authorization: Optional[str] = Header(None)):
         user = current_user(authorization); player_id = user["player_id"]
         require_world_ready(user)
         profile = profile_for(player_id, npc_id)
         stats = db.state(player_id, npc_id)
         if life_world is not None:
             entries = life_profiles(player_id)
-            context = life_world.npc_context(player_id, entries, npc_id)
+            context = life_world.npc_context(player_id, entries, npc_id, author_opening=author_opening)
             cue = context["current_action"].get("animation_cue") or "idle"
             return {"room_id": f"{npc_id}-room",
                     "npc": {"id": npc_id, "name": profile["name"],
@@ -871,6 +875,23 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         return life_world.stories(user["player_id"], life_profiles(user["player_id"]),
                                   level=level, status=status, npc_id=npc_id,
                                   household_id=household_id, game_date=game_date)
+
+    @app.post(settings.api_prefix + "/life-stories/{story_id}/dialogue")
+    def life_story_dialogue(story_id: str, retry: bool = False, authorization: Optional[str] = Header(None)):
+        user = current_user(authorization)
+        require_world_ready(user)
+        if life_world is None:
+            raise HTTPException(404, "Life story was not found.")
+        entries = life_profiles(user["player_id"])
+        state = life_world.load(user["player_id"], entries)
+        try:
+            # Authorize through the observable projection BEFORE reading any
+            # internal facts. Never accept prompts or participant IDs from a client.
+            story = life_world.story(user["player_id"], entries, story_id, state=state)
+        except KeyError:
+            raise HTTPException(404, "Life story was not found.")
+        return expressions.scene(user["player_id"], story, state["stories"][story_id],
+                                 {entry["id"]: entry["profile"] for entry in entries}, retry=retry)
 
     @app.post(settings.api_prefix + "/life-stories/{story_id}/observe")
     def observe_life_story(story_id: str, authorization: Optional[str] = Header(None)):

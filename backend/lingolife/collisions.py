@@ -557,6 +557,20 @@ def _instruction(style: str, response_id: str) -> str:
     return "continue"
 
 
+BORROWING_RESPONSES = {
+    "borrower": frozenset({"return_and_apologize", "ask_retroactively", "deny_responsibility"}),
+    "owner": frozenset({"state_borrowing_rule", "allow_with_reminder", "ask_item_back"}),
+}
+
+
+def borrowing_role(facts: Mapping[str, Any], npc_id: str) -> str | None:
+    if npc_id == (facts.get("borrower_id") or facts.get("actor_id")):
+        return "borrower"
+    if npc_id == (facts.get("owner_id") or facts.get("affected_id")):
+        return "owner"
+    return None
+
+
 def resolve_collision_autonomously(collision: Collision, *,
                                    profiles: Mapping[str, Mapping[str, Any]] | None = None,
                                    relationships: Mapping[tuple[str, str], Mapping[str, Any]] | None = None,
@@ -567,11 +581,23 @@ def resolve_collision_autonomously(collision: Collision, *,
     profile_map, edge_map = profiles or {}, relationships or {}
     responses: dict[str, str] = {}
     chosen_templates: dict[str, CollisionResponseTemplate] = {}
-    for npc_id in collision.participant_ids:
+    response_order = collision.participant_ids
+    if collision.topic == "borrowed_property":
+        response_order = tuple(sorted(response_order, key=lambda npc_id: borrowing_role(collision.facts, npc_id) != "borrower"))
+    for npc_id in response_order:
         other = next((value for value in collision.participant_ids if value != npc_id), "")
         edge = edge_map.get((npc_id, other), {})
+        eligible = scenario.responses
+        if collision.topic == "borrowed_property":
+            allowed = BORROWING_RESPONSES.get(borrowing_role(collision.facts, npc_id))
+            if allowed:
+                eligible = tuple(value for value in eligible if value.id in allowed)
+                if borrowing_role(collision.facts, npc_id) == "owner" and "ask_retroactively" in responses.values():
+                    # A concrete permission question needs an actual decision,
+                    # not another recital of the borrowing rule.
+                    eligible = tuple(value for value in eligible if value.id != "state_borrowing_rule")
         chosen = _sample_response(
-            scenario.responses, npc_id=npc_id, collision=collision,
+            eligible, npc_id=npc_id, collision=collision,
             profile=profile_map.get(npc_id, {}), relationship=edge,
         )
         responses[npc_id] = chosen.id

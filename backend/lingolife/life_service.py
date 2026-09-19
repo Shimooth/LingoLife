@@ -90,7 +90,21 @@ def _attention_strength(value: Mapping[str, Any]) -> int:
 def select_story_attention(values: Sequence[Mapping[str, Any]], limit: int, *,
                            preserve_urgent: bool = False) -> list[dict[str, Any]]:
     """Choose a deterministic, diverse story feed without hiding urgent items."""
-    candidates = [dict(value) for value in values]
+    candidates = []
+    seen = set()
+    # Keep history intact, but surface only the newest settled moment for a
+    # topic/pair. Active intervention windows are never folded into history.
+    for value in sorted(values, key=_attention_timestamp, reverse=True):
+        participants = tuple(sorted(str(item) for item in value.get("participant_ids", [])))
+        fingerprint = (_attention_topic(value), participants)
+        foldable = bool(participants) and value.get("status") in {
+            "resolved_autonomously", "resolved_with_management", "closed", "observed",
+        } and not value.get("trouble_signal")
+        if foldable and fingerprint in seen:
+            continue
+        if foldable:
+            seen.add(fingerprint)
+        candidates.append(dict(value))
     requested = max(0, int(limit))
     if requested == 0 or not candidates:
         return []
@@ -285,6 +299,7 @@ class LifeWorldService:
         self.db = db
         self.engine = LifeWorldEngine(timezone_name=timezone_name)
         self._lock = threading.RLock()
+        self.expression_service = None
 
     def _refresh_layout_contract(self) -> None:
         active = self.db.get_world_layout()
@@ -815,7 +830,8 @@ class LifeWorldService:
             household["life"] = public_home_life(state, str(household["id"]))
             households.append(household)
         all_moments = [story for story in story_views
-                       if story["level"] == "moment" and story["presentable"]]
+                       if story["level"] == "moment" and story["presentable"]
+                       and not story.get("observed_at")]
         all_incidents = [story for story in story_views if story["level"] == "incident"
                          and story["status"] not in {"resolved_autonomously", "resolved_with_management", "closed"}]
         all_threads = self._thread_views(state, profile_map)
@@ -905,7 +921,7 @@ class LifeWorldService:
         return found
 
     def npc_context(self, player_id: str, profile_entries: Sequence[Mapping[str, Any]], npc_id: str,
-                    *, now: datetime | None = None) -> dict[str, Any]:
+                    *, now: datetime | None = None, author_opening: bool = True) -> dict[str, Any]:
         moment = _utc(now)
         state = self.load(player_id, profile_entries, now=moment)
         if npc_id not in state["residents"]:
@@ -963,6 +979,15 @@ class LifeWorldService:
             "game_date": game_date,
             "opening": conversation_opening(context["current_action"]),
         }
+        if self.expression_service is not None:
+            context["recent_life_stories"] = self.expression_service.dialogue_context(player_id, stories)
+            cached_opening = self.expression_service.cached_opening(player_id, context["conversation"]["id"])
+            if cached_opening:
+                context["conversation"]["opening"] = cached_opening
+            elif author_opening and self.expression_service.enabled:
+                context["conversation"]["opening"] = self.expression_service.opening(
+                    player_id, npc_id, profile_map.get(npc_id, {}), context,
+                )
         return context
 
     @staticmethod
@@ -1309,6 +1334,15 @@ class LifeWorldService:
         """Mirror the core presentation TTL without hiding history endpoints."""
         if not story.get("observable"):
             return False
+        # Unseen is not synonymous with current: old catch-up incidents should
+        # remain in history, not resurface indefinitely in today's city feed.
+        if story.get("status") != "intervention_window" and story.get("created_at"):
+            try:
+                created = datetime.fromisoformat(str(story["created_at"]).replace("Z", "+00:00"))
+                if (_utc(now) - _utc(created)).total_seconds() >= 24 * 60 * 60:
+                    return False
+            except (TypeError, ValueError):
+                pass
         if not story.get("observed_at"):
             return True
         expires_at = story.get("presentation_expires_at")
@@ -1361,6 +1395,14 @@ class LifeWorldService:
                 setting_en = f"In the {location_copy['label'].lower()}"
             summary = f"{setting_en}, this moment involves {cast_en}. {summary}"
             summary_zh = f"这件事发生在{location_copy['label_zh']}，涉及{cast_zh}。{summary_zh}"
+            facts = collision.get("facts") or {}
+            if topic == "borrowed_property" and facts.get("actor_id") in participant_ids and facts.get("affected_id") in participant_ids:
+                borrower = str(profiles.get(facts["actor_id"], {}).get("name") or facts["actor_id"])
+                owner = str(profiles.get(facts["affected_id"], {}).get("name") or facts["affected_id"])
+                item_en = str(facts.get("item_label") or "personal item")
+                item_zh = str(facts.get("item_label_zh") or "私人物品")
+                summary = f"{borrower} borrowed {owner}'s {item_en} without asking."
+                summary_zh = f"{borrower}没先问{owner}，就借走了对方的{item_zh}。"
             status = str(story.get("status") or "open")
             public_status = ({"intervention_window": "awaiting_management", "archived": "closed"}.get(status)
                              or ("observed" if story.get("observed_at") and status == "open" else status))

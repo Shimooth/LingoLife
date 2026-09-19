@@ -103,7 +103,7 @@ assert.match(studioSource,/shared_history_hooks/,'the character editor must pers
 assert.doesNotMatch(studioSource,/type=["']color["']/,'avatar material colors must come from the approved palette rather than arbitrary browser color input')
 for(const palette of ['AVATAR_SKIN_COLORS','AVATAR_HAIR_COLORS','AVATAR_OUTFIT_COLORS'])assert.match(studioSource,new RegExp(palette),`the character editor is missing ${palette}`)
 assert.doesNotMatch(appSource,/getLocationAsset\([^\n]+homeBackground/,'shared-home scenes must not vary by resident appearance settings')
-assert.match(appSource,/currentResident\?\.is_home\?t\('map\.home'\)/,'home conversations must use the shared-home label')
+assert.match(appSource,/chatLocation\.isHome\?t\('map\.home'\)/,'home conversations must use the shared-home label after resolving spatial presence')
 const locationAssetSource=await source('../src/locationAssets.ts')
 assert.match(locationAssetSource,/zh:\{name:'共享住宅'/,'the authoritative home asset must describe the shared residence')
 assert.doesNotMatch(locationAssetSource,/HOME_SCENES/,'the shared-home background must not vary per resident')

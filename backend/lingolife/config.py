@@ -22,6 +22,10 @@ class Settings:
     deepseek_max_tokens: int = 700
     deepseek_temperature: float = 0.7
     deepseek_retry_count: int = 1
+    # Expression generation has its own budget; it does not consume chat turns.
+    expression_daily_limit: int = 48
+    expression_global_daily_limit: int = 1000
+    expression_max_tokens: int = 2000
     admin_password: str | None = None
     admin_session_secret: str | None = None
     admin_cookie_secure: bool = True
@@ -59,6 +63,9 @@ def load_settings(path: str | None = None) -> Settings:
         deepseek_max_tokens=int(ai.get("max_tokens", Settings.deepseek_max_tokens)),
         deepseek_temperature=float(ai.get("temperature", Settings.deepseek_temperature)),
         deepseek_retry_count=int(ai.get("retry_count", Settings.deepseek_retry_count)),
+        expression_daily_limit=max(0, int(os.getenv("EXPRESSION_DAILY_LIMIT", Settings.expression_daily_limit))),
+        expression_global_daily_limit=max(0, int(os.getenv("EXPRESSION_GLOBAL_DAILY_LIMIT", Settings.expression_global_daily_limit))),
+        expression_max_tokens=max(256, min(3000, int(os.getenv("EXPRESSION_MAX_TOKENS", Settings.expression_max_tokens)))),
         admin_password=os.getenv("ADMIN_PASSWORD"),
         admin_session_secret=os.getenv("SESSION_SECRET_KEY"),
         admin_cookie_secure=os.getenv("ADMIN_COOKIE_SECURE", "true").lower() not in {"0", "false", "no"},

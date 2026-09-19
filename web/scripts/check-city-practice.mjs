@@ -13,9 +13,9 @@ for(const result of ['accepted','mixed','misunderstood','refused','backfired']){
 }
 const autonomous={...base,status:'resolved_autonomously',outcome:{mode:'autonomous'}}
 assert.equal(storyOutcomeCopy(autonomous,'zh').managed,false)
-assert.match(storyOutcomeCopy(autonomous,'zh').choice,/回顾/)
-assert.match(storyOutcomeCopy({...autonomous,observed_at:'today'},'zh').choice,/没有替他们决定/)
-assert.match(storyOutcomeCopy({...autonomous,observed_at:'today'},'en').choice,/without deciding/)
+assert.equal(storyOutcomeCopy(autonomous,'zh').choice,'')
+assert.equal(storyOutcomeCopy({...autonomous,observed_at:'today'},'zh').choice,'')
+assert.equal(storyOutcomeCopy({...autonomous,observed_at:'today'},'en').choice,'')
 console.log('City practice outcome checks passed (bilingual choice, non-success results, autonomous vs managed).')
 const progress={status:'active',step:'participate',participation:null}
 assert.equal(practicePresentation({progress,story:autonomous},'zh').kind,'recap')

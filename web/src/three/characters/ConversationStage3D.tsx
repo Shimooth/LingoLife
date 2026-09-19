@@ -9,6 +9,7 @@ import type { ConversationAtmosphere, ConversationStage3DProps, SpeechLine } fro
 import './characters.css'
 import {IndoorEnvironment3D} from '../interiors'
 import {selectSceneSpeech} from '../../conversationOpening'
+import {StreetConversationEnvironment} from './StreetConversationEnvironment'
 
 type Palette = { sky: string; horizon: string; floor: string; accent: string; light: string }
 
@@ -114,13 +115,15 @@ export function ConversationStage3D({ npcAvatar, playerAvatar, showPlayerAvatar 
 
   return <section className={`conversation-stage-3d ${sceneryMode ? 'is-scenery' : ''} ${reducedMotion ? 'is-reduced-motion' : ''} ${className}`.trim()} style={{ '--conversation-sky': palette.sky } as React.CSSProperties} aria-label={language === 'zh' ? `在${place ?? '天空之城'}与${npcName}对话` : `Conversation with ${npcName} at ${place ?? 'the Sky City'}`}>
     <Canvas dpr={[1, 1.65]} gl={{ antialias: true, alpha: true }}>
-      <fog attach="fog" args={[palette.sky, 8, 18]} />
+      {locationKind==='street'&&<color attach="background" args={['#c6dce1']}/>}
+      <fog attach="fog" args={locationKind==='street'?['#c6dce1',22,38]:[palette.sky, 8, 18]} />
       <PerspectiveCamera makeDefault position={[0, 2.1, 7.2]} fov={37} near={.1} far={40} />
       <ambientLight intensity={1.15} />
       <hemisphereLight args={[palette.light, palette.floor, 1.7]} />
       <directionalLight position={[-4, 7, 6]} intensity={2.4} color={palette.light} castShadow />
       <pointLight position={[4, 3, 2]} intensity={10} distance={9} color={palette.accent} />
       {atmosphere==='home'&&<Suspense fallback={null}><IndoorEnvironment3D theme="home_lounge" placements={interiorPlacements}/></Suspense>}
+      {locationKind==='street'&&<Suspense fallback={null}><StreetConversationEnvironment/></Suspense>}
       <FadingCast hidden={sceneryMode} immediate={reducedMotion}>
         {showPlayerAvatar && playerAvatar
           ? <group position={[-1.92, -.05, 1.28]} rotation={[0, .2, 0]}><DirectedCharacter3D avatar={playerAvatar} animation={playerMotion} performanceMode={speaker === 'player' ? 'conversation_speak' : 'conversation_listen'} performanceKey={`player:${lineKey}`} reducedMotion={reducedMotion} detail="portrait" scale={1.18} name={you} seed={you} /></group>

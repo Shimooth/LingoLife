@@ -4,6 +4,7 @@ import hashlib
 import json
 from datetime import date, datetime, timezone
 from typing import Any, Mapping, Sequence
+from .prompt_localization import localize_event_objective
 
 
 RELATIONSHIP_STAGES = (
@@ -571,14 +572,14 @@ def time_slot(local_hour: int) -> str:
 def dialogue_objective(active_event: Mapping[str, Any] | None, runtime: Mapping[str, Any],
                        goal: Mapping[str, Any], relationship: Mapping[str, Any]) -> str:
     if active_event:
-        return str(active_event.get("stage", {}).get("objective") or "Continue the current situation naturally")
+        return localize_event_objective(str(active_event.get("stage", {}).get("objective") or "自然地延续当前情境"))
     raw_needs = runtime.get("needs", {})
     needs = ({key: value for key, value in raw_needs.items() if key in PUBLIC_NEED_KEYS}
              if isinstance(raw_needs, Mapping) else {})
     if needs and min(needs.values()) < 35:
         urgent = min(needs, key=needs.get)
-        return f"Seek a natural form of {urgent} support without directly asking the player to fix everything"
+        return f"自然地寻求与 {urgent} 相关的支持，但不要直接要求玩家解决所有问题"
     milestone = next((item.get("name") for item in goal.get("milestones", ()) if item.get("status") == "active"), None)
     if milestone:
-        return f"Let the current goal quietly shape the conversation: {milestone}"
-    return f"Build the relationship naturally at the {relationship.get('stage', 'acquaintance')} stage"
+        return f"让当前目标自然地影响对话，不必刻意强调：{milestone}"
+    return f"根据 {relationship.get('stage', 'acquaintance')} 关系阶段自然地发展关系"

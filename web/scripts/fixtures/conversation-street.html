@@ -1,0 +1,20 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Street conversation QA</title></head><body><div id="root"></div>
+<script type="module">
+import React from 'react';import {createRoot} from 'react-dom/client';
+import {ConversationScene} from '/src/components/ConversationScene.tsx';
+import {ConversationStage3D} from '/src/three/characters/ConversationStage3D.tsx';
+import {conversationLocation} from '/src/life/conversationLocation.ts';
+import {defaultAvatar} from '/src/avatar.ts';
+import '/src/styles.css';import '/src/ThreeIntegration.css';
+const h=React.createElement,avatar={...defaultAvatar,model:'city-01'},noop=()=>{};
+function Demo(){
+ const [mode,setMode]=React.useState('traveling'),[language,setLanguage]=React.useState('zh'),[scenery,setScenery]=React.useState(false),[history,setHistory]=React.useState(false);
+ window.qaMode=setMode;window.qaLanguage=setLanguage;
+ const atHome=mode==='home',id=atHome?'home-1':'innovation_hub';
+ const resident={home:{id:'home-1'},current_location_id:id,is_home:atHome,spatial_presence:{mode:mode==='traveling'?'traveling':'indoor',location_id:id,building_id:mode==='traveling'?null:id}};
+ const scene=conversationLocation(resident,[{id:'innovation_hub',kind:'work'}]),copy=scene.asset[language];
+ const speech={key:1,speaker:'npc',text:"I'm on my way home. Walk with me?",translation:'我正要回家。一起走一会儿？'};
+ return h(ConversationScene,{npcName:'Aria',playerName:'You',avatar,mood:'neutral',place:copy.name,locationDescription:copy.description,locationId:scene.id,locationKind:scene.kind,locationBackground:scene.asset.image,messages:[],liveSpeech:speech,historyOpen:history,sceneryOpen:scenery,olderCount:0,showOlder:false,ready:true,editLabel:'外观',agentLabel:'角色',language,onHistoryOpen:()=>setHistory(true),onHistoryClose:()=>setHistory(false),onSceneryOpen:()=>setScenery(true),onSceneryClose:()=>setScenery(false),onToggleOlder:noop,onEdit:noop,onAgent:noop,visualStage:h(ConversationStage3D,{npcAvatar:avatar,npcName:'Aria',place:copy.name,locationKind:scene.kind,liveSpeech:speech,language,sceneryMode:scenery})});
+}
+createRoot(document.getElementById('root')).render(h(Demo));
+</script><style>.dialogue-scene{height:100dvh;min-height:100dvh}</style></body></html>

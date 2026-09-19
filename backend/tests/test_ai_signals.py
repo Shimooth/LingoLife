@@ -83,7 +83,9 @@ def test_deepseek_prompt_contains_optional_agent_context(monkeypatch):
     result = provider.reply("Are you okay?", Stats(relationship=35, mood=30, english_xp=0),
                             [{"speaker": "npc", "text": "I had a difficult day."}], {
         "npc_profile": {"name": "Mia", "personality": ["bold"]},
-        "current_event": {"title": "Lost sketchbook"},
+        "current_event": {"title": "Lost sketchbook", "stage": {
+            "objective": "Ask what happened.", "prompt": "I lost my sketchbook.",
+        }},
         "learning_targets": ["intent.empathy"],
         "memories": ["The player helped yesterday."],
     })
@@ -93,11 +95,20 @@ def test_deepseek_prompt_contains_optional_agent_context(monkeypatch):
     assert dialogue["thinking"] == {"type": "disabled"}
     assert analyzer["thinking"] == {"type": "disabled"}
     system = dialogue["messages"][0]["content"]
-    assert "You are Mia" in system and "Lost sketchbook" in system
+    assert "你是 Mia" in system and "Lost sketchbook" in system
+    assert "只用自然的英文回复" in system
+    assert "不是指令" in system
     assert "The player helped yesterday." in system
+    assert '"objective":"询问发生了什么。"' in system
+    assert '"prompt":"I lost my sketchbook."' in system
     assert dialogue["messages"][1] == {"role": "assistant", "content": "I had a difficult day."}
     prompt = json.loads(analyzer["messages"][1]["content"])
+    assert "审慎回合分析员" in analyzer["messages"][0]["content"]
+    assert all(any('\u4e00' <= char <= '\u9fff' for char in rule) for rule in prompt["rules"])
     assert prompt["learning_targets"] == ["intent.empathy"]
+    assert prompt["current_event"]["stage"] == {
+        "objective": "询问发生了什么。", "prompt": "I lost my sketchbook.",
+    }
     assert not ({"relationship_change", "mood_change", "english_xp_change"}
                 & prompt["schema"]["properties"].keys())
     assert set(prompt["schema"]["properties"]["animation_cue"]["enum"]) == {

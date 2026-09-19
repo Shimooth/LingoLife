@@ -40,6 +40,7 @@ type Props={
 }
 
 const palettes:Record<string,[string,string,string,string]>={
+ street:['#85989f','#c6dce1','#676e78','#d9b97c'],
  home:['#d9b79f','#f0d9c5','#a97867','#73816d'],cafe:['#b86f4e','#ecc9a0','#744937','#5f775e'],restaurant:['#6d3f39','#d8a370','#513337','#879267'],
  park:['#78a58a','#c9ddbd','#56806c','#e5c47d'],waterfront:['#6997a7','#bedce0','#4e7783','#e4c68a'],transit:['#687687','#c4c9c8','#4b5665','#dd9d55'],
  education:['#8b735b','#d9c9a9','#61564b','#879b7f'],health:['#7ca1a0','#d9ebe6','#557d7c','#d4877c'],culture:['#8d667d','#ddc5d1','#60485d','#d6a267'],
@@ -55,7 +56,7 @@ function sceneKind(kind?:string,locationId?:string){
 function LocationBackdrop({kind,locationId,place,background,backgroundPosition,accent,showName=true}:{kind?:string;locationId?:string;place:string;background?:string;backgroundPosition?:string;accent?:string;showName?:boolean}){
  const variant=sceneKind(kind,locationId),palette=palettes[variant]||palettes.default
  const style={'--scene-deep':palette[0],'--scene-light':palette[1],'--scene-shadow':palette[2],'--scene-accent':accent||palette[3]} as CSSProperties
- const outdoors=variant==='park'||variant==='waterfront'||variant==='plaza'
+ const outdoors=variant==='park'||variant==='waterfront'||variant==='plaza'||variant==='street'
  return <div className={`location-backdrop location-backdrop--${variant}`} style={style} aria-hidden="true">
   {background&&<div className="location-backdrop__art" style={{backgroundImage:`url(${background})`,backgroundPosition:backgroundPosition||'center'}}/>}
   <svg viewBox="0 0 1200 720" preserveAspectRatio="xMidYMid slice">
@@ -71,6 +72,13 @@ function LocationBackdrop({kind,locationId,place,background,backgroundPosition,a
 }
 
 function OutdoorSet({variant}:{variant:string}){
+ if(variant==='street')return <g>
+  {[0,1,2,3,4,5].map(i=><g key={i} transform={`translate(${i*220-40} ${100+(i%2)*50})`}><rect width="200" height="330" fill={['#bd8168','#75989c','#d0b077'][i%3]}/><path d="M0 0h200M0 90h200M0 190h200" stroke="#f3e6d4" strokeWidth="10"/>{[0,1,2].map(row=><path key={row} d={`M35 ${35+row*95}h35m45 0h35`} stroke="#e4f0ee" strokeWidth="38"/>)}</g>)}
+  <path d="M0 420h1200v300H0z" fill="#bbb6ad"/>
+  <path d="M0 475h1200v130H0z" fill="#69737b"/>
+  <path d="M0 485h1200M0 595h1200" stroke="#efc875" strokeWidth="4"/>
+  <path d="M0 540h1200" stroke="#f5edda" strokeWidth="6" strokeDasharray="65 55"/>
+ </g>
  return <g>
   <circle cx="960" cy="105" r="52" fill="#fff4c8" opacity=".72"/>
   <path d="M0 390Q160 260 330 374t310-18q155-132 310 6t250-14v270H0z" fill="var(--scene-shadow)" opacity=".35"/>

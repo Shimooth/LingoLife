@@ -144,6 +144,8 @@ RESPONSES: dict[str, Pair] = {
     "return_and_apologize": ("Here, I'm giving it back. Should've asked.", "喏，还你，是该先问一声。"),
     "ask_retroactively": ("I should've asked. Can we sort this out?", "是我没先问，这事咱们怎么处理？"),
     "state_borrowing_rule": ("Ask before borrowing my stuff. Every time.", "借我的东西先问一声，每次都要。"),
+    "allow_with_reminder": ("Use it, then. Just ask me next time.", "那你用吧，下次问我一声。"),
+    "ask_item_back": ("Can I have it back?", "把东西还我，行吗？"),
     "deny_responsibility": ("Why's this suddenly my fault?", "怎么突然就成我的错了？"),
     "choose_alternative": ("Right. I'll try something else.", "行吧，我换个办法。"),
     "wait_for_opening": ("I'll wait until it's available.", "我等到能用的时候吧。"),

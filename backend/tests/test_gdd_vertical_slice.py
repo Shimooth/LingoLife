@@ -455,7 +455,7 @@ def test_each_required_roommate_friction_is_rule_reachable_with_three_reactions(
     assert len(collision.response_candidates) >= 3
 
 
-def test_shared_household_borrowing_can_naturally_reach_a_property_boundary():
+def test_shared_household_borrowing_can_reach_a_property_boundary_when_permission_is_skipped(monkeypatch):
     """A catalog entry is insufficient if the authoritative world cannot emit it."""
     profiles = _profiles(2)
     engine = LifeWorldEngine(timezone_name="UTC")
@@ -484,6 +484,9 @@ def test_shared_household_borrowing_can_naturally_reach_a_property_boundary():
         "read",
     ).to_dict()
 
+    from lingolife.life_world import stable_fraction
+    monkeypatch.setattr("lingolife.life_world.stable_fraction", lambda *parts, **kwargs:
+                        0.0 if parts[-1] == "permission-check" else stable_fraction(*parts, **kwargs))
     boundary_events, _ = engine._fact_events(state, NOW)
     borrowed = [event for event in boundary_events if event.get("kind") == "borrowed_item"]
     assert borrowed, "shared-home borrowing never emitted the borrowed-property boundary fact"

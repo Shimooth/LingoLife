@@ -11,6 +11,9 @@ import {IndoorEnvironment3D,INTERIOR_THEME_COPY,interiorThemeFor,type InteriorTh
 import type {WorldLayoutRoom} from '../worldLayout'
 import './LifeStoryEncounter.css'
 import {StoryOutcomeCard} from './StoryOutcomeCard'
+import {useSceneDialogue,type SceneWriter} from '../life/useSceneDialogue'
+
+const ROLE_COPY:Record<string,[string,string]>={visitor:['来访者','Visitor'],unavailable_host:['正忙的居民','Busy resident'],host:['被拜访者','Host'],cook:['做饭的人','Cook'],diner:['用餐的人','Diner'],owner:['物品主人','Owner'],borrower:['借用者','Borrower'],initiator:['发起者','Initiator'],affected_resident:['当事人','Resident'],alone:['独处中','On their own']}
 
 type Props={
  story:LifeStory
@@ -22,6 +25,7 @@ type Props={
  onClose:()=>void
  onObserve:(story:LifeStory)=>Promise<LifeStory>
  onIntervene:(story:LifeStory,action:string)=>Promise<LifeStory>
+ onDialogue?:SceneWriter
  guideStep?:string
  guideBusy?:boolean
  guideFailed?:boolean
@@ -75,15 +79,6 @@ const levelLabel=(story:LifeStory,language:LifeLanguage)=>{
  return language==='zh'?'城市里的生活片段':'A MOMENT IN THE CITY'
 }
 
-const statusLabel=(story:LifeStory,observed:boolean,language:LifeLanguage)=>{
- if(story.status==='resolved_with_management')return language==='zh'?'你参与了这个结果':'You helped shape this outcome'
- if(story.status==='resolved_autonomously'||story.status==='closed')return language==='zh'?'居民已经自行走过这一刻':'The residents carried on by themselves'
- if(story.level==='thread')return language==='zh'?'这条生活线索仍在延续':'This life thread is still unfolding'
- if(story.status==='awaiting_management')return language==='zh'?'可以选择是否介入':'You may choose whether to step in'
- if(observed)return language==='zh'?'已记录为亲眼见证':'Marked as witnessed'
- return language==='zh'?'尚未观察':'Not witnessed yet'
-}
-
 function LifeStoryCast3D({story,participants,avatars,reducedMotion,theme,language,layoutRoom,activeBeat}:{story:LifeStory;participants:{id:string;name:string}[];avatars?:Record<string,AvatarConfig>;reducedMotion:boolean;theme:InteriorTheme;language:LifeLanguage;layoutRoom?:WorldLayoutRoom;activeBeat?:LifeStoryBeat}){
  const cast=participants.slice(0,3),count=cast.length
  // Keep the authored furniture readable and reserve the right side for the
@@ -112,10 +107,13 @@ function LifeStoryCast3D({story,participants,avatars,reducedMotion,theme,languag
  </div>
 }
 
-export function LifeStoryEncounter({story,language='zh',locationName,locationImage,participantAvatars,layoutRooms=[],onClose,onObserve,onIntervene,guideStep,guideBusy,guideFailed,onGuideComplete,onGuideRefresh}:Props){
- const reduce=useReducedMotion(),closeRef=useRef<HTMLButtonElement>(null),storyIdRef=useRef(story.id),bodyRef=useRef<HTMLDivElement>(null),outcomeRef=useRef<HTMLDivElement>(null),previousStatus=useRef<LifeStory['status']>('open')
+export function LifeStoryEncounter({story,language='zh',locationName,locationImage,participantAvatars,layoutRooms=[],onClose,onObserve,onIntervene,onDialogue,guideStep,guideBusy,guideFailed,onGuideComplete,onGuideRefresh}:Props){
+ const reduce=useReducedMotion(),closeRef=useRef<HTMLButtonElement>(null),storyIdRef=useRef(story.id),bodyRef=useRef<HTMLDivElement>(null),outcomeRef=useRef<HTMLDivElement>(null),previousStatus=useRef<LifeStory['status']>(story.status)
  const [current,setCurrent]=useState(story),[busy,setBusy]=useState(''),[error,setError]=useState(''),[observedLocally,setObservedLocally]=useState(Boolean(story.observed_at)),[revealedBeatCount,setRevealedBeatCount]=useState(reduce?(story.presentation?.beats?.length??0):Math.min(1,story.presentation?.beats?.length??0))
- useEffect(()=>{const changed=storyIdRef.current!==story.id;storyIdRef.current=story.id;setCurrent(story);setObservedLocally(Boolean(story.observed_at));if(changed){setError('');setRevealedBeatCount(reduce?(story.presentation?.beats?.length??0):Math.min(1,story.presentation?.beats?.length??0))}else setRevealedBeatCount(value=>reduce?(story.presentation?.beats?.length??0):Math.min(value,story.presentation?.beats?.length??0))},[reduce,story])
+ useEffect(()=>{const changed=storyIdRef.current!==story.id;storyIdRef.current=story.id;setCurrent(story);setObservedLocally(Boolean(story.observed_at));if(changed){setError('');setRevealedBeatCount(reduce?(story.presentation?.beats?.length??0):Math.min(1,story.presentation?.beats?.length??0))}},[reduce,story])
+ const dialogue=useSceneDialogue(current,onDialogue)
+ const presentation=dialogue.enabled?dialogue.result?.presentation:current.presentation
+ useEffect(()=>{setRevealedBeatCount(1)},[dialogue.key,dialogue.result?.cache_key])
  useEffect(()=>{closeRef.current?.focus()},[])
  useEffect(()=>{const close=(event:globalThis.KeyboardEvent)=>{if(event.key==='Escape'&&!busy)onClose()};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close)},[busy,onClose])
  const title=localized(current.title,current.title_zh,language),summary=localized(current.summary,current.summary_zh,language),aftermath=localized(current.aftermath,current.aftermath_zh,language)
@@ -127,17 +125,15 @@ export function LifeStoryEncounter({story,language='zh',locationName,locationIma
  const observed=observedLocally||Boolean(current.observed_at)||current.status==='observed'
  const terminal=TERMINAL.has(current.status)
  const canObserve=current.level!=='thread'&&!observed
- const managementPrompt=localized(current.management?.prompt,current.management?.prompt_zh,language)
- const subject=language==='zh'?current.presentation?.subject_zh?.trim()||current.presentation?.subject:current.presentation?.subject?.trim()||current.presentation?.subject_zh
  const interiorTheme=useMemo(()=>interiorThemeFor({locationId:current.location_id??current.presentation?.location?.id,hint:[current.title,current.title_zh,current.summary,current.summary_zh,current.presentation?.subject,current.presentation?.subject_zh].filter(Boolean).join(' ')}),[current.location_id,current.presentation?.location?.id,current.presentation?.subject,current.presentation?.subject_zh,current.summary,current.summary_zh,current.title,current.title_zh])
  const interiorCopy=INTERIOR_THEME_COPY[interiorTheme][language]
  const authoredRoomKind=interiorTheme==='home_kitchen'?'kitchen':interiorTheme==='home_bathroom'?'bathroom':interiorTheme==='home_bedroom'?'bedroom':'living_room'
  const authoredRoom=current.household_id?layoutRooms.find(room=>room.kind===authoredRoomKind):undefined
- const beats=useMemo(()=>current.presentation?.beats??[],[current.presentation?.beats])
+ const beats=useMemo(()=>dialogue.result?.source==='fallback'?[]:presentation?.beats??[],[dialogue.result?.source,presentation?.beats])
  const visibleBeats=reduce?beats:beats.slice(0,revealedBeatCount)
  const activeBeat=visibleBeats.at(-1)
- const activeStage=current.presentation?.stages?.find(stage=>stage.id===activeBeat?.phase)
- const performanceComplete=revealedBeatCount>=beats.length
+ // An AI request or long exchange must not consume a limited intervention window.
+ const performanceComplete=dialogue.enabled||revealedBeatCount>=beats.length
  const choicesRef=useRef<HTMLDivElement>(null)
 
  useEffect(()=>{
@@ -175,42 +171,44 @@ export function LifeStoryEncounter({story,language='zh',locationName,locationIma
  return <motion.div className="life-story-encounter" role="dialog" aria-modal="true" aria-labelledby="life-story-title" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} onMouseDown={event=>{if(event.target===event.currentTarget&&!busy)onClose()}}>
   <motion.article initial={reduce?false:{opacity:0,y:26,scale:.965}} animate={{opacity:1,y:0,scale:1}} exit={reduce?{opacity:0}:{opacity:0,y:18,scale:.98}} transition={{type:'spring',stiffness:270,damping:27}}>
    <header>
-    <div><small>{levelLabel(current,language)}{locationName?` · ${locationName}`:''}</small><h2 id="life-story-title">{title.primary}</h2>{title.secondary&&<p lang={language==='zh'?'en':'zh-CN'}>{title.secondary}</p>}</div>
+    <div><small>{levelLabel(current,language)}{locationName?` · ${locationName}`:''}</small><h2 id="life-story-title">{title.primary}</h2></div>
     <button ref={closeRef} type="button" onClick={onClose} disabled={Boolean(busy)} aria-label={language==='zh'?'关闭事件详情':'Close story details'}>×</button>
    </header>
    <div ref={bodyRef} className="life-story-encounter__scroll">
    <section className="life-story-encounter__scene" data-interior-theme={interiorTheme} style={locationImage?{backgroundImage:`linear-gradient(180deg,rgba(229,240,233,.26),rgba(105,137,128,.5)),url("${locationImage}")`}:undefined}>
     <span className="life-story-encounter__scene-kind">{interiorCopy}</span>
     <div className="life-story-encounter__cast" aria-label={language==='zh'?'参与者':'Participants'}>
-     <LifeStoryCast3D story={current} participants={participants} avatars={participantAvatars} reducedMotion={Boolean(reduce)} theme={interiorTheme} language={language} layoutRoom={authoredRoom} activeBeat={activeBeat}/>
-     <div className="life-story-encounter__cast-names">{participants.slice(0,3).map((person,index)=><motion.b key={person.id} initial={reduce?false:{opacity:0,y:8}} animate={{opacity:1,y:0}} transition={{delay:reduce?0:index*.08}}>{person.name}</motion.b>)}</div>
+     <LifeStoryCast3D story={{...current,presentation}} participants={participants} avatars={participantAvatars} reducedMotion={Boolean(reduce)} theme={interiorTheme} language={language} layoutRoom={authoredRoom} activeBeat={activeBeat}/>
+     <div className="life-story-encounter__cast-names">{participants.slice(0,3).map((person,index)=><motion.b key={person.id} initial={reduce?false:{opacity:0,y:8}} animate={{opacity:1,y:0}} transition={{delay:reduce?0:index*.08}}>{person.name}{ROLE_COPY[dialogue.result?.roles[person.id]??'']&&<small>{ROLE_COPY[dialogue.result?.roles[person.id]??''][language==='zh'?0:1]}</small>}</motion.b>)}</div>
      {participants.length>3&&<span className="life-story-encounter__more">+{participants.length-3}</span>}
     </div>
     <div className="life-story-encounter__summary">
-     {subject&&<small>{subject}</small>}
-     <p>{summary.primary}</p>{summary.secondary&&<blockquote lang={language==='zh'?'en':'zh-CN'}>{summary.secondary}</blockquote>}
+
+     <p>{summary.primary}</p>
     </div>
    </section>
    <section className="life-story-encounter__body">
-    {guideStep&&<section className="life-story-encounter__guide" aria-label={language==='zh'?'引导提示':'Guide hint'}><b>{language==='zh'?'发现事情 → 参与 → 看到后果':'Discover → Participate → Consequences'}</b><p>{language==='zh'?(guideStep==='result'?'这就是这次真实结算的结果。读完下方结果卡，再继续观察他们的生活。':terminal?'这是已经发生的事情。看看结果，再点「记下这一刻」，回顾不会重复结算。':'先看看他们怎么说。你可以观察而不决定，也可以在下方选择一种帮助方式。'):(guideStep==='result'?'This is the actual settled outcome. Read the receipt below, then keep watching their lives.':terminal?'This is a recap. Read the outcome, then Remember this moment. It will not settle again.':'Watch their exchange. Witness without deciding, or choose a way to help below.')}</p>{guideFailed&&<p role="alert">{language==='zh'?'引导未同步成功，事件结果不会因此丢失。':'Guide sync failed; the story outcome is still saved.'}<button type="button" disabled={guideBusy} onClick={onGuideRefresh}>{language==='zh'?'重试同步':'Retry sync'}</button></p>}</section>}
+    {guideStep&&<section className="life-story-encounter__guide" aria-label={language==='zh'?'引导提示':'Guide hint'}><p>{language==='zh'?(guideStep==='result'?'看看他们的回应。':'听听他们怎么说，再选一个回应。'):(guideStep==='result'?'See how they responded.':'Listen, then choose a response.')}</p>{guideFailed&&<button type="button" disabled={guideBusy} onClick={onGuideRefresh}>{language==='zh'?'重试同步':'Retry sync'}</button>}</section>}
+
+    {canObserve&&terminal&&<button type="button" className="life-story-encounter__observe is-terminal" disabled={Boolean(busy)} onClick={()=>void observe()}><span aria-hidden>◉</span><b>{busy==='observe'?(language==='zh'?'正在记录…':'Recording…'):(language==='zh'?'记下这一刻':'Remember this moment')}</b></button>}
+
+    {current.level==='thread'&&aftermath.primary&&<div className="life-story-encounter__thread-note"><b>{language==='zh'?'目前留下的痕迹':'What remains so far'}</b><p>{aftermath.primary}</p></div>}
+    {beats.length>0&&<div className="life-story-encounter__beats" aria-live="polite"><AnimatePresence initial={false}>{visibleBeats.map((beat,index)=>{const personIndex=participants.findIndex(item=>item.id===beat.speaker_id),person=personIndex>=0?participants[personIndex]:undefined,english=beat.text?.trim()||beat.translation_zh?.trim()||'',translation=language==='zh'&&beat.translation_zh?.trim()!==english?beat.translation_zh?.trim():'';return <motion.blockquote key={beat.id??`${beat.speaker_id??'narrator'}-${index}`} className={`${personIndex%2===1?'is-right ':''}${index===visibleBeats.length-1?'is-active':''}`} initial={reduce?false:{opacity:0,y:14,scale:.975}} animate={{opacity:1,y:0,scale:1}} transition={{type:'spring',stiffness:320,damping:27}}><b>{person?.name??(language==='zh'?'现场':'At the scene')}{beat.addressee_id&&<small> → {participants.find(item=>item.id===beat.addressee_id)?.name}</small>}</b><p lang="en">{english}</p>{translation&&<small lang="zh-CN">{translation}</small>}</motion.blockquote>})}</AnimatePresence></div>}
+    {dialogue.enabled&&(dialogue.loading||dialogue.failed||dialogue.result?.source==='fallback')&&<div className="life-story-encounter__writer" role="status">{dialogue.loading?(language==='zh'?'对话加载中…':'Loading dialogue…'):dialogue.result?.reason==='budget'&&dialogue.result.retryable===false?(language==='zh'?'今日对白额度已用完':'Daily dialogue limit reached'):<><span>{language==='zh'?'对白未加载':'Dialogue unavailable'}</span><button type="button" onClick={dialogue.retry}>{language==='zh'?'重试':'Retry'}</button></>}</div>}
     {terminal&&<div ref={outcomeRef} tabIndex={-1}><StoryOutcomeCard story={current} language={language}/></div>}
-    {canObserve&&terminal&&<button type="button" className="life-story-encounter__observe is-terminal" disabled={Boolean(busy)} onClick={()=>void observe()}><span aria-hidden>◉</span><b>{busy==='observe'?(language==='zh'?'正在记录…':'Recording…'):(language==='zh'?'记下这一刻':'Remember this moment')}</b><small>{language==='zh'?'结果已经发生；记录只表示你见证过，不会改写居民的选择。':'The outcome already happened; witnessing records it without changing anyone’s choice.'}</small></button>}
-    <div className={`life-story-encounter__status is-${terminal?'resolved':current.status}`}><span aria-hidden>{terminal?'✓':observed||current.level==='thread'?'◉':'○'}</span><div><b>{statusLabel(current,observed,language)}</b><small>{language==='zh'?(terminal?'结果会成为居民记忆与后续生活的一部分。':current.level==='thread'?'它会随着新的经历继续发展，而不是一项必须完成的任务。':observed?'观察不会替居民做决定，生活仍会继续。':'先观察，可以记住这一刻而不改变结果。'):(terminal?'The outcome becomes part of their memory and future life.':current.level==='thread'?'It evolves through new experiences and is not a task to complete.':observed?'Observing does not decide for residents; life continues.':'Witnessing records the moment without changing its outcome.')}</small></div></div>
-    {current.level==='thread'&&aftermath.primary&&<div className="life-story-encounter__thread-note"><b>{language==='zh'?'目前留下的痕迹':'What remains so far'}</b><p>{aftermath.primary}</p>{aftermath.secondary&&<small>{aftermath.secondary}</small>}</div>}
-    {beats.length>0&&<div className="life-story-encounter__beats" aria-live="polite">{activeStage&&<motion.small key={activeStage.id} className="life-story-encounter__phase" initial={reduce?false:{opacity:0,y:4}} animate={{opacity:1,y:0}}>{language==='zh'?activeStage.label_zh||activeStage.label:activeStage.label||activeStage.label_zh}</motion.small>}<AnimatePresence initial={false}>{visibleBeats.map((beat,index)=>{const personIndex=participants.findIndex(item=>item.id===beat.speaker_id),person=personIndex>=0?participants[personIndex]:undefined,english=beat.text?.trim()||beat.translation_zh?.trim()||'',translation=language==='zh'&&beat.translation_zh?.trim()!==english?beat.translation_zh?.trim():'';return <motion.blockquote key={beat.id??`${beat.speaker_id??'narrator'}-${index}`} className={`${personIndex%2===1?'is-right ':''}${index===visibleBeats.length-1?'is-active':''}`} initial={reduce?false:{opacity:0,y:14,scale:.975}} animate={{opacity:1,y:0,scale:1}} transition={{type:'spring',stiffness:320,damping:27}}><b>{person?.name??(language==='zh'?'现场':'At the scene')}</b><p lang="en">{english}</p>{translation&&<small lang="zh-CN">{translation}</small>}</motion.blockquote>})}</AnimatePresence></div>}
     <div ref={choicesRef}/><AnimatePresence mode="wait" initial={false}>
      {performanceComplete&&!terminal&&<motion.div key="open" className="life-story-encounter__choices" initial={{opacity:0,y:6}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-6}}>
-      {canObserve&&<button type="button" className="life-story-encounter__observe" disabled={Boolean(busy)} onClick={()=>void observe()}><span aria-hidden>◉</span><b>{busy==='observe'?(language==='zh'?'正在记录…':'Recording…'):(language==='zh'?'观察这一刻':'Witness this moment')}</b><small>{language==='zh'?'只标记为已经看见，不会结算或改变事件。':'Marks it as seen without settling or changing it.'}</small></button>}
-      {current.status==='awaiting_management'&&current.management?.can_intervene&&options.length>0&&<section className="life-story-encounter__management"><header><div><small>{language==='zh'?'管理者视角':'MANAGER VIEW'}</small><h3>{managementPrompt.primary||(language==='zh'?'你想怎样回应？':'How would you respond?')}</h3>{managementPrompt.secondary&&<p>{managementPrompt.secondary}</p>}</div><span aria-hidden>◇</span></header><div>{options.map(option=><button type="button" disabled={Boolean(busy)} key={option.id} onClick={()=>void intervene(option.id)}><b>{busy===option.id?'…':option.label}</b>{option.description&&<small>{option.description}</small>}<i aria-hidden>›</i></button>)}</div></section>}
-      {(observed||current.level==='thread'||current.status==='awaiting_management')&&(!current.management?.can_intervene||!options.length)&&<p className="life-story-encounter__continue">{language==='zh'?'你可以回到城市继续观察；居民会按照自己的性格和处境行动。':'Return to the city and keep observing; residents will act from their own personalities and circumstances.'}</p>}
+      {canObserve&&<button type="button" className="life-story-encounter__observe" disabled={Boolean(busy)} onClick={()=>void observe()}><span aria-hidden>◉</span><b>{busy==='observe'?(language==='zh'?'正在记录…':'Recording…'):(language==='zh'?'观察这一刻':'Witness this moment')}</b></button>}
+      {current.status==='awaiting_management'&&current.management?.can_intervene&&options.length>0&&<section className="life-story-encounter__management"><header><h3>{language==='zh'?'你想怎么回应？':'Your response?'}</h3></header><div>{options.map(option=><button type="button" disabled={Boolean(busy)} key={option.id} title={option.description} onClick={()=>void intervene(option.id)}><b>{busy===option.id?'…':option.label}</b><i aria-hidden>›</i></button>)}</div></section>}
+
      </motion.div>}
-     {terminal&&!guideStep&&<button type="button" className="life-story-encounter__guide-complete" onClick={onClose}>{language==='zh'?'回到城市，看看接下来':'Back to city · See what comes next'}</button>}
+     {terminal&&!guideStep&&<button type="button" className="life-story-encounter__guide-complete" onClick={onClose}>{language==='zh'?'返回城市':'Back to city'}</button>}
     </AnimatePresence>
     {error&&<p className="life-story-encounter__error" role="alert">{error}</p>}
    </section>
    </div>
    {guideStep&&<footer className="life-story-encounter__next" aria-label={language==='zh'?'引导下一步':'Next guide step'}>
-    <small aria-live="polite">{guideFailed?(language==='zh'?'进度同步失败，事件结果已保留':'Sync failed; the story result is safe'):terminal?(language==='zh'?'回顾已发生的结果，不会重复结算':'Reviewing the outcome does not settle it again'):observed?(language==='zh'?'已见证 · 等待居民处理后续，可先返回城市':'Witnessed · Outcome pending; you can explore'):language==='zh'?'看完交流后，在这里选择下一步':'Choose the next step here after the exchange'}</small>
+    <small aria-live="polite">{guideFailed?(language==='zh'?'同步失败':'Sync failed'):terminal?(language==='zh'?'看看后续':'See what happened'):observed?(language==='zh'?'等待后续':'Waiting for the outcome'):language==='zh'?'选择下一步':'Choose your next step'}</small>
     {guideFailed?<button disabled={guideBusy} onClick={onGuideRefresh}>{language==='zh'?'重试同步':'Retry sync'}</button>:guideStep==='result'?<button disabled={guideBusy} onClick={()=>void onGuideComplete?.()}>{language==='zh'?'我看到了后果 · 完成引导':'I see the consequences · Finish guide'}</button>:canObserve?<button disabled={Boolean(busy)||Boolean(guideBusy)||(!terminal&&!performanceComplete)} onClick={()=>void observe()}>{busy?(language==='zh'?'正在记录…':'Recording…'):terminal?(language==='zh'?'记下这一刻 · 查看后果':'Remember this moment · See consequences'):!performanceComplete?(language==='zh'?'正在观看交流…':'Watching the exchange…'):language==='zh'?'观察这一刻 · 不替他们决定':'Witness · Leave the decision to them'}</button>:<button onClick={onClose}>{language==='zh'?'继续逛城市，等待结果':'Explore while the outcome unfolds'}</button>}
     {!terminal&&performanceComplete&&current.management?.can_intervene&&options.length>0&&<button className="is-secondary" onClick={()=>choicesRef.current?.scrollIntoView({behavior:reduce?'instant':'smooth',block:'start'})}>{language==='zh'?'看看可以怎么帮忙':'See ways to help'}</button>}
    </footer>}

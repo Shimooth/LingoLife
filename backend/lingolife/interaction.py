@@ -85,6 +85,8 @@ RESPONSE_COPY: dict[str, ResponseCopy] = {
     "return_and_apologize": ResponseCopy("cooperative", "I should have asked. I am returning it now.", "我本来应该先问你，我现在就把它还回来。", "talk", "remorseful"),
     "ask_retroactively": ResponseCopy("warm", "I should have asked first. Can we make this right?", "我应该先问你的，我们能把这件事处理好吗？", "talk", "gentle"),
     "state_borrowing_rule": ResponseCopy("boundaried", "From now on, we ask before borrowing personal things.", "从现在开始，借私人物品前要先询问。", "talk", "firm"),
+    "allow_with_reminder": ResponseCopy("patient", "You can use it. Just ask me first next time.", "这次你可以用。下次先问我一声。", "talk", "measured"),
+    "ask_item_back": ResponseCopy("assertive", "I'd like it back, please.", "把东西还我吧。", "talk", "firm"),
     "deny_responsibility": ResponseCopy("confrontational", "I do not see why this is being blamed on me.", "我不明白为什么这件事要怪到我头上。", "look_around", "defensive"),
     "choose_alternative": ResponseCopy("flexible", "The plan changed. I will find another way to do it.", "计划变了，我会找另一个办法完成。", "look_around", "adaptive"),
     "wait_for_opening": ResponseCopy("patient", "I can wait until the place is available again.", "我可以等到这里重新开放。", "listen", "patient"),
@@ -556,6 +558,7 @@ def build_interaction_scene(*, collision: object, resolution: object,
         })
     return {
         "version": 1, "rules_version": INTERACTION_RULES_VERSION,
+        "relationship_context": {"closeness": closeness, "tension": tension},
         "stages": stages,
     }
 

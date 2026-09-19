@@ -80,6 +80,7 @@ class Database:
         "life_stories",
         "life_story_observations",
         "life_interventions",
+        "life_expression_cache",
         "unresolved_threads",
         "npc_relationship_bonds",
         "relationship_evidence",
@@ -115,6 +116,12 @@ class Database:
               speaker TEXT NOT NULL CHECK(speaker IN ('player','npc')), text TEXT NOT NULL,
               npc_id TEXT NOT NULL DEFAULT 'emma', translation TEXT,
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+            CREATE TABLE IF NOT EXISTS life_expression_cache (
+              player_id TEXT NOT NULL, cache_key TEXT NOT NULL, kind TEXT NOT NULL,
+              budget_day TEXT NOT NULL, reserved_calls INTEGER NOT NULL,
+              owner_token TEXT NOT NULL, expires_at REAL NOT NULL,
+              result_json TEXT, PRIMARY KEY(player_id, cache_key));
+            CREATE INDEX IF NOT EXISTS idx_expression_budget ON life_expression_cache(budget_day);
             CREATE TABLE IF NOT EXISTS chat_requests (
               idempotency_key TEXT NOT NULL, player_id TEXT NOT NULL, response_json TEXT NOT NULL,
               created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(idempotency_key, player_id));
@@ -2545,6 +2552,93 @@ class Database:
         return value
 
     # Life simulation v2 --------------------------------------------------
+
+    def expression_cached(self, player_id: str, cache_key: str) -> dict | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT result_json FROM life_expression_cache WHERE player_id=? AND cache_key=?",
+                (player_id, cache_key),
+            ).fetchone()
+            return json.loads(row[0]) if row and row[0] else None
+
+    def expression_latest(self, player_id: str, base_key: str) -> dict | None:
+        """Retries are separate reservations, preserving historical daily spend."""
+        prefix = base_key + ":retry:"
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT cache_key,budget_day,result_json FROM life_expression_cache WHERE player_id=? AND (cache_key=? OR substr(cache_key,1,?)=?) ORDER BY rowid DESC LIMIT 1",
+                (player_id, base_key, len(prefix), prefix),
+            ).fetchone()
+            return {"cache_key": row[0], "budget_day": row[1], "result": json.loads(row[2]) if row[2] else None} if row else None
+
+    def expression_claim(self, player_id: str, cache_key: str, kind: str, day: str,
+                         now: float, player_limit: int, global_limit: int,
+                         fallback: dict, enabled: bool = True) -> tuple[str | None, dict | None]:
+        """Reserve at most two calls atomically across workers, outside AI I/O.
+
+        Failed/expired requests stay cached (no retry storm on city polling).
+        A late worker cannot overwrite an expired lease or a reset save.
+        """
+        def claim():
+            row = self._connection.execute(
+                "SELECT * FROM life_expression_cache WHERE player_id=? AND cache_key=?",
+                (player_id, cache_key),
+            ).fetchone()
+            if row:
+                if row["result_json"]:
+                    return None, json.loads(row["result_json"])
+                if row["expires_at"] > now:
+                    return None, None
+                result = {**fallback, "reason": "timeout"}
+                self._connection.execute(
+                    "UPDATE life_expression_cache SET owner_token='', result_json=? WHERE player_id=? AND cache_key=?",
+                    (json.dumps(result, ensure_ascii=False), player_id, cache_key),
+                )
+                return None, result
+            total, personal = self._connection.execute(
+                "SELECT COALESCE(SUM(reserved_calls),0), COALESCE(SUM(CASE WHEN player_id=? THEN reserved_calls ELSE 0 END),0) FROM life_expression_cache WHERE budget_day=?",
+                (player_id, day),
+            ).fetchone()
+            allowed = enabled and personal + 2 <= player_limit and total + 2 <= global_limit
+            owner = uuid.uuid4().hex if allowed else ""
+            result = None if allowed else {**fallback, "reason": "budget" if enabled else "unavailable"}
+            self._connection.execute(
+                "INSERT INTO life_expression_cache VALUES(?,?,?,?,?,?,?,?)",
+                (player_id, cache_key, kind, day, 2 if allowed else 0, owner, now + 65,
+                 json.dumps(result, ensure_ascii=False) if result else None),
+            )
+            return owner or None, result
+        return self._life_transaction(claim)
+
+    def expression_finish(self, player_id: str, cache_key: str, owner: str, result: dict) -> bool:
+        def finish():
+            cursor = self._connection.execute(
+                "UPDATE life_expression_cache SET result_json=? WHERE player_id=? AND cache_key=? AND owner_token=? AND result_json IS NULL",
+                (json.dumps(result, ensure_ascii=False), player_id, cache_key, owner),
+            )
+            return bool(cursor.rowcount)
+        return self._life_transaction(finish)
+
+    def recent_expressions(self, player_id: str, kind: str) -> list[dict]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT result_json FROM life_expression_cache WHERE player_id=? AND kind=? AND result_json IS NOT NULL ORDER BY rowid DESC LIMIT 4",
+                (player_id, kind),
+            ).fetchall()
+            return [json.loads(row[0]) for row in rows]
+
+    def expression_abandon_pending(self, player_id: str, cache_key: str, fallback: dict) -> dict:
+        def finish():
+            self._connection.execute(
+                "UPDATE life_expression_cache SET owner_token='',result_json=? WHERE player_id=? AND cache_key=? AND result_json IS NULL",
+                (json.dumps(fallback, ensure_ascii=False), player_id, cache_key),
+            )
+            row = self._connection.execute(
+                "SELECT result_json FROM life_expression_cache WHERE player_id=? AND cache_key=?",
+                (player_id, cache_key),
+            ).fetchone()
+            return json.loads(row[0]) if row else fallback
+        return self._life_transaction(finish)
 
     def _life_transaction(self, operation):
         """Run a world/projection write under one cross-connection transaction.

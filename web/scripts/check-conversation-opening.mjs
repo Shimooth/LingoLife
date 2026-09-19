@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import './check-conversation-location.mjs'
 import {selectConversationOpening,selectSceneSpeech} from '../src/conversationOpening.ts'
 
 const opening={text:"I'm having a bite to eat.",translation:'我正在吃点东西。'}
