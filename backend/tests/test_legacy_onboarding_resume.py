@@ -85,6 +85,21 @@ def test_administrator_blocked_roster_cannot_use_resume_to_bypass_review(tmp_pat
     assert len(db.list_npc_profiles(player)) == 10
 
 
+def test_translation_backfilled_after_inventory_does_not_block_legacy_resume(tmp_path):
+    client = _client(tmp_path)
+    db, player, headers = legacy(client)
+    with db._connection:
+        db._connection.execute("UPDATE messages SET translation='补齐的旧消息翻译' WHERE player_id=?", (player,))
+    result = client.post('/api/v1/onboarding/complete', headers=headers,
+                         json={'residents': [_profile('Aria'), _profile('Nora')]})
+    assert result.status_code == 201, result.text
+    assert result.json()['onboarding']['completed'] is True
+    assert db._connection.execute("SELECT translation FROM messages WHERE player_id=? AND npc_id='npc-1'", (player,)).fetchone()[0] == '补齐的旧消息翻译'
+    assert client.get('/api/v1/city', headers=headers).status_code == 200
+    raw = db._connection.execute('SELECT state_json FROM player_onboarding WHERE player_id=?', (player,)).fetchone()[0]
+    assert 'legacy_resume_snapshot' not in json.loads(raw)
+
+
 @pytest.mark.parametrize('custom', [False, True])
 def test_relationships_are_optional_or_materialized_for_only_selected_pair(tmp_path, custom):
     client = _client(tmp_path)

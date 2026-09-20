@@ -2017,6 +2017,13 @@ class Database:
                     raise ValueError("ROSTER_REVIEW_REQUIRED")
                 stored = {**stored, "completed": False}
                 stored_status = "not_started"
+            resume_snapshot = stored.get("legacy_resume_snapshot")
+            if migration and migration["status"] == "needs_onboarding" and not resume_snapshot:
+                # The inventory snapshot may predate normal translation
+                # backfills. Preserve the actual rows at the start of this
+                # setup attempt, not an obsolete startup schema snapshot.
+                resume_snapshot = player_fact_snapshot(self._connection, player_id)
+                stored["legacy_resume_snapshot"] = resume_snapshot
             if stored_status in {"initializing", "completed"} or stored.get("completed"):
                 if stored_key != setup_key:
                     raise ValueError(
@@ -2033,6 +2040,11 @@ class Database:
                 by_id = {str(row["npc_id"]): json.loads(row["profile_json"]) for row in rows}
                 if any(npc_id not in by_id for npc_id in staged_ids):
                     raise ValueError("ONBOARDING_SETUP_CORRUPT")
+                if resume_snapshot:
+                    self._connection.execute(
+                        "UPDATE player_onboarding SET state_json=? WHERE player_id=?",
+                        (self._json(stored), player_id),
+                    )
                 return [
                     {"id": npc_id, "profile": normalize_profile_contract(by_id[npc_id])}
                     for npc_id in staged_ids
@@ -2109,6 +2121,8 @@ class Database:
                                   "step": "discover", "npc_id": None, "story_id": None,
                                   "participation": None, "receipt": None},
             }
+            if resume_snapshot:
+                state["legacy_resume_snapshot"] = resume_snapshot
             self._connection.execute(
                 """INSERT INTO player_onboarding(player_id,state_json,completed_at)
                    VALUES (?,?,NULL)
@@ -2176,6 +2190,7 @@ class Database:
                 if not profile_ids <= member_ids:
                     raise ValueError("ONBOARDING_INITIALIZATION_INCOMPLETE")
             now = str(self._connection.execute("SELECT CURRENT_TIMESTAMP").fetchone()[0])
+            resume_snapshot = stored.pop("legacy_resume_snapshot", None)
             stored.update({
                 "version": ONBOARDING_STATE_VERSION,
                 "completed": True,
@@ -2192,7 +2207,7 @@ class Database:
                 "SELECT * FROM player_roster_migrations WHERE player_id=?", (player_id,),
             ).fetchone())
             if migration and migration["status"] == "needs_onboarding":
-                before = migration["baseline_snapshot"]
+                before = resume_snapshot or migration["baseline_snapshot"]
                 after = player_fact_snapshot(self._connection, player_id)
                 integrity = inspect_player_integrity(self._connection, player_id)
                 # Adding residents necessarily changes table digests. Old
