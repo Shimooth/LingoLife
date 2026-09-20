@@ -5,7 +5,6 @@ import {
  addRandomOnboardingResident,
  buildOnboardingSocialContract,
  createOnboardingResidents,
- FAMILY_ROLE_INVERSE,
  onboardingResidentsAreValid,
  onboardingRosterDifference,
  rerollOnboardingResident,
@@ -20,7 +19,8 @@ import {CharacterCanvas3D} from '../three/characters'
 import {CharacterModelPicker} from './CharacterModelPicker'
 import {CharacterPortrait} from './CharacterPortrait'
 import type {CharacterMotion} from '../three/characters/types'
-import type {FamilyRole,NpcProfile,OnboardingCompleteRequest,SharedHistoryKind,SharedHistoryTone} from '../types'
+import type {NpcProfile,OnboardingCompleteRequest} from '../types'
+import OnboardingRelationships from './OnboardingRelationships'
 import './OnboardingFlow.css'
 
 const COPY={
@@ -47,13 +47,14 @@ const COPY={
 const split=(value:string,max:number)=>value.split(/[,，]/).map(item=>item.trim()).filter(Boolean).slice(0,max)
 const issueFor=(issues:readonly ResidentValidationIssue[],field:ResidentValidationIssue)=>issues.includes(field)
 
-export function OnboardingFlow({language,minimum,maximum,introAcknowledged,saving,error,onAcknowledgeIntro,onComplete}:{
+export function OnboardingFlow({language,minimum,maximum,introAcknowledged,saving,error,retainedResidents=0,onAcknowledgeIntro,onComplete}:{
  language:Language
  minimum:number
  maximum:number
  introAcknowledged:boolean
  saving:boolean
  error:string
+ retainedResidents?:number
  onAcknowledgeIntro:()=>Promise<void>
  onComplete:(setup:Omit<OnboardingCompleteRequest,'household_name'>)=>void
 }){
@@ -72,9 +73,8 @@ export function OnboardingFlow({language,minimum,maximum,introAcknowledged,savin
  const issues=useMemo(()=>validateOnboardingResidents(drafts),[drafts])
  const difference=useMemo(()=>onboardingRosterDifference(drafts),[drafts])
  const selected=drafts.find(draft=>draft.key===selectedKey)??drafts[0]
- const otherDrafts=drafts.filter(draft=>draft.key!==selected.key)
  const selectedIssues=issues[selected.key]??[]
- const socialValid=historyHooks.every(hook=>hook.summary.trim().length>=3&&hook.participantKeys.every(key=>drafts.some(draft=>draft.key===key)))
+ const socialValid=historyHooks.every(hook=>hook.summary.trim().length>=(hook.kind==='personal_connection'?1:3)&&hook.participantKeys.every(key=>drafts.some(draft=>draft.key===key)))
  const valid=onboardingResidentsAreValid(drafts,safeMinimum,safeMaximum)&&socialValid
  const updateProfile=(change:(profile:NpcProfile)=>NpcProfile)=>setDrafts(current=>current.map(draft=>draft.key===selected.key?{...draft,profile:change(draft.profile)}:draft))
  const setField=<K extends keyof NpcProfile>(field:K,value:NpcProfile[K])=>updateProfile(profile=>({...profile,[field]:value}))
@@ -92,27 +92,6 @@ export function OnboardingFlow({language,minimum,maximum,introAcknowledged,savin
  const rerollAll=()=>{const next=createOnboardingResidents(drafts.length);setDrafts(next);setFamilyBonds([]);setHistoryHooks([]);setSelectedKey(next[0].key);setAttempted(false)}
  const beginGuide=async()=>{setAcknowledging(true);setIntroError('');try{await onAcknowledgeIntro();setPhase('loop')}catch{setIntroError(copy.introError)}finally{setAcknowledging(false)}}
  const toggleChore=(value:NpcProfile['chorePreferences'][number])=>setField('chorePreferences',selected.profile.chorePreferences.includes(value)?selected.profile.chorePreferences.filter(item=>item!==value):[...selected.profile.chorePreferences,value].slice(-3))
- const bondFor=(otherKey:string)=>familyBonds.find(bond=>(bond.leftKey===selected.key&&bond.rightKey===otherKey)||(bond.rightKey===selected.key&&bond.leftKey===otherKey))
- const familyRoleFor=(otherKey:string)=>{const bond=bondFor(otherKey);return bond?(bond.leftKey===selected.key?bond.leftRole:bond.rightRole):''}
- const familyCount=(key:string)=>familyBonds.filter(bond=>bond.leftKey===key||bond.rightKey===key).length
- const setFamilyRole=(otherKey:string,role:FamilyRole|'')=>setFamilyBonds(current=>{
-  const rest=current.filter(bond=>!((bond.leftKey===selected.key&&bond.rightKey===otherKey)||(bond.rightKey===selected.key&&bond.leftKey===otherKey)))
-  if(!role)return rest
-  const count=(key:string)=>current.filter(bond=>bond.leftKey===key||bond.rightKey===key).length
-  if(count(selected.key)>=4||count(otherKey)>=4)return current
-  return [...rest,{leftKey:selected.key,rightKey:otherKey,leftRole:role,rightRole:FAMILY_ROLE_INVERSE[role]}]
- })
- const historyFor=(otherKey:string)=>historyHooks.find(hook=>hook.participantKeys.length===2&&hook.participantKeys.includes(selected.key)&&hook.participantKeys.includes(otherKey))
- const historyCount=(key:string)=>historyHooks.filter(hook=>hook.participantKeys.includes(key)).length
- const setHistoryKind=(other:OnboardingResidentDraft,kind:SharedHistoryKind|'')=>setHistoryHooks(current=>{
-  const existing=historyFor(other.key),rest=current.filter(hook=>hook.id!==existing?.id)
-  if(!kind)return rest
-  const count=(key:string)=>current.filter(hook=>hook.participantKeys.includes(key)).length
-  if(!existing&&(count(selected.key)>=4||count(other.key)>=4))return current
-  const id=existing?.id??`history-${Date.now().toString(36)}-${selected.key.slice(-5)}-${other.key.slice(-5)}`
-  return [...rest,existing?{...existing,kind}:{id,participantKeys:[selected.key,other.key],kind,summary:copy.historyDefault(selected.profile.name,other.profile.name),tone:'neutral'}]
- })
- const updateHistory=(id:string,change:Partial<Pick<DraftSharedHistoryHook,'summary'|'tone'>>)=>setHistoryHooks(current=>current.map(hook=>hook.id===id?{...hook,...change}:hook))
  const submit=(event:FormEvent)=>{
   event.preventDefault();setAttempted(true);setEditorTab('profile')
   if(!valid||saving)return
@@ -149,7 +128,7 @@ export function OnboardingFlow({language,minimum,maximum,introAcknowledged,savin
     <div className="onboarding-intro__actions"><button type="button" onClick={()=>setPhase('intro')}>{copy.loopBack}</button><motion.button className="onboarding-primary" type="button" onClick={()=>setPhase('residents')} whileHover={reduce?undefined:{y:-2}} whileTap={reduce?undefined:{scale:.98}}>{copy.loopBegin}<span aria-hidden>→</span></motion.button></div>
    </motion.section>:<motion.section className="onboarding-setup" key="residents" initial={reduce?false:{opacity:0,x:18}} animate={{opacity:1,x:0}} exit={{opacity:0}} transition={{duration:reduce?0:.38,ease:[.22,.8,.25,1]}}>
     <header className="onboarding-setup__heading"><div><p>{copy.setupEyebrow}</p><h1>{copy.setupTitle}</h1><span>{copy.setupBody}</span></div><button type="button" onClick={rerollAll}>↻ {copy.randomAll}</button></header>
-    <aside className="onboarding-home-banner"><span aria-hidden>⌂</span><div><strong>{copy.sharedTitle}</strong><p>{copy.sharedBody}</p></div></aside>
+    <aside className="onboarding-home-banner"><span aria-hidden>⌂</span><div><strong>{copy.sharedTitle}</strong><p>{retainedResidents>0?(language==='zh'?`原有 ${retainedResidents} 名居民及历史会保留。以下设置用于新增居民。`:`Your ${retainedResidents} existing resident(s) and history will be kept. These settings add new residents.`):copy.sharedBody}</p></div></aside>
     <div className="onboarding-workspace">
      <aside className="onboarding-roster">
       <header><strong>{copy.roster}</strong><span>{copy.residentCount(drafts.length,safeMaximum)}</span></header>
@@ -190,8 +169,8 @@ export function OnboardingFlow({language,minimum,maximum,introAcknowledged,savin
        </div>
        <fieldset className={invalid('chores')?'has-error':''}><legend>{copy.chores}</legend><div className="onboarding-chore-options">{(Object.entries(copy.choreNames) as [NpcProfile['chorePreferences'][number],string][]).map(([value,label])=><button type="button" className={selected.profile.chorePreferences.includes(value)?'is-selected':''} aria-pressed={selected.profile.chorePreferences.includes(value)} onClick={()=>toggleChore(value)} key={value}>{selected.profile.chorePreferences.includes(value)?'✓ ':'＋ '}{label}</button>)}</div>{fieldMessage('chores')}</fieldset>
        <label className={invalid('goal')?'has-error':''}>{copy.goal}<textarea rows={3} maxLength={180} value={selected.profile.longTermGoal} onChange={event=>setField('longTermGoal',event.target.value)}/>{fieldMessage('goal')}</label>
-       <fieldset className="onboarding-social-contract"><legend>{copy.familyTitle}</legend><p>{copy.familyHint}</p><div className="onboarding-social-contract__rows">{otherDrafts.map(other=>{const currentRole=familyRoleFor(other.key),atLimit=!currentRole&&(familyCount(selected.key)>=4||familyCount(other.key)>=4);return <label key={other.key}><span>{other.profile.name}</span><select value={currentRole} disabled={atLimit} onChange={event=>setFamilyRole(other.key,event.target.value as FamilyRole|'')}><option value="">{copy.notFamily}</option>{(Object.entries(copy.familyRoles) as [FamilyRole,string][]).map(([role,label])=><option value={role} key={role}>{label}</option>)}</select></label>})}</div></fieldset>
-       <fieldset className={`onboarding-social-contract ${attempted&&!socialValid?'has-error':''}`}><legend>{copy.historyTitle}</legend><p>{copy.historyHint}</p><div className="onboarding-history-list">{otherDrafts.map(other=>{const hook=historyFor(other.key),atLimit=!hook&&(historyCount(selected.key)>=4||historyCount(other.key)>=4);return <section key={other.key}><label><span>{other.profile.name}</span><select value={hook?.kind??''} disabled={atLimit} onChange={event=>setHistoryKind(other,event.target.value as SharedHistoryKind|'')}><option value="">{copy.noHistory}</option>{(Object.entries(copy.historyKinds) as [SharedHistoryKind,string][]).map(([kind,label])=><option value={kind} key={kind}>{label}</option>)}</select></label>{hook&&<div><label>{copy.historySummary}<input maxLength={180} value={hook.summary} onChange={event=>updateHistory(hook.id,{summary:event.target.value})}/></label><label><span className="onboarding-visually-hidden">Tone</span><select value={hook.tone} onChange={event=>updateHistory(hook.id,{tone:event.target.value as SharedHistoryTone})}>{(Object.entries(copy.historyTones) as [SharedHistoryTone,string][]).map(([tone,label])=><option value={tone} key={tone}>{label}</option>)}</select></label></div>}</section>})}</div></fieldset>
+       <OnboardingRelationships language={language} selected={selected} drafts={drafts} bonds={familyBonds} histories={historyHooks} setBonds={setFamilyBonds} setHistories={setHistoryHooks} disabled={saving}/>
+       {attempted&&!socialValid&&<p role="alert">{language==='zh'?'请补充已添加关系的简短说明，或移除这条关系。':'Describe the connection you added, or remove it.'}</p>}
        <fieldset className="onboarding-appearance"><legend>{copy.appearance}</legend><p>{language==='zh'?'点击缩略图试穿造型；左侧可预览实际动作。外观不会改变已经填写的性格和生活设定。':'Choose a look and preview its animations. Your personality and life settings stay unchanged.'}</p><CharacterModelPicker avatar={selected.profile.avatar} language={language} onChange={model=>setField('avatar',{...selected.profile.avatar,model,strokes:[]})}/></fieldset>
        <label className="onboarding-romance"><input type="checkbox" checked={Boolean(selected.profile.romanceEnabled)} disabled={(selected.profile.age??0)<18} onChange={event=>updateProfile(profile=>withRomancePreference(profile,event.target.checked))}/><span><b>{copy.romance}</b><small>{copy.romanceHint}</small></span></label>
        <footer>

@@ -605,6 +605,9 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
                 player_id, entries, household_name, maximum=NPC_LIMIT,
             )
         except ValueError as error:
+            if str(error) == "ROSTER_REVIEW_REQUIRED":
+                raise HTTPException(409, {"code": "ROSTER_REVIEW_REQUIRED",
+                                          "message": "This legacy roster requires administrator review."})
             if str(error) == "NPC_LIMIT_REACHED":
                 raise HTTPException(409, {"code": "NPC_LIMIT_REACHED",
                                           "message": "You can create up to eight characters."})
@@ -633,9 +636,15 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
                 # Reproject after the name-only world mutation.
                 world = life_world.city(player_id, profiles)
                 assert len(state.get("households") or {}) == 1
-        completed = db.finalize_onboarding_setup(
-            player_id, setup_key, require_life_world=life_world is not None,
-        )
+        try:
+            completed = db.finalize_onboarding_setup(
+                player_id, setup_key, require_life_world=life_world is not None,
+            )
+        except ValueError as error:
+            if str(error) != "ROSTER_REVIEW_REQUIRED":
+                raise
+            raise HTTPException(409, {"code": "ROSTER_REVIEW_REQUIRED",
+                                      "message": "This legacy roster requires administrator review."})
         household = (world.get("households") or [None])[0] if world else None
         return {
             "onboarding": completed, "created": created,

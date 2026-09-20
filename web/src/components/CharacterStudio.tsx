@@ -15,7 +15,7 @@ import {
   resolveChibiOutfit,
 } from "../three/characters/characterAssets";
 const familyLabels:Record<FamilyRole,{zh:string;en:string}>={sibling:{zh:'兄弟姐妹',en:'Sibling'},cousin:{zh:'表/堂亲',en:'Cousin'},parent:{zh:'父母',en:'Parent'},child:{zh:'子女',en:'Child'},guardian:{zh:'监护人',en:'Guardian'},dependent:{zh:'被监护人',en:'Dependent'}}
-const historyKinds:Record<SharedHistoryKind,{zh:string;en:string}>={grew_up_together:{zh:'一起长大',en:'Grew up together'},studied_together:{zh:'曾经同学',en:'Studied together'},worked_together:{zh:'曾经共事',en:'Worked together'},shared_project:{zh:'合作过项目',en:'Shared a project'},weathered_hardship:{zh:'共同度过难关',en:'Weathered hardship'},family_tradition:{zh:'共享家庭传统',en:'Family tradition'},friendly_rivalry:{zh:'长期友好竞争',en:'Friendly rivalry'}}
+const historyKinds:Record<SharedHistoryKind,{zh:string;en:string}>={personal_connection:{zh:'自定义关系',en:'Custom connection'},grew_up_together:{zh:'一起长大',en:'Grew up together'},studied_together:{zh:'曾经同学',en:'Studied together'},worked_together:{zh:'曾经共事',en:'Worked together'},shared_project:{zh:'合作过项目',en:'Shared a project'},weathered_hardship:{zh:'共同度过难关',en:'Weathered hardship'},family_tradition:{zh:'共享家庭传统',en:'Family tradition'},friendly_rivalry:{zh:'长期友好竞争',en:'Friendly rivalry'}}
 const historyTones:Record<SharedHistoryTone,{zh:string;en:string}>={warm:{zh:'温暖',en:'Warm'},neutral:{zh:'平静',en:'Neutral'},complicated:{zh:'复杂',en:'Complicated'}}
 const split = (value: string, max: number) =>
   value

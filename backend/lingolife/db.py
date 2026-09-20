@@ -1920,9 +1920,11 @@ class Database:
         """Idempotently persist that this account saw the current introduction."""
         if intro_version != CURRENT_INTRO_VERSION:
             raise ValueError("UNSUPPORTED_INTRO_VERSION")
-        self.ensure_player(player_id)
 
         def write():
+            # Acknowledge an introduction without manufacturing the legacy Emma
+            # state/greeting, which would invalidate a one-resident migration.
+            self._connection.execute("INSERT OR IGNORE INTO players(id) VALUES (?)", (player_id,))
             row = self._connection.execute(
                 "SELECT state_json FROM player_onboarding WHERE player_id=?", (player_id,),
             ).fetchone()
@@ -1996,6 +1998,25 @@ class Database:
                 raise ValueError("INTRO_NOT_ACKNOWLEDGED")
             stored_key = str(stored.get("setup_key") or "")
             stored_status = str(stored.get("setup_status") or "")
+            migration = self._decode_roster_migration(self._connection.execute(
+                "SELECT * FROM player_roster_migrations WHERE player_id=?", (player_id,),
+            ).fetchone())
+            if migration and migration["status"] not in {"ready", "needs_onboarding"}:
+                raise ValueError("ROSTER_REVIEW_REQUIRED")
+            # The old completion flag and the v5 roster gate used to disagree:
+            # GET required onboarding while POST rejected the same account.
+            # Only a verified undersized legacy roster can resume this way;
+            # never reopen an actual setup saga or an administrator-blocked save.
+            resume_legacy = bool(migration and migration["status"] == "needs_onboarding"
+                                 and not stored_key)
+            if resume_legacy:
+                count = self._connection.execute(
+                    "SELECT count(*) FROM npc_profiles WHERE player_id=?", (player_id,),
+                ).fetchone()[0]
+                if count >= 2 or not inspect_player_integrity(self._connection, player_id)["valid"]:
+                    raise ValueError("ROSTER_REVIEW_REQUIRED")
+                stored = {**stored, "completed": False}
+                stored_status = "not_started"
             if stored_status in {"initializing", "completed"} or stored.get("completed"):
                 if stored_key != setup_key:
                     raise ValueError(
@@ -2167,6 +2188,45 @@ class Database:
                      updated_at=CURRENT_TIMESTAMP WHERE player_id=?""",
                 (self._json(stored), player_id),
             )
+            migration = self._decode_roster_migration(self._connection.execute(
+                "SELECT * FROM player_roster_migrations WHERE player_id=?", (player_id,),
+            ).fetchone())
+            if migration and migration["status"] == "needs_onboarding":
+                before = migration["baseline_snapshot"]
+                after = player_fact_snapshot(self._connection, player_id)
+                integrity = inspect_player_integrity(self._connection, player_id)
+                # Adding residents necessarily changes table digests. Old
+                # authored profiles, messages and memories must still survive.
+                immutable = {"npc_profiles", "messages", "npc_memories", "chat_requests",
+                             "event_history", "learning_states", "conversation_summaries"}
+                preserved = set(before["preserved_npc_ids"]) <= profile_ids
+                for table in immutable:
+                    old_rows = before["tables"].get(table, {}).get("row_sha256", [])
+                    new_rows = after["tables"].get(table, {}).get("row_sha256", [])
+                    preserved = preserved and set(old_rows) <= set(new_rows)
+                if not preserved or not integrity["valid"] or not 2 <= len(profile_ids) <= 8:
+                    raise ValueError("ROSTER_REVIEW_REQUIRED")
+                revision = migration["revision"] + 1
+                review = {**migration["review"], "status": "resolved", "world_verified": True,
+                          "active_npc_ids": sorted(profile_ids), "archived_npc_ids": [],
+                          "world_verified_at_revision": revision,
+                          "active_selection_required": False, "completed_via_onboarding": True}
+                self._connection.execute(
+                    """UPDATE player_roster_migrations SET status='ready',revision=?,
+                       active_npc_ids_json=?,archived_npc_ids_json='[]',review_json=?,
+                       latest_snapshot_json=?,integrity_json=?,completed_at=CURRENT_TIMESTAMP,
+                       updated_at=CURRENT_TIMESTAMP WHERE player_id=?""",
+                    (revision, self._json(sorted(profile_ids)), self._json(review), self._json(after),
+                     self._json(integrity), player_id),
+                )
+                self._write_roster_migration_report(
+                    player_id=player_id, action="complete_onboarding", status="ready", revision=revision,
+                    actor="player", note="旧居民与历史保留，补充入住后完成引导",
+                    before=before, after=after,
+                    comparison={"verified": True, "preserved_original_rows": True,
+                                "unexpected_changes": [], "added_resident_ids": sorted(profile_ids-set(before["preserved_npc_ids"]))},
+                    review=review, integrity=integrity, request_key=f"onboarding:{setup_key}",
+                )
 
         self._life_transaction(write)
         return self.onboarding_state(player_id)

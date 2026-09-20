@@ -175,7 +175,7 @@ export function buildOnboardingSocialContract(
   })),
   shared_history_hooks:historyHooks.map(hook=>({
    id:hook.id,participant_indices:hook.participantKeys.map(key=>indices.get(key)??-1),
-   kind:hook.kind,summary:hook.summary.trim(),tone:hook.tone,
+   kind:hook.kind,summary:hook.kind==='personal_connection'&&hook.summary.trim().length<3?`关系：${hook.summary.trim()}`:hook.summary.trim(),tone:hook.tone,
   })),
  }
 }

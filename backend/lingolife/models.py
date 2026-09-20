@@ -161,6 +161,7 @@ FamilyRole = Literal["sibling", "cousin", "parent", "child", "guardian", "depend
 SharedHistoryKind = Literal[
     "grew_up_together", "studied_together", "worked_together", "shared_project",
     "weathered_hardship", "family_tradition", "friendly_rivalry",
+    "personal_connection",
 ]
 
 FAMILY_ROLE_INVERSE: dict[str, str] = {
