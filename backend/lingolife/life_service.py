@@ -28,6 +28,8 @@ from .household_life import public_home_life
 from .spatial_presence import spatial_presence
 from . import dinner as dinner_life
 from . import shared_activities
+from . import social_mind
+from . import social_continuity
 
 
 def story_attention_budget(resident_count: int) -> dict[str, Any]:
@@ -140,6 +142,8 @@ def select_story_attention(values: Sequence[Mapping[str, Any]], limit: int, *,
 
 
 TOPIC_COPY: dict[str, tuple[str, str, str, str]] = {
+    "social_followup": ("Something left to say", "还有句话想说", "They returned to something that had stayed on their minds.", "他们又聊起了之前的那件事。"),
+    "public_relay": ("A word passed along", "带来一句话", "One resident shared something they had actually witnessed.", "一位居民带来了自己亲眼见过的事情。"),
     "shared_kitchen": ("A busy kitchen", "厨房里的小插曲", "They both needed the kitchen at the same time.", "两个人恰好同时需要使用厨房。"),
     "bathroom_access": ("Waiting at the bathroom", "浴室门外", "A shared bathroom tested someone's patience.", "共用浴室让某个人等得有些着急。"),
     "shared_entertainment": ("What should we watch?", "今晚看什么？", "They wanted different things from the television.", "他们想看的电视节目不太一样。"),
@@ -153,6 +157,14 @@ TOPIC_COPY: dict[str, tuple[str, str, str, str]] = {
     "food_shortage": ("The kitchen is running low", "厨房快没有存货了", "There was not enough food for the plan they had in mind.", "厨房里的食物不足以完成原本的计划。"),
     "noise": ("Too much noise", "有点太吵了", "Noise made it hard for someone to continue what they were doing.", "噪音让某个人很难继续手上的事情。"),
     "friendly_competition": ("A friendly challenge", "来一场友好的较量", "A shared hobby turned into a test of skill and sportsmanship.", "共同的爱好变成了一场技术和风度的较量。"),
+}
+
+FOLLOWUP_COPY = {
+    "repair": ("Another start", "再开个头", "wanted to revisit the earlier disagreement", "想聊聊之前那点不愉快"),
+    "thank": ("That stayed with me", "那件事还记着", "wanted to acknowledge what happened earlier", "想说起之前记在心里的那件事"),
+    "check_in": ("A better moment?", "这次有空吗？", "came back to see whether this was a better time", "又来看看这次是否方便"),
+    "explain": ("About last time", "上次没能赶上", "wanted to talk about the plan that did not work out", "想聊聊那次没能成行的安排"),
+    "relay": ("Something you missed", "顺便告诉你", "had something they witnessed to share", "有件亲眼见过的事想说一说"),
 }
 
 INTERVENTION_COPY: dict[str, tuple[str, str]] = {
@@ -440,6 +452,15 @@ class LifeWorldService:
                         or str(stored.get("city_layout_version") or "built-in")
                         != self.engine.city_layout_version
                     )
+                    person_migration_due = (
+                        (stored.get("social_mind") or {}).get("version") != social_mind.VERSION
+                        or (stored.get("social_continuity") or {}).get("version") != social_continuity.VERSION
+                    )
+                    person_profile_changed = any(
+                        (stored.get("social_mind") or {}).get("minds", {}).get(npc_id, {}).get("persona")
+                        != social_mind.persona_values(profile)
+                        for npc_id, profile in profile_map.items()
+                    )
                     transition = stored.get("next_transition_at")
                     transition_due = True
                     if transition:
@@ -448,11 +469,12 @@ class LifeWorldService:
                         except ValueError:
                             transition_due = True
                     if not (force_advance or profile_changed or shared_home_migration_due
-                            or layout_migration_due or transition_due):
+                            or layout_migration_due or person_migration_due or person_profile_changed or transition_due):
                         return stored
                     home_mapping = self._home_mapping(player_id, profile_entries, stored)
                     advance_at = moment
-                    if profile_changed or shared_home_migration_due or layout_migration_due:
+                    if (profile_changed or shared_home_migration_due or layout_migration_due
+                            or person_migration_due or person_profile_changed):
                         try:
                             stored_at = datetime.fromisoformat(
                                 str(stored.get("last_advanced_at") or "").replace("Z", "+00:00")
@@ -751,6 +773,9 @@ class LifeWorldService:
                 resource_kind=str(resource.get("kind") or "") or None,
             )
             shared_activities.annotate_observable(state, npc_id, raw_action, observable, target_name)
+            observable = social_continuity.annotate_observable(
+                state, npc_id, raw_action.to_dict(), observable, target_name,
+            )
             if observable["visible_context"].get("visibility") == "private":
                 action.update({"location_id": authoritative_home_id,
                                "target_resource_id": None, "target_npc_id": None})
@@ -926,7 +951,8 @@ class LifeWorldService:
         return found
 
     def npc_context(self, player_id: str, profile_entries: Sequence[Mapping[str, Any]], npc_id: str,
-                    *, now: datetime | None = None, author_opening: bool = True) -> dict[str, Any]:
+                    *, now: datetime | None = None, author_opening: bool = True,
+                    include_private: bool = False) -> dict[str, Any]:
         moment = _utc(now)
         state = self.load(player_id, profile_entries, now=moment)
         if npc_id not in state["residents"]:
@@ -955,6 +981,9 @@ class LifeWorldService:
             resource_kind=str(resource.get("kind") or "") or None,
         )
         shared_activities.annotate_observable(state, npc_id, action, observable, target_name)
+        observable = social_continuity.annotate_observable(
+            state, npc_id, action.to_dict(), observable, target_name,
+        )
         stories = [story for story in self._story_views(state, profile_map, now=_utc(now))
                    if npc_id in story["participant_ids"]][:5]
         relationships = []
@@ -985,6 +1014,11 @@ class LifeWorldService:
             "game_date": game_date,
             "opening": conversation_opening(context["current_action"]),
         }
+        # Only the speaking resident's perspective reaches its provider. The
+        # room, map and public agent endpoints must never become a mind dump.
+        speaker_perspective = social_mind.perspective(
+            state, npc_id, tuple(state["residents"]), before=moment,
+        )
         if self.expression_service is not None:
             context["recent_life_stories"] = self.expression_service.dialogue_context(player_id, stories)
             cached_opening = self.expression_service.cached_opening(player_id, context["conversation"]["id"])
@@ -992,8 +1026,11 @@ class LifeWorldService:
                 context["conversation"]["opening"] = cached_opening
             elif author_opening and self.expression_service.enabled:
                 context["conversation"]["opening"] = self.expression_service.opening(
-                    player_id, npc_id, profile_map.get(npc_id, {}), context,
+                    player_id, npc_id, profile_map.get(npc_id, {}),
+                    {**context, "speaker_perspective": speaker_perspective},
                 )
+        if include_private:
+            context["speaker_perspective"] = speaker_perspective
         return context
 
     @staticmethod
@@ -1425,6 +1462,12 @@ class LifeWorldService:
             summary = f"{setting_en}, this moment involves {cast_en}. {summary}"
             summary_zh = f"这件事发生在{location_copy['label_zh']}，涉及{cast_zh}。{summary_zh}"
             facts = collision.get("facts") or {}
+            followup = FOLLOWUP_COPY.get(str(facts.get("followup_kind") or ""))
+            if topic in {"social_followup", "public_relay"} and followup:
+                title, title_zh, action_en, action_zh = followup
+                speaker = facts.get("actor_id")
+                name = str(profiles.get(str(speaker), {}).get("name") or speaker or cast_en)
+                summary, summary_zh = f"{name} {action_en}.", f"{name}{action_zh}。"
             if topic == "borrowed_property" and facts.get("actor_id") in participant_ids and facts.get("affected_id") in participant_ids:
                 borrower = str(profiles.get(facts["actor_id"], {}).get("name") or facts["actor_id"])
                 owner = str(profiles.get(facts["affected_id"], {}).get("name") or facts["affected_id"])

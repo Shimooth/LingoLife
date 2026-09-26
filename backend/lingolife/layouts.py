@@ -122,6 +122,34 @@ def _building_model(kind: str, index: int) -> str:
     return choices[index % len(choices)]
 
 
+def _fabric_building_style(family: str, x: float, z: float) -> tuple[str, float]:
+    """New default fabric only; never migrate or mutate an authored layout.
+
+    Keep the foreground lower and give the skyline a few taller accents.
+    This mirrors web cityArtDirection.fabricBuildingStyle. Full uniform
+    scale preserves the original model proportions and legal parcel bounds.
+    """
+    variant = abs(round(x / 2.6) * 31 + round(z / 2.6) * 17)
+    depth = .65 * x + .76 * z
+    foreground, background = depth >= 8, depth <= -7
+    if family == "residential":
+        choices = ("building_A", "building_B") if foreground else (
+            ("building_C", "building_B", "building_C") if background
+            else ("building_A", "building_B", "building_C")
+        )
+    elif family == "commercial":
+        choices = ("building_E",) if foreground else (
+            "building_D", "building_E", "building_E",
+        )
+    else:
+        choices = ("building_F",) if foreground else (
+            ("building_G", "building_H", "building_F") if background
+            else ("building_F", "building_G", "building_H")
+        )
+    scale = (1 if foreground else 1.08 if background else 1.035) + (variant % 3) * .025
+    return choices[variant % len(choices)], round(scale, 3)
+
+
 def _default_buildings() -> list[dict[str, Any]]:
     """Claim legal road-adjacent parcels for landmarks and city fabric."""
     step = 2.6
@@ -247,10 +275,10 @@ def _default_buildings() -> list[dict[str, Any]]:
         if cell in claimed:
             continue
         claimed.add(cell)
-        model = _building_model(lot["family"], len(result))
+        model, scale = _fabric_building_style(lot["family"], lot["x"], lot["z"])
         result.append(_placement(
             f"fabric-{lot['gx']}-{lot['gz']}", f"{CITY_ASSET_ROOT}/{model}.gltf",
-            lot["x"], .369, lot["z"], lot["rotation"], 1.16,
+            lot["x"], .369, lot["z"], lot["rotation"], scale,
             location_id=None,
         ))
     if len(result) < 54:
@@ -287,13 +315,17 @@ def _default_props() -> list[dict[str, Any]]:
         ("bench-campus-a", "bench", -5.9, -10.7, math.pi / 2, 2.1),
         ("bench-sunny-a", "bench", .7, -5.5, math.pi / 2, 2.1),
         ("watertower-cloudgate", "watertower", -24.2, -12.8, .2, 2.4),
-        ("car-taxi-centre", "car_taxi", 1.1, .28, math.pi / 2, 1.16),
-        ("car-sedan-west", "car_sedan", -16.6, -.28, -math.pi / 2, 1.16),
-        ("car-police-dawn", "car_police", 23.3, .28, math.pi / 2, 1.16),
+        # Station courtyard parking, outside the live lanes and sidewalks.
+        ("car-taxi-centre", "car_taxi", 13.4, 7.65, math.pi, 1.16),
+        ("car-sedan-west", "car_sedan", 16, 7.65, math.pi, 1.16),
+        ("car-police-dawn", "car_police", 18.6, 7.65, math.pi, 1.16),
     )
     for identifier, model, x, z, rotation, scale in fixed:
+        # The parking slab tops out at .36; include the wheels below the
+        # vehicle origin (-.061043 local Y) plus a small contact clearance.
+        height = .433 if model.startswith("car_") else .37
         result.append(_placement(
-            identifier, f"{CITY_ASSET_ROOT}/{model}.gltf", x, .37, z, rotation, scale,
+            identifier, f"{CITY_ASSET_ROOT}/{model}.gltf", x, height, z, rotation, scale,
         ))
     return result
 

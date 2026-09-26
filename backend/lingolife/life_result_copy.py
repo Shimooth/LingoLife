@@ -3,6 +3,15 @@
 # These describe a selected intention. They must not claim a resource moved,
 # food was eaten, a promise was kept, or both residents agreed.
 RESPONSE_SUMMARIES = {
+    "repair_attempt": ("tried to reopen the conversation", "试着重新开口聊聊"),
+    "offer_thanks": ("wanted to acknowledge the other person's help", "想让对方知道，之前的帮助自己记着"),
+    "check_in": ("checked whether this was a better moment to talk", "来看看这次是否方便聊聊"),
+    "explain_absence": ("wanted to talk about the missed plan", "想聊聊那次没能赴的约"),
+    "relay_observation": ("passed along something they had witnessed", "说起了自己亲眼见过的事"),
+    "hear_out": ("was willing to hear the other person out", "愿意听对方说一说"),
+    "defer": ("left the conversation for another time", "这次先不聊，留到之后再说"),
+    "keep_distance": ("still wanted some space", "还是想保持一点距离"),
+    "acknowledge": ("acknowledged what the other person said", "听到了对方的意思"),
     "wait": ("chose to wait for a turn", "选择等一会儿再用"),
     "negotiate": ("wanted to work out who uses the kitchen first", "想商量厨房谁先用"),
     "cook_together": ("suggested cooking together", "提议一起做饭"),

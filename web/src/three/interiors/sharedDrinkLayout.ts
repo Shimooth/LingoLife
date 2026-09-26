@@ -20,7 +20,7 @@ const localPoint=(position:DrinkPoint,rotation:number,scale:DrinkPoint,local:Dri
 }
 
 /** The same authored furniture drives both the shared home and the close-up.
- * Heights are measured from the shipped KayKit geometry: seat cushion .485,
+ * Heights are measured from the shipped KayKit geometry: seat cushion .5,
  * coffee table .5. No separate, arbitrarily-scaled encounter furniture. */
 export function resolveSharedDrinkLayout(placements?:readonly WorldLayoutInteriorPlacement[]):SharedDrinkLayout{
  const defaults=sharedHomeDefaultPlacements('living_room')
@@ -34,7 +34,7 @@ export function resolveSharedDrinkLayout(placements?:readonly WorldLayoutInterio
   const chair=find(id),position=localPoint(chair.position,chair.rotation,chair.scale,[0,0,.25])
   // Approach from the open side; the coffee table is never a walk-through waypoint.
   const side=index===0?1:-1
-  return {position,rotation:chair.rotation,seatTopY:chair.position[1]+.485*chair.scale[1],
+  return {position,rotation:chair.rotation,seatTopY:chair.position[1]+.5*chair.scale[1],
    approach:localPoint(chair.position,chair.rotation,chair.scale,[1.3*side,0,.25]),
    exit:localPoint(chair.position,chair.rotation,chair.scale,[2*side,0,.35])}
  }) as [SharedDrinkSeat,SharedDrinkSeat]

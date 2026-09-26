@@ -7,6 +7,10 @@ import {trafficLoop,trafficRoutes} from '../src/three/world/ambientTraffic.ts'
 import {ROAD_TILES,ROAD_TILE_STEP} from '../src/three/world/worldData.ts'
 import {Box3,BoxGeometry,Group,Mesh} from 'three'
 import {visibleCharacterBounds} from '../src/three/characters/visibleCharacterBounds.ts'
+import './check-ambient-traffic.mjs'
+import './check-traffic-parking.mjs'
+import './check-city-art-direction.mjs'
+import './check-streetscape.mjs'
 
 const actor=new Group(),body=new Mesh(new BoxGeometry(1,2,1)),hiddenHair=new Mesh(new BoxGeometry(1,10,1))
 hiddenHair.visible=false;actor.add(body,hiddenHair);actor.position.y=3
@@ -68,7 +72,7 @@ for(let i=0;i<loop.length;i++)assert.ok(Math.abs(Math.hypot(loop[i][0]-loop[(i+1
 assert.deepEqual(trafficLoop([]),[])
 const routes=trafficRoutes(ROAD_TILES),open=routes.filter(r=>!r.closed)
 assert.equal(open.length,6,'all three gateways must have inbound and outbound routes')
-assert.equal(routes.length,8,'bound the fleet to six transit routes and two city loops')
+assert.equal(routes.length,16,'cover all five city blocks in both directions, plus six gateway routes; fleet count is separately bounded')
 for(const route of open){
  assert.notDeepEqual(route.points[0],route.points.at(-1))
  assert.ok(open.some(other=>JSON.stringify(other.points)===JSON.stringify([...route.points].reverse())),'every gateway route has an opposite direction')

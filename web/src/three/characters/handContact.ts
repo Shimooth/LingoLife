@@ -25,7 +25,9 @@ export function solveHandContact(model:Object3D,family:CharacterFamily,target:Ve
  }
 }
 
-/** Seated feet retain the rig's lengths but rest on the visible floor, not in mid-air. */
+/** @deprecated Only retained for the known-bad posture diagnostic. Forcing both
+ * feet down rotates the thighs into a half-standing pose. Runtime seating must
+ * use solveSeatedContact, which prioritizes the cushion and allows dangling. */
 export function groundSeatedFeet(model:Object3D,family:CharacterFamily,floorY:number,weight:number):void{
  const origin=new Vector3(),from=new Vector3(),to=new Vector3(),delta=new Quaternion(),parent=new Quaternion(),world=new Quaternion()
  for(const side of ['L','R']){

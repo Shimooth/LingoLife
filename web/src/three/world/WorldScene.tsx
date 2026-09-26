@@ -10,12 +10,18 @@ import {CharacterEmote,DirectedCharacter3D,type CharacterMotion,type CharacterPe
 import {
  BUILDING_LOTS,BUILDING_MODELS,CITY_PLATFORM_OUTLINE,DISTRICTS,KAYKIT_ASSET_BASE,KAYKIT_PROP_MODELS,KAYKIT_ROAD_MODELS,KIND_COLORS,ROAD_TILES,ROAD_TILE_SCALE,SKY_ROAD_EXITS,STREET_PROPS,TREES,WORLD_DEPTH,WORLD_WIDTH,
  buildingModelFor,hashString,worldPosition,
- type BuildingLot,type CityBuildingPlacement,type KayKitBuildingModel,type KayKitPropModel,type KayKitRoadModel,type RoadTilePlacement,type TimeSlot,type WorldPoint,
+ type BuildingLot,type CityBuildingPlacement,type KayKitBuildingModel,type KayKitPropModel,type KayKitRoadModel,type PropPlacement,type TimeSlot,type WorldPoint,
 } from './worldData'
 import {cameraDampingAlpha,cameraPoseSettled,followCameraZoom,followViewOffset,topViewOffset} from './worldCamera'
 import {buildPedestrianRoute,buildPedestrianRouteForRoads,samplePedestrianRoute,type PedestrianRoute} from './worldNavigation'
 import {residentSidewalkOffset,uniformBuildingScale} from './worldTransforms'
-import {trafficRoutes} from './ambientTraffic'
+import {trafficRoadsFromLayout} from './ambientTraffic'
+import {AmbientTraffic} from './AmbientTrafficVehicles'
+import {CityFacadeDetails} from './CityFacadeDetails'
+import {fabricBuildingStyle,type FacadeBuilding} from './cityArtDirection'
+import {CityStreetscape} from './CityStreetscape'
+import {resolveStreetscapeLayout,streetscapeObstacleFromAuthored} from './streetscapeLayout'
+import {filterSafeParkedVehicles,filterSafeAuthoredVehicles,isParkedVehicle} from './worldDecorations'
 import type {WorldLayoutBuilding,WorldLayoutDocument,WorldLayoutPlacement} from '../../worldLayout'
 
 type Quality='low'|'high'
@@ -94,7 +100,9 @@ function useKayKitMesh(model:KayKitModel){
 function AssetInstances({model,items,castShadow=false,receiveShadow=false}:{model:KayKitModel;items:readonly InstancePlacement[];castShadow?:boolean;receiveShadow?:boolean}){
  const {geometry,material}=useKayKitMesh(model)
  if(!items.length)return null
- return <Instances geometry={geometry} material={material} limit={items.length} castShadow={castShadow} receiveShadow={receiveShadow} frustumCulled>
+ // Drei allocates its typed arrays only on mount. A published layout can
+ // increase the count after the first frame; resize by remounting this batch.
+ return <Instances key={items.length} name={`city-props-${model}`} geometry={geometry} material={material} limit={items.length} castShadow={castShadow} receiveShadow={receiveShadow} frustumCulled>
   {items.map(item=><Instance key={item.id} position={item.position} rotation={[0,item.rotation,0]} scale={item.scale}/>) }
  </Instances>
 }
@@ -107,7 +115,7 @@ function AssetInstances({model,items,castShadow=false,receiveShadow=false}:{mode
 function StableBuildingInstances({model,items,castShadow=false,receiveShadow=false}:{model:KayKitBuildingModel;items:readonly InstancePlacement[];castShadow?:boolean;receiveShadow?:boolean}){
  const {geometry,material}=useKayKitMesh(model)
  if(!items.length)return null
- return <Instances geometry={geometry} material={material} limit={items.length} castShadow={castShadow} receiveShadow={receiveShadow} frustumCulled>
+ return <Instances key={items.length} name={`city-buildings-${model}`} geometry={geometry} material={material} limit={items.length} castShadow={castShadow} receiveShadow={receiveShadow} frustumCulled>
   {items.map(item=><group key={item.id} position={item.position} rotation={[0,item.rotation,0]} scale={item.scale}><Instance scale={1}/></group>)}
  </Instances>
 }
@@ -137,40 +145,6 @@ function AssetObject({model,item,castShadow=false,receiveShadow=false}:{model:Ka
   return clone
  },[anisotropy,castShadow,receiveShadow,scene])
  return <primitive object={object} position={item.position} rotation={[0,item.rotation,0]} scale={item.scale}/>
-}
-
-function AmbientTraffic({roads,reducedMotion}:{roads:readonly RoadTilePlacement[];reducedMotion:boolean}){
- const groups=useRef<(THREE.Group|null)[]>([]),elapsed=useRef(0)
- const routes=useMemo(()=>trafficRoutes(roads).map(route=>{
-  const curve=new THREE.CatmullRomCurve3(route.points.map(([x,z])=>new THREE.Vector3(x,.47,z)),route.closed,'catmullrom',.1)
-  return {...route,curve,length:curve.getLength()}
- }),[roads])
- const fleet=useMemo(()=>routes.flatMap((route,routeIndex)=>{
-  // Bounded fleet: all three gateways in both directions, plus local circulation.
-  const count=route.closed?3:2
-  return Array.from({length:count},(_,index)=>({route,index,count,offset:(index+(routeIndex%3)*.19)/count,model:(['car_taxi','car_sedan','car_hatchback'] as const)[(index+routeIndex)%3]}))
- }),[routes])
- const scratch=useMemo(()=>({position:new THREE.Vector3(),tangent:new THREE.Vector3()}),[])
- useFrame((_,delta)=>{
-  if(!routes.length||reducedMotion)return
-  elapsed.current+=Math.min(delta,.05)
-  groups.current.forEach((group,index)=>{
-   if(!group||!fleet[index])return
-   const vehicle=fleet[index],{route}=vehicle
-   const t=(elapsed.current*1.45/route.length+vehicle.offset)%1
-   route.curve.getPointAt(t,scratch.position);route.curve.getTangentAt(t,scratch.tangent)
-   // Stay in one lane; these are anonymous background vehicles, not resident actions.
-   group.position.copy(scratch.position)
-   group.position.x+=scratch.tangent.z*.39;group.position.z-=scratch.tangent.x*.39
-   group.rotation.y=Math.atan2(scratch.tangent.x,scratch.tangent.z)
-   group.visible=true
-   // Gateway endpoints are inside cloud banks. Scale in/out there only;
-   // no visible jump from an exit back into the city.
-   group.scale.setScalar(route.closed?1:Math.min(1,t*route.length/2,(1-t)*route.length/2))
-  })
- })
- if(!routes.length||reducedMotion)return null
- return <group name="ambient-road-traffic">{fleet.map(({model,route,index:slot},index)=><group key={`${route.id}-${slot}`} visible={false} ref={node=>{groups.current[index]=node}}><AssetObject model={model} item={{id:`ambient-${index}`,position:[0,0,0],rotation:0,scale:1.08}} castShadow receiveShadow/></group>)}</group>
 }
 
 function AuthoredAsset({placement,quality}:{placement:WorldLayoutPlacement;quality:Quality}){
@@ -315,15 +289,15 @@ function FloatingCityBase({quality}:{quality:Quality}){
  return <group>
   <mesh position-y={-1.06} rotation-x={-Math.PI/2} receiveShadow castShadow={quality==='high'}>
    <extrudeGeometry args={[PLATFORM_SHELL,{depth:1.06,bevelEnabled:true,bevelSize:.32,bevelThickness:.2,bevelSegments:4,curveSegments:2}]}/>
-   <meshStandardMaterial color="#43535c" roughness={.64} metalness={.045}/>
+   <meshStandardMaterial color="#526571" roughness={.76} metalness={.025}/>
   </mesh>
   <mesh position-y={.222} rotation-x={-Math.PI/2} receiveShadow>
    <shapeGeometry args={[PLATFORM_TOP]}/>
-   <meshStandardMaterial color="#606d70" roughness={.76} metalness={.02}/>
+   <meshStandardMaterial color="#8e9995" roughness={.86} metalness={.01}/>
   </mesh>
   <mesh position-y={.232} rotation-x={-Math.PI/2} scale={[.978,.978,1]} receiveShadow>
    <shapeGeometry args={[PLATFORM_TOP]}/>
-   <meshStandardMaterial color="#707c7b" roughness={.84}/>
+   <meshStandardMaterial color="#b4b5a4" roughness={.94}/>
   </mesh>
   {UNDERCITY_ANCHORS.map(([x,y,z,scale],index)=><group key={`under-city-${index}`} position={[x,y,z]} rotation-y={index*.71}>
    <mesh castShadow={quality==='high'} scale={[scale*.88,scale*.62,scale*.78]}>
@@ -354,18 +328,17 @@ function RoadNetwork({placements}:{placements?:readonly WorldLayoutPlacement[]})
   return model?{model,item:{id:item.id,position:[item.position.x,item.position.y,item.position.z] as [number,number,number],rotation:item.rotation.y,scale:item.scale.x}}:null
  }).filter((item):item is {model:KayKitRoadModel;item:InstancePlacement}=>Boolean(item))
  return <group>
-  {KAYKIT_ROAD_MODELS.map(model=><AssetInstances key={model} model={model} receiveShadow items={authored?.length?authored.filter(entry=>entry.model===model).map(entry=>entry.item):ROAD_TILES.filter(tile=>tile.model===model).map(tile=>({id:tile.id,position:[tile.position[0],.245,tile.position[1]],rotation:tile.rotation,scale:ROAD_TILE_SCALE}))}/>) }
+  {KAYKIT_ROAD_MODELS.map(model=><AssetInstances key={model} model={model} receiveShadow items={authored?authored.filter(entry=>entry.model===model).map(entry=>entry.item):ROAD_TILES.filter(tile=>tile.model===model).map(tile=>({id:tile.id,position:[tile.position[0],.245,tile.position[1]],rotation:tile.rotation,scale:ROAD_TILE_SCALE}))}/>) }
  </group>
 }
 
-const COURTYARD_CARS:readonly {id:string;model:KayKitPropModel;position:[number,number];rotation:number}[]=[
- {id:'station-yard-car-a',model:'car_sedan',position:[13.4,6],rotation:0},
- {id:'station-yard-car-b',model:'car_hatchback',position:[16.1,6],rotation:0},
- {id:'station-yard-car-c',model:'car_stationwagon',position:[18.7,6],rotation:0},
+const COURTYARD_CARS:readonly PropPlacement[]=[
+ {id:'station-yard-car-a',model:'car_sedan',position:[13.4,5.4],rotation:0,scale:1.12,detail:true},
+ {id:'station-yard-car-b',model:'car_hatchback',position:[16,5.4],rotation:0,scale:1.12,detail:true},
+ {id:'station-yard-car-c',model:'car_stationwagon',position:[18.6,5.4],rotation:0,scale:1.12,detail:true},
 ]
 
-function CourtyardFeatures({quality}:{quality:Quality}){
- const cars=quality==='high'?COURTYARD_CARS:COURTYARD_CARS.slice(0,2)
+function CourtyardFeatures({quality,cars}:{quality:Quality;cars:readonly PropPlacement[]}){
  return <group>
   <group position={[-.8,.3,-6.5]}>
    <mesh receiveShadow><boxGeometry args={[14.4,.12,4.25]}/><meshStandardMaterial color="#8daf76" roughness={.96}/></mesh>
@@ -382,9 +355,9 @@ function CourtyardFeatures({quality}:{quality:Quality}){
   </group>
   <group position={[16,.3,6.5]}>
    <mesh receiveShadow><boxGeometry args={[7.7,.12,4.4]}/><meshStandardMaterial color="#4e5a61" roughness={.88}/></mesh>
-   {[-2.6,0,2.6].map(offset=><group key={offset} position={[offset,.08,0]}>{[-.63,.63].map(side=><mesh key={side} position={[side,0,0]}><boxGeometry args={[.055,.025,3.55]}/><meshBasicMaterial color="#e5e2d7"/></mesh>)}</group>)}
+   {[-2.6,-1.3,0,1.3,2.6].map(offset=><group key={offset} position={[offset,.08,0]}>{[-.57,.57].flatMap(side=>[-1,1].map(row=><mesh key={`${side}-${row}`} position={[side,0,row*1.13]}><boxGeometry args={[.04,.025,1.32]}/><meshBasicMaterial color="#e5e2d7"/></mesh>))}</group>)}
   </group>
-  {cars.map(item=><AssetObject key={item.id} model={item.model} item={{id:item.id,position:[item.position[0],.46,item.position[1]],rotation:item.rotation,scale:1.12}} castShadow={quality==='high'} receiveShadow/>)}
+  {cars.map(item=><group key={item.id} name={`parked-${item.id}`} userData={{parkedVehicle:true,position:item.position,scale:item.scale,model:item.model,rotation:item.rotation}}><AssetObject model={item.model} item={{id:item.id,position:[item.position[0],.43,item.position[1]],rotation:item.rotation,scale:item.scale}} castShadow={quality==='high'} receiveShadow/></group>)}
  </group>
 }
 
@@ -521,13 +494,8 @@ function resolveCityLayout(landmarks:readonly CityLandmark[],characters:readonly
   districtCounts.set(lot.district,(districtCounts.get(lot.district)??0)+1)
   const grid=layoutGridKey(lot.position)
   gridCounts.set(grid,(gridCounts.get(grid)??0)+1)
-  const depth=.65*lot.position[0]+.76*lot.position[1]
-  const models=depth>=8
-   ?lot.family==='residential'?BUILDING_MODELS.residential.slice(0,2):lot.family==='commercial'?(['building_E'] as const):(['building_F'] as const)
-   :BUILDING_MODELS[lot.family]
-  const model=models[hashString(lot.id)%models.length]
-  const baseScale=depth<=-7?1.1:depth>=8?.98:1.04
-  fillerBuildings.push({id:`fabric-${lot.id}`,family:lot.family,model,position:lot.position,rotation:lot.rotation,scale:baseScale+(hashString(`scale:${lot.id}`)%4)*.025})
+  const style=fabricBuildingStyle(lot)
+  fillerBuildings.push({id:`fabric-${lot.id}`,family:lot.family,...style,position:lot.position,rotation:lot.rotation})
  }
 
  return {
@@ -555,9 +523,7 @@ function ResidentialHomes({homes,language,onSelect}:{homes:readonly HomePlacemen
 
 const ROAD_PROPS=new Set<KayKitPropModel>(['streetlight','trafficlight_A','trafficlight_B','trafficlight_C','firehydrant','car_sedan','car_taxi','car_police','car_hatchback','car_stationwagon'])
 
-function StreetLife({quality,occupiedPositions,authored}:{quality:Quality;occupiedPositions:readonly [number,number][];authored?:readonly WorldLayoutPlacement[]}){
- const authoredPlacements=authored?.map(item=>{const model=modelFromAsset(item.asset,KAYKIT_PROP_MODELS);return model?{id:item.id,model,position:[item.position.x,item.position.z] as [number,number],rotation:item.rotation.y,scale:item.scale.x,detail:true,y:item.position.y}:null}).filter((item):item is {id:string;model:KayKitPropModel;position:[number,number];rotation:number;scale:number;detail:boolean;y:number}=>Boolean(item))
- const source=authoredPlacements?.length?authoredPlacements:STREET_PROPS
+function StreetLife({quality,occupiedPositions,source}:{quality:Quality;occupiedPositions:readonly [number,number][];source:readonly (PropPlacement&{y?:number})[]}){
  const qualityPlacements=quality==='high'?source:source.filter((_,index)=>index%2===0)
  const placements=qualityPlacements.filter(item=>ROAD_PROPS.has(item.model)||occupiedPositions.every(position=>pointDistanceSquared(position,item.position)>4.4))
  const staticPlacements=placements.filter(item=>!item.model.startsWith('car_'))
@@ -570,7 +536,7 @@ function StreetLife({quality,occupiedPositions,authored}:{quality:Quality;occupi
    rotation:item.rotation,
    scale:item.scale,
   }))}/>) }
-  {cars.map(item=><AssetObject key={item.id} model={item.model} item={{id:item.id,position:[item.position[0],(item as {y?:number}).y??.47,item.position[1]],rotation:item.rotation,scale:item.scale}} castShadow={quality==='high'} receiveShadow/>)}
+  {cars.map(item=><group key={item.id} name={`parked-${item.id}`} userData={{parkedVehicle:true,position:item.position,scale:item.scale,model:item.model,rotation:item.rotation}}><AssetObject model={item.model} item={{id:item.id,position:[item.position[0],item.y??.433,item.position[1]],rotation:item.rotation,scale:item.scale}} castShadow={quality==='high'} receiveShadow/></group>)}
  </group>
 }
 
@@ -579,11 +545,11 @@ function Trees({quality,occupiedPositions,authored}:{quality:Quality;occupiedPos
  const qualityTrees=quality==='high'?TREES:TREES.filter((_,index)=>index%2===0)
  const trees=qualityTrees.filter(tree=>occupiedPositions.every(position=>pointDistanceSquared(position,tree)>4.2))
  return <group>
-  <Instances limit={trees.length} castShadow={quality==='high'}>
+  <Instances key={`trunks-${trees.length}`} limit={trees.length} castShadow={quality==='high'}>
    <cylinderGeometry args={[.09,.15,.62,7]}/><meshStandardMaterial color="#75543c" roughness={1}/>
    {trees.map(([x,z],index)=><Instance key={`trunk-${index}`} position={[x,.68,z]} rotation={[0,index*.72,0]}/>) }
   </Instances>
-  <Instances limit={trees.length} castShadow={quality==='high'}>
+  <Instances key={`crowns-${trees.length}`} limit={trees.length} castShadow={quality==='high'}>
    <icosahedronGeometry args={[.52,1]}/><meshStandardMaterial color="#4f9368" roughness={.96}/>
    {trees.map(([x,z],index)=><Instance key={`crown-${index}`} position={[x,1.28+(index%3)*.07,z]} scale={[.9+(index%2)*.16,1.08,.9]}/>) }
   </Instances>
@@ -592,7 +558,7 @@ function Trees({quality,occupiedPositions,authored}:{quality:Quality;occupiedPos
 
 function LandmarkModelInstances({model,items,onHover,onSelect}:{model:KayKitBuildingModel;items:readonly LandmarkPlacement[];quality:Quality;onHover:(id?:string)=>void;onSelect:(landmark:CityLandmark)=>void}){
  const {geometry,material}=useKayKitMesh(model)
- return <Instances geometry={geometry} material={material} limit={items.length} castShadow receiveShadow>
+ return <Instances key={items.length} name={`city-landmarks-${model}`} geometry={geometry} material={material} limit={items.length} castShadow receiveShadow>
   {items.map(item=><group key={item.landmark.id} position={item.position} rotation={[0,item.rotation,0]} scale={item.scale}>
    <Instance
     scale={1}
@@ -765,7 +731,44 @@ export function WorldScene({characters,landmarks,followedCharacterId,serverTime,
  const [hoveredLandmarkId,setHoveredLandmarkId]=useState<string>()
  const actors=useRef(new Map<string,THREE.Group>())
  const layout=useMemo(()=>resolveCityLayout(landmarks,characters,worldLayout?.city.buildings),[characters,landmarks,worldLayout?.city.buildings])
- const authoredRoads=useMemo<RoadTilePlacement[]>(()=>worldLayout?.city.roads.flatMap(item=>{const model=modelFromAsset(item.asset,KAYKIT_ROAD_MODELS);return model?[{id:item.id,model,position:[item.position.x,item.position.z],rotation:item.rotation.y,surface:'city'}]:[]})??[],[worldLayout?.city.roads])
+ const facadeBuildings=useMemo<FacadeBuilding[]>(()=>[
+  ...layout.fillerBuildings.map(item=>({id:item.id,model:item.model,position:[item.position[0],item.y??.369,item.position[1]] as WorldPoint,rotation:item.rotation,scale:item.scale})),
+  ...layout.landmarkPlacements.map(item=>({id:`landmark-${item.landmark.id}`,model:item.model,position:item.position,rotation:item.rotation,scale:item.scale})),
+  ...layout.homePlacements.map(item=>({id:'shared-home',model:item.model,position:item.position,rotation:item.rotation,scale:item.scale})),
+ ],[layout])
+ const roads=useMemo(()=>worldLayout?trafficRoadsFromLayout(worldLayout.city.roads):ROAD_TILES,[worldLayout])
+ const visualRoads=useMemo(()=>worldLayout?worldLayout.city.roads.flatMap(item=>{
+  const model=modelFromAsset(item.asset,KAYKIT_ROAD_MODELS)
+  return model?[{id:item.id,model,position:[item.position.x,item.position.z] as [number,number],rotation:item.rotation.y,surface:'city' as const,scale:Math.max(item.scale.x,item.scale.z)}]:[]
+ }):roads,[roads,worldLayout])
+ const streetscape=useMemo(()=>{
+  const authoredObstacles=worldLayout?[...worldLayout.city.props,...worldLayout.city.decorations].map(streetscapeObstacleFromAuthored):[
+   ...STREET_PROPS.map(item=>streetscapeObstacleFromAuthored({id:item.id,asset:`${KAYKIT_ASSET_BASE}/${item.model}.gltf`,position:{x:item.position[0],y:.37,z:item.position[1]},rotation:{x:0,y:item.rotation,z:0},scale:{x:item.scale,y:item.scale,z:item.scale}})),
+   ...TREES.map(position=>({position,half:[.65,.65] as [number,number],rotation:0})),
+  ]
+  const courtyardObstacles=COURTYARD_CARS.map(item=>({position:item.position,half:[.24,.53] as [number,number],rotation:item.rotation}))
+  return resolveStreetscapeLayout({roads:visualRoads,
+   buildings:facadeBuildings.map(item=>({id:item.id,position:[item.position[0],item.position[2]],rotation:item.rotation,scale:item.scale})),
+   landmarks:layout.landmarkPlacements.map(item=>({locationId:item.landmark.id,kind:item.landmark.kind,position:[item.position[0],item.position[2]],rotation:item.rotation,scale:item.scale})),
+   obstacles:[...authoredObstacles,...courtyardObstacles],
+  })
+ },[facadeBuildings,layout.landmarkPlacements,visualRoads,worldLayout])
+ const parking=useMemo(()=>{
+  // Validate against the same published geometry that is actually rendered.
+  // Courtyard -> props -> decorations is a stable priority across sources.
+  const constraints={roads:visualRoads,buildings:[
+   ...layout.fillerBuildings,
+   ...[...layout.homePlacements,...layout.landmarkPlacements].map(item=>({position:[item.position[0],item.position[2]] as [number,number],rotation:item.rotation,scale:item.scale})),
+  ]}
+  const courtyard=filterSafeParkedVehicles(quality==='high'?COURTYARD_CARS:COURTYARD_CARS.slice(0,2),constraints)
+  const props:readonly (PropPlacement&{y?:number})[]=worldLayout?worldLayout.city.props.flatMap(item=>{
+   const model=modelFromAsset(item.asset,KAYKIT_PROP_MODELS)
+   return model?[{id:item.id,model,position:[item.position.x,item.position.z] as [number,number],rotation:item.rotation.y,scale:item.scale.x,detail:true,y:item.position.y}]:[]
+  }):STREET_PROPS
+  const street=filterSafeParkedVehicles(props,{...constraints,vehicles:courtyard})
+  const decorations=worldLayout?filterSafeAuthoredVehicles(worldLayout.city.decorations,{...constraints,vehicles:[...courtyard,...street.filter(isParkedVehicle)]}):undefined
+  return {courtyard,street,decorations}
+ },[layout,quality,visualRoads,worldLayout])
  const characterLot=(character:CityCharacter)=>character.locationId?layout.landmarkLots.get(character.locationId):layout.homeLots.get(character.id)
  const characterNavigation=useMemo(()=>{
   const values=characters.filter(visibleOnCityMap).slice(0,24).map(character=>({
@@ -777,11 +780,11 @@ export function WorldScene({characters,landmarks,followedCharacterId,serverTime,
    const destination=character.worldAction?.target_location_id
    const target=destination===character.homeLocationId?layout.homeLots.get(character.id):destination?layout.landmarkLots.get(destination):undefined
    const participantIndex=character.worldAction?.participant_index??0
-   const route=character.worldAction?.state==='walking_to_event'&&origin&&target?(authoredRoads.length?buildPedestrianRouteForRoads(origin,target,authoredRoads,{seed:`${character.worldAction.event_id}:${character.id}`,startLateralOffset:participantIndex ? .28 : -.28,endLateralOffset:participantIndex ? .7 : -.7}):buildPedestrianRoute(origin,target,{seed:`${character.worldAction.event_id}:${character.id}`,startLateralOffset:participantIndex ? .28 : -.28,endLateralOffset:participantIndex ? .7 : -.7})):undefined
+   const route=character.worldAction?.state==='walking_to_event'&&origin&&target?(worldLayout?buildPedestrianRouteForRoads(origin,target,roads,{seed:`${character.worldAction.event_id}:${character.id}`,startLateralOffset:participantIndex ? .28 : -.28,endLateralOffset:participantIndex ? .7 : -.7}):buildPedestrianRoute(origin,target,{seed:`${character.worldAction.event_id}:${character.id}`,startLateralOffset:participantIndex ? .28 : -.28,endLateralOffset:participantIndex ? .7 : -.7})):undefined
    const peers=origin?parcelResidents.get(origin.id)??[character.id]:[character.id]
    return {character,origin,route,parcelIndex:Math.max(0,peers.indexOf(character.id)),parcelCount:peers.length}
   })
- },[authoredRoads,characters,layout.homeLots,layout.landmarkLots])
+ },[roads,worldLayout,characters,layout.homeLots,layout.landmarkLots])
  const followedCharacter=characters.find(character=>character.id===followedCharacterId&&visibleOnCityMap(character))
  const followedLot=followedCharacter?characterLot(followedCharacter):undefined
  const followedLotRotation=followedLot?.rotation
@@ -804,12 +807,14 @@ export function WorldScene({characters,landmarks,followedCharacterId,serverTime,
   <SkyRoadDecks quality={quality}/>
   <DistrictGround language={language}/>
   <RoadNetwork placements={worldLayout?.city.roads}/>
-  <CourtyardFeatures quality={quality}/>
+  <CourtyardFeatures quality={quality} cars={parking.courtyard}/>
+  <CityStreetscape layout={streetscape} quality={quality} reducedMotion={reducedMotion}/>
   <CityFabric buildings={layout.fillerBuildings} quality={quality}/>
+  <CityFacadeDetails buildings={facadeBuildings} quality={quality} night={night}/>
   <ResidentialHomes homes={layout.homePlacements} quality={quality} language={language} onSelect={home=>{const householdId=home.character.householdId;if(householdId&&onHouseholdOpen)onHouseholdOpen(householdId);else onCharacterClick(home.character.id)}}/>
-  <StreetLife quality={quality} occupiedPositions={layout.occupiedPositions} authored={worldLayout?.city.props}/>
-  <AmbientTraffic roads={authoredRoads.length?authoredRoads:ROAD_TILES} reducedMotion={reducedMotion}/>
-  <Trees quality={quality} occupiedPositions={layout.occupiedPositions} authored={worldLayout?.city.decorations}/>
+  <StreetLife quality={quality} occupiedPositions={layout.occupiedPositions} source={parking.street}/>
+  <AmbientTraffic roads={roads} reducedMotion={reducedMotion} quality={quality}/>
+  <Trees quality={quality} occupiedPositions={layout.occupiedPositions} authored={parking.decorations}/>
   <LandmarkBuildings placements={layout.landmarkPlacements} selectedId={selectedLandmarkId} hoveredId={hoveredLandmarkId} language={language} night={night} quality={quality} onHover={setHoveredLandmarkId} onSelect={onLandmarkSelect}/>
   {characterNavigation.map(({character,origin,route,parcelIndex,parcelCount})=><CharacterMarker key={character.id} character={character} lot={origin} parcelIndex={parcelIndex} parcelCount={parcelCount} route={route} active={character.id===followedCharacterId} actors={actors} serverTime={serverTime} reducedMotion={reducedMotion} language={language} onClick={()=>onCharacterClick(character.id)} onEvent={onCharacterEvent} onTrouble={onCharacterTrouble?()=>onCharacterTrouble(character.id):undefined} onJourneyElapsed={onJourneyElapsed}/>)}
   <CameraRig focus={resolvedFocus} focusVersion={focusVersion} followedCharacterId={followedCharacter?.id} followCameraOffset={followCameraOffset} followWalking={followedCharacter?.worldAction?.state==='walking_to_event'} actors={actors} reducedMotion={reducedMotion} viewMode={viewMode}/>

@@ -5,7 +5,7 @@ import typescript from 'typescript'
 const modulePath=fileURLToPath(new URL('../src/three/world/worldDecorations.ts',import.meta.url))
 const worldDataUrl=new URL('../src/three/world/worldData.ts',import.meta.url).href
 const source=await readFile(modulePath,'utf8')
-const rewritten=source.replace("from './worldData'",`from '${worldDataUrl}'`)
+const rewritten=source.replace(/from '\.\/worldData(?:\.ts)?'/,`from '${worldDataUrl}'`)
 if(rewritten===source)throw new Error('World decoration guard failed: data import could not be resolved')
 const compiled=typescript.transpileModule(rewritten,{compilerOptions:{module:typescript.ModuleKind.ESNext,target:typescript.ScriptTarget.ES2022}}).outputText
 const decorations=await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`)

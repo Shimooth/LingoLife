@@ -17,7 +17,7 @@ from itertools import combinations
 from typing import Any, Iterable, Mapping, MutableMapping, Sequence, cast
 
 from .agent import compile_persona, observable_runtime_state
-from . import pair_memory
+from . import pair_memory, social_mind, social_continuity
 from .life_expression import persona_snapshot
 from .collisions import (
     COLLISION_RULES_VERSION,
@@ -1223,12 +1223,15 @@ class LifeWorldEngine:
                         "offline_blocks": 0, "scenario_counts": {}, "topic_counts": {}},
         }
         self._assign_private_sleep_bindings(state)
+        social_mind.ensure(state, profile_map, current)
+        social_continuity.ensure(state, profile_map, current)
         window = self.clock.decision_window(current)
         resource_map = self._resource_map(state)
         for npc_id in sorted(residents):
             self._ensure_current_action(state, profile_map, npc_id, window.key,
                                         window.period, current, resource_map)
         state["resources"] = [resource_map[key].to_dict() for key in sorted(resource_map)]
+        self._sync_social_receipts(state, profile_map, current)
         self._detect_and_record(state, profile_map, window.key, current)
         self._settle_due_stories(state, profile_map, current)
         state["next_transition_at"] = self._next_transition(state, current)
@@ -1243,10 +1246,12 @@ class LifeWorldEngine:
         result = self._validate_and_copy(state)
         current = _utc(now or datetime.now(timezone.utc))
         last = _moment(result.get("last_advanced_at"), fallback=current)
+        profile_map = _profile_map(profiles)
+        social_mind.ensure(result, profile_map, last)
+        social_continuity.ensure(result, profile_map, last)
         if current <= last:
             return result
         pair_memory.maintain(result, last)
-        profile_map = _profile_map(profiles)
         self._reconcile_residents(result, profile_map, current, home_location_mapping)
         # ``last_advanced_at`` tracks API progress while ``simulation_cursor_at``
         # tracks the latest deterministic transition integrated by the kernel.
@@ -1972,6 +1977,7 @@ class LifeWorldEngine:
                 else _profile_schedule_kind(profile, period)
             ),
             nearby_resident_ids=nearby,
+            social_target_weights=social_continuity.weights(state, npc_id, nearby, now),
             resources=self._resident_resources(state, npc_id, resources),
             # Keep a richer UI/debug history without changing the five-action
             # anti-repetition horizon used by the established selector.
@@ -2047,6 +2053,7 @@ class LifeWorldEngine:
             self._record_schedule_consequence(state, npc_id, active_block, reason, now)
         meal_action = dinner_life.hint(state, npc_id, now)
         shared_activity = None
+        social_concern = None
         if (meal_action and not urgent_need and not active_incident
                 and (not active_block or active_block.get("kind") not in {"work", "study", "sleep_window", "accepted_invitation"})):
             meal_candidate = next((item for item in decision.ranked if item.action_type == meal_action), None)
@@ -2068,6 +2075,16 @@ class LifeWorldEngine:
                     target_npc_id=next(key for key in activity_hint['participants'] if key != npc_id),
                     reasons=(*activity_candidate.reasons, 'accepted_shared_activity'))
                 decision = self._decision_with_candidate(decision, activity_candidate, state['player_id'], npc_id)
+        if (not meal_action and not activity_hint and not urgent_need and not active_incident
+                and (not active_block or active_block.get("kind") not in {"work", "study", "sleep_window", "accepted_invitation"})
+                and min(runtime["needs"].get(key, 70) for key in ("food", "rest", "privacy")) >= 32):
+            ready_concern = social_continuity.ready(state, npc_id, nearby, now)
+            conversation = next((item for item in decision.ranked if item.action_type == "talk_to_resident"), None)
+            if ready_concern and conversation:
+                social_concern = ready_concern
+                conversation = replace(conversation, target_npc_id=ready_concern["target_id"],
+                    target_resource_id=None, reasons=(*conversation.reasons, "personal_social_concern"))
+                decision = self._decision_with_candidate(decision, conversation, state["player_id"], npc_id)
         target_location = resident.get("current_location_id")
         coordinated_meeting: tuple[str, LifeAction] | None = None
         if decision.selected.target_resource_id in resources:
@@ -2177,6 +2194,12 @@ class LifeWorldEngine:
             current_location_id=resident.get("current_location_id"),
             target_location_id=target_location, travel_seconds=travel, catalog=self.catalog,
         )
+        if social_concern:
+            fraction = min(1, 120 / action.duration_seconds)
+            action = replace(action, duration_seconds=120,
+                need_deltas={key: round(value * fraction) for key, value in action.need_deltas.items()},
+                emotion_deltas={key: round(value * fraction) for key, value in action.emotion_deltas.items()})
+            social_continuity.assigned(state, npc_id, social_concern, action, now)
         if shared_activity:
             # Do not award a full hour's learning/need rewards for four minutes.
             fraction = min(1, 240 / action.duration_seconds)
@@ -2232,6 +2255,8 @@ class LifeWorldEngine:
         """
         elapsed = max(0, (end - start).total_seconds())
         pair_memory.maintain(state, end)
+        social_mind.ensure(state, profiles, end)
+        social_continuity.maintain(state, profiles, end)
         for npc_id in sorted(state["residents"]):
             self._decay_runtime(state["residents"][npc_id], elapsed, end)
         for key, raw in list(state["relationships"].items()):
@@ -2248,6 +2273,7 @@ class LifeWorldEngine:
         window = self.clock.decision_window(end)
         dinner_life.advance(state, profiles, end)
         shared_activities.advance(state, end)
+        self._sync_social_receipts(state, profiles, end)
         for npc_id in sorted(state["residents"]):
             resident = state["residents"][npc_id]
             self._ensure_daily_plans(state, profiles, npc_id, end)
@@ -2339,6 +2365,7 @@ class LifeWorldEngine:
                         state, resident, action, transition.effects, resource_map, end,
                         profiles.get(npc_id, {}),
                     )
+                    social_continuity.action_completed(state, profiles, action, end)
                     dinner_life.advance(state, profiles, end)
                     resident["current_action"] = None
                     resident["current_journey"] = None
@@ -2373,6 +2400,7 @@ class LifeWorldEngine:
         self._detect_and_record(state, profiles, window.key, end)
         self._settle_due_stories(state, profiles, end)
         shared_activities.advance(state, end)
+        self._sync_social_receipts(state, profiles, end)
         state["simulation_cursor_at"] = end.isoformat()
         self._trim(state)
 
@@ -2925,12 +2953,24 @@ class LifeWorldEngine:
             social_events=tuple(social),
             profiles=profile_map, relationships=edges,
         )
+        self._record_social_followups(state, profiles, now)
         processed = set(state["processed_collision_ids"])
         previously_active = set(state.get("active_collision_fact_ids", []))
         detected = self.collisions.detect(snapshot)
         state["active_collision_fact_ids"] = [collision.id for collision in detected]
         cooldowns = state.setdefault("collision_cooldowns", {})
         for collision in detected:
+            if collision.topic in {"companionship", "missed_connection"} and any(
+                item.get("assigned_action_id") in collision.action_ids and item["status"] == "approaching"
+                for npc_id in collision.participant_ids
+                for item in state.get("social_continuity", {}).get("concerns", {}).get(npc_id, [])
+            ):
+                continue  # 有来源的续谈由真实会面链生成，避免同时冒出无关的通用开场。
+            if collision.topic in {"companionship", "missed_connection"} and any(
+                set(event["action_ids"]) == set(collision.action_ids)
+                for event in state.get("social_continuity", {}).get("encounters", {}).values()
+            ):
+                continue
             # A collision is the rising edge of a fact.  Re-evaluating an
             # unchanged queue, responsibility, or co-located action must not
             # create another story merely because time advanced.
@@ -3001,6 +3041,10 @@ class LifeWorldEngine:
                         npc_id: persona_snapshot(profile_map.get(npc_id, {}))
                         for npc_id in collision.participant_ids
                     },
+                    "expression_perspectives": {
+                        npc_id: social_mind.perspective(state, npc_id, collision.participant_ids, before=now)
+                        for npc_id in collision.participant_ids
+                    },
                     # Disclosure is a persisted decision, not a value that may
                     # reroll after a profile edit or a later conversation.
                     # It stays internal; public DTOs only project the resulting
@@ -3021,6 +3065,82 @@ class LifeWorldEngine:
             scenario_counts[collision.scenario_id] = int(scenario_counts.get(collision.scenario_id, 0)) + 1
             topic_counts = state["metrics"].setdefault("topic_counts", {})
             topic_counts[collision.topic] = int(topic_counts.get(collision.topic, 0)) + 1
+
+    def _sync_social_receipts(self, state: MutableMapping[str, Any],
+                             profiles: Mapping[str, Mapping[str, Any]], now: datetime) -> None:
+        social_continuity.sync_receipts(state, profiles, now)
+        for receipt in state.get("social_continuity", {}).get("receipts", {}).values():
+            if receipt["status"] != "fulfilled" or receipt.get("relationship_evidence_applied"):
+                continue
+            # 只奖励实际共同完成；未见面不能直接推断对方背叛，听到解释也不等于已原谅。
+            at = _moment(receipt["updated_at"])
+            fact = {"id": receipt["id"] + ":fulfilled"}
+            for owner in receipt["participants"]:
+                for target in receipt["participants"]:
+                    if owner == target or _pair_key(owner, target) not in state.get("relationships", {}):
+                        continue
+                    appraisal = Appraisal(**social_mind.appraise(state, owner, target, fact, profiles.get(owner, {}), at))
+                    self._apply_evidence(state, RelationshipEvidence(
+                        evidence_id=stable_id("promise-kept", receipt["id"], owner, target),
+                        owner_id=owner, target_id=target, kind="kept_promise", magnitude=.45,
+                        occurred_at=at, appraisal=appraisal, source_event_id=receipt["id"],
+                    ))
+            receipt["relationship_evidence_applied"] = True
+
+    def _record_social_followups(self, state: MutableMapping[str, Any],
+                                 profiles: Mapping[str, Mapping[str, Any]], now: datetime) -> None:
+        for event in social_continuity.encounter_candidates(state, profiles, now):
+            owner, target = event["owner_id"], event["target_id"]
+            if event["topic"] == "public_relay":
+                # 被谈论者不是额外说话人；只冻结当时的名字，不复制其内心或完整人设。
+                event["facts"]["source_people"] = [
+                    {"id": key, "name": str(profiles[key].get("name") or key)[:80]}
+                    for key in dict.fromkeys(event["facts"].get("source_participants", []))
+                    if key in profiles and key not in {owner, target}
+                ][:8]
+            intention = {"repair": "repair_attempt", "thank": "offer_thanks", "check_in": "check_in",
+                         "explain": "explain_absence", "relay": "relay_observation"}[event["facts"]["followup_kind"]]
+            collision = Collision(
+                id=event["id"], kind="person_person", scenario_id="friendly_company", topic=event["topic"],
+                participant_ids=(owner, target), action_ids=tuple(event["action_ids"]), trigger="continuing_social_concern",
+                occurred_at=now, location_id=event["location_id"], resource_id=None, severity=18,
+                response_candidates=tuple(sorted(social_continuity.FOLLOWUP_RESPONSES)), thread_key=None,
+                facts=event["facts"],
+            )
+            resolution = CollisionResolution(
+                id=stable_id("followup-resolution", collision.id), collision_id=collision.id, mode="autonomous",
+                response_by_participant={owner: intention, target: event["response"]},
+                relationship_changes=(), action_instructions={},
+                memory_seeds=tuple({"npc_id": first, "other_npc_id": second,
+                                   "kind": "relationship", "topic": collision.topic,
+                                   "content_seed": f"{event['facts']['followup_kind']}:{event['response']}"}
+                                  for first, second in ((owner, target), (target, owner))),
+                severity_before=18, severity_after=18 if event["response"] in {"defer", "keep_distance"} else 12,
+                requires_intervention=False, outcome_tags=("social_followup_" + event["response"],), settled_at=now,
+            )
+            story = story_from_collision(collision, resolution, context=StoryContext(
+                novelty=90, personality_expression=80, relationship_relevance=75,
+                visual_readability=85, need_stakes=30,
+            ), now=now)
+            story = replace(story, level="moment", observable=True, status="open", auto_resolve_at=now,
+                            visible_facts={**story.visible_facts, **event["facts"]})
+            if story.id in state["stories"]:
+                continue
+            profile_map = self._collision_profiles(state, profiles)
+            state["stories"][story.id] = {
+                "story": story.to_dict(), "collision": collision.to_dict(), "resolution": resolution.to_dict(),
+                "interaction": build_interaction_scene(collision=collision, resolution=resolution,
+                    profiles=profile_map, relationships=self._relationship_edges(state), catalog=self.collisions.catalog,
+                    intervention_available=False),
+                "expression_personas": {key: persona_snapshot(profile_map.get(key, {})) for key in (owner, target)},
+                "expression_perspectives": event["expression_perspectives"],
+            }
+            state.setdefault("open_story_ids", []).append(story.id)
+            state["processed_collision_ids"].append(collision.id)
+            for key in ("collisions", "stories"):
+                state["metrics"][key] = int(state["metrics"].get(key, 0)) + 1
+            topics = state["metrics"].setdefault("topic_counts", {})
+            topics[collision.topic] = int(topics.get(collision.topic, 0)) + 1
 
     @staticmethod
     def _collision_cooldown_key(collision: Collision) -> str:
@@ -3151,6 +3271,7 @@ class LifeWorldEngine:
                           aftermath: Sequence[Mapping[str, Any]], now: datetime,
                           profiles: Mapping[str, Mapping[str, Any]] | None) -> None:
         shared_activities.settled(state, collision, resolution, now)
+        social_continuity.settled(state, profiles or {}, collision.to_dict(), resolution.to_dict(), now)
         by_action = {raw["current_action"]["id"]: raw for raw in state["residents"].values()}
         for action_id, instruction in instructions.items():
             if action_id in by_action:
@@ -3223,6 +3344,8 @@ class LifeWorldEngine:
                                      profiles: Mapping[str, Mapping[str, Any]]) -> None:
         if len(collision.participant_ids) < 2:
             return
+        if collision.topic in {"social_followup", "public_relay"}:
+            return  # 听到解释不自动变成原谅；记忆和下一步选择变化，但不硬刷好感。
         changes = {(str(item.get("npc_a")), str(item.get("npc_b"))): item
                    for item in resolution.relationship_changes
                    if item.get("npc_a") and item.get("npc_b")}
@@ -3262,6 +3385,8 @@ class LifeWorldEngine:
             magnitude = min(.95, max(.25, collision.severity / 100,
                                      max((abs(int(value)) for key, value in raw_change.items()
                                           if key not in {"npc_a", "npc_b"}), default=0) / 8))
+            fact = social_continuity.collision_fact(collision.to_dict(), resolution.to_dict(), now)
+            appraisal = Appraisal(**social_mind.appraise(state, owner, target, fact, profiles.get(owner, {}), now))
             self._apply_evidence(state, RelationshipEvidence(
                 evidence_id=stable_id("evidence", story.id, resolution.id, owner, target, kind),
                 owner_id=owner, target_id=target, kind=cast(Any, kind), magnitude=magnitude,
@@ -3692,6 +3817,7 @@ class LifeWorldEngine:
         if cls._has_due_transition(state, after):
             return after
         candidates: list[datetime] = []
+        candidates.extend(social_continuity.next_transitions(state, after))
         for activity in state.get('shared_activities', {}).values():
             if activity['phase'] not in shared_activities.FINAL:
                 for field in ('join_after', 'deadline'):

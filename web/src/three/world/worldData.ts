@@ -11,6 +11,15 @@ export type KayKitPropModel=
  |'bush'|'bench'|'watertower'|'firehydrant'|'dumpster'|'trash_A'|'trash_B'|'box_A'|'box_B'
  |'car_sedan'|'car_taxi'|'car_police'|'car_hatchback'|'car_stationwagon'
 
+export type KayKitVehicleModel=Extract<KayKitPropModel,`car_${string}`>
+
+// Conservative bounds of every mesh in each glTF scene, including the wheels.
+// KayKit vehicles face +Z: width is local X and length is local Z.
+export const KAYKIT_VEHICLE_HALF_EXTENTS:Readonly<Record<KayKitVehicleModel,readonly [number,number]>>={
+ car_sedan:[.21,.473],car_taxi:[.21,.473],car_police:[.21,.473],
+ car_hatchback:[.21,.411],car_stationwagon:[.21,.473],
+}
+
 export type CityBuildingPlacement={
  id:string
  family:BuildingFamily
@@ -344,11 +353,13 @@ export const STREET_PROPS:readonly PropPlacement[]=[
  prop('bench-station-a','bench',11.8,10.6,-Math.PI/2,2.1),
  ...[[-6.5,-11.1],[-5.3,-12.2],[-3.9,-11.1],[.4,-5.2],[1.5,-6.1],[2.7,-5.2],[-4.8,10.4],[-3.6,11.2],[-2.5,10.4],[10.9,10.2],[12.1,11.2],[13.3,10.1]].map(([x,z],index)=>prop(`park-bush-${index}`,'bush',x,z,index*.68,1.65+(index%3)*.12,index%3!==0)),
  prop('watertower-cloudgate','watertower',-24.2,-12.8,.2,2.4,false),
- prop('car-taxi-centre','car_taxi',1.1,.28,Math.PI/2,1.16,false),
- prop('car-sedan-west','car_sedan',-16.6,-.28,-Math.PI/2,1.16,false),
- prop('car-police-dawn','car_police',23.3,.28,Math.PI/2,1.16,false),
- prop('car-hatchback-campus','car_hatchback',-18.45,-7.6,0,1.16),
- prop('car-stationwagon-station','car_stationwagon',15.7,13.05,Math.PI/2,1.16),
+ // Park inside the station's paved courtyard, clear of every potential
+ // building parcel and of the three courtyard vehicles in the front row.
+ prop('car-taxi-centre','car_taxi',13.4,7.65,Math.PI,1.16,false),
+ prop('car-sedan-west','car_sedan',16,7.65,Math.PI,1.16,false),
+ prop('car-police-dawn','car_police',18.6,7.65,Math.PI,1.16,false),
+ prop('car-hatchback-campus','car_hatchback',14.7,5.4,0,1.16),
+ prop('car-stationwagon-station','car_stationwagon',17.3,5.4,0,1.16),
 ]
 
 // A perimeter ring would flatten the floating-city silhouette; use groves.

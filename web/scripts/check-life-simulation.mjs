@@ -145,5 +145,12 @@ assert.ok(expressionSource.indexOf('if(troubleSignal)')<expressionSource.indexOf
 await import('./check-shared-home.mjs')
 // Run the CPU-heavy real-rig checks after the short network-deadline fixtures finish.
 await import('./check-drink-rig-contact.mjs')
+await import('./check-cafe-drink.mjs')
+await import('./check-animation-continuity.mjs')
+await import('./check-natural-hand-contact.mjs')
+await import('./check-seated-contact.mjs')
+await import('./check-social-motions.mjs')
+await import('./check-social-performance.mjs')
+await import('./check-standing-turn.mjs')
 
 console.log('Life simulation frontend guard passed (13 actions, staged NPC scenes, shared-home editing, romance consent, v2 precedence, version safety, single-timer schedule).')

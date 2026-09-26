@@ -3,9 +3,13 @@ import {AnimatePresence,motion,useReducedMotion} from 'motion/react'
 import {Canvas,useThree} from '@react-three/fiber'
 import {ContactShadows,PerspectiveCamera} from '@react-three/drei'
 import {EncounterResident3D} from '../three/characters/EncounterResident3D'
+import {useTimedStoryBeat} from '../life/useTimedStoryBeat'
 import {SharedDrinkPerformance3D} from '../three/characters/SharedDrinkPerformance3D'
 import {isSharedDrinkStage} from '../three/characters/sharedDrinkPerformance'
+import {isCafeDrinkStory} from '../three/characters/cafeDrinkScene'
 import {resolveSharedDrinkLayout,type SharedDrinkLayout} from '../three/interiors/sharedDrinkLayout'
+import {CAFE_DRINK_RIG} from '../three/world/streetscapeLayout'
+import {CafeDrinkFurniture3D} from '../three/world/CityStreetscape'
 import {defaultAvatar} from '../avatar'
 import type {AvatarConfig,LifeInterventionOption,LifeStory,LifeStoryBeat} from '../types'
 import type {LifeLanguage} from '../life/lifeActionCatalog'
@@ -89,7 +93,10 @@ const levelLabel=(story:LifeStory,language:LifeLanguage)=>{
 function LifeStoryCamera({drinkLayout}:{drinkLayout?:SharedDrinkLayout}){
  const size=useThree(state=>state.size)
  if(drinkLayout){
-  const target=drinkLayout.target,base=drinkLayout.cameraPosition,factor=size.width<600?1.18:1
+  // Fit the entire approach/exit lane as well as the seats. A width-only
+  // breakpoint cropped the departing resident on tall mobile canvases.
+  const aspect=size.width/Math.max(1,size.height)
+  const target=drinkLayout.target,base=drinkLayout.cameraPosition,factor=Math.max(size.width<600?1.18:1,Math.min(1.65,1.65/aspect))
   const position=base.map((value,index)=>target[index]+(value-target[index])*factor) as [number,number,number]
   return <PerspectiveCamera makeDefault position={position} onUpdate={camera=>camera.lookAt(...target)} fov={37} near={.1} far={45}/>
  }
@@ -99,16 +106,18 @@ function LifeStoryCamera({drinkLayout}:{drinkLayout?:SharedDrinkLayout}){
 function LifeStoryCast3D({story,participants,avatars,reducedMotion,theme,layoutRoom,activeBeat,previewTime}:{story:LifeStory;participants:{id:string;name:string}[];avatars?:Record<string,AvatarConfig>;reducedMotion:boolean;theme:InteriorTheme;language:LifeLanguage;layoutRoom?:WorldLayoutRoom;activeBeat?:LifeStoryBeat;previewTime?:number}){
  const visualBudget=useVisualBudget()
  const cast=participants.slice(0,3),count=cast.length
- const drinkLayout=useMemo(()=>resolveSharedDrinkLayout(layoutRoom?.placements),[layoutRoom?.placements])
+ const cafeDrink=isCafeDrinkStory(story)
+ const drinkLayout=useMemo(()=>cafeDrink?CAFE_DRINK_RIG:resolveSharedDrinkLayout(layoutRoom?.placements),[cafeDrink,layoutRoom?.placements])
  const staging=story.presentation?.staging
- const drink=isSharedDrinkStage(staging)&&drinkLayout.usable&&staging.participant_ids.every(id=>participants.some(person=>person.id===id))
+ const drink=isSharedDrinkStage(staging)&&(cafeDrink||theme==='home_lounge')&&drinkLayout.usable&&staging.participant_ids.every(id=>participants.some(person=>person.id===id))
  const castAvatars=Object.fromEntries(cast.map((person,index)=>[person.id,avatars?.[person.id]??fallbackAvatar(person.id,index)]))
  return <div className="life-story-encounter__cast-3d" aria-hidden>
   <Canvas dpr={visualBudget.dpr} shadows="percentage" gl={{antialias:true,alpha:true,powerPreference:'low-power'}}>
    <LifeStoryCamera drinkLayout={drink?drinkLayout:undefined}/>
    <SceneLook/><SceneLighting portrait/><AdaptiveResolution onTier={visualBudget.onTier}/>
    <Suspense fallback={null}><IndoorEnvironment3D theme={theme} placements={layoutRoom?.placements}/></Suspense>
-   {drink?<SharedDrinkPerformance3D key={`${story.id}:${staging.phase}`} staging={staging} participants={cast} participantAvatars={castAvatars} activeBeat={activeBeat} reducedMotion={reducedMotion} placements={layoutRoom?.placements} previewTime={previewTime}/>:cast.map((person,index)=><EncounterResident3D key={person.id} story={story} person={person} index={index} count={count} avatar={castAvatars[person.id]} activeBeat={activeBeat} reducedMotion={reducedMotion}/>)}
+   {drink&&cafeDrink&&<CafeDrinkFurniture3D cups={false}/>}
+   {drink?<SharedDrinkPerformance3D key={story.id} staging={staging} participants={cast} participantAvatars={castAvatars} activeBeat={activeBeat} reducedMotion={reducedMotion} placements={layoutRoom?.placements} layoutOverride={cafeDrink?drinkLayout:undefined} previewTime={previewTime}/>:cast.map((person,index)=><EncounterResident3D key={person.id} story={story} person={person} index={index} count={count} avatar={castAvatars[person.id]} activeBeat={activeBeat} reducedMotion={reducedMotion}/>)}
    <ContactShadows position={[0,-.24,.15]} opacity={.29} scale={7.4} blur={2.5} far={4}/>
   </Canvas>
  </div>
@@ -135,10 +144,11 @@ export function LifeStoryEncounter({story,language='zh',locationName,participant
  const interiorTheme=useMemo(()=>interiorThemeFor({locationId:current.location_id??current.presentation?.location?.id,hint:[current.title,current.title_zh,current.summary,current.summary_zh,current.presentation?.subject,current.presentation?.subject_zh].filter(Boolean).join(' ')}),[current.location_id,current.presentation?.location?.id,current.presentation?.subject,current.presentation?.subject_zh,current.summary,current.summary_zh,current.title,current.title_zh])
  const interiorCopy=INTERIOR_THEME_COPY[interiorTheme][language]
  const authoredRoomKind=interiorTheme==='home_kitchen'?'kitchen':interiorTheme==='home_bathroom'?'bathroom':interiorTheme==='home_bedroom'?'bedroom':'living_room'
- const authoredRoom=current.household_id?layoutRooms.find(room=>room.kind===authoredRoomKind):undefined
+ const authoredRoom=current.household_id&&interiorTheme.startsWith('home_')?layoutRooms.find(room=>room.kind===authoredRoomKind):undefined
  const beats=useMemo(()=>dialogue.result?.source==='fallback'?[]:presentation?.beats??[],[dialogue.result?.source,presentation?.beats])
  const visibleBeats=reduce?beats:beats.slice(0,revealedBeatCount)
  const activeBeat=visibleBeats.at(-1)
+ const actingBeat=useTimedStoryBeat(`${current.id}:${dialogue.result?.cache_key??''}`,activeBeat,Boolean(reduce))
  // An AI request or long exchange must not consume a limited intervention window.
  const performanceComplete=dialogue.enabled||revealedBeatCount>=beats.length
  const choicesRef=useRef<HTMLDivElement>(null)
@@ -188,7 +198,7 @@ export function LifeStoryEncounter({story,language='zh',locationName,participant
    <section className="life-story-encounter__scene" data-interior-theme={interiorTheme}>
     <span className="life-story-encounter__scene-kind">{interiorCopy}</span>
     <div className="life-story-encounter__cast" aria-label={language==='zh'?'参与者':'Participants'}>
-     <LifeStoryCast3D story={{...current,presentation}} participants={participants} avatars={participantAvatars} reducedMotion={Boolean(reduce)} theme={interiorTheme} language={language} layoutRoom={authoredRoom} activeBeat={activeBeat} previewTime={performancePreviewTime}/>
+     <LifeStoryCast3D story={{...current,presentation}} participants={participants} avatars={participantAvatars} reducedMotion={Boolean(reduce)} theme={interiorTheme} language={language} layoutRoom={authoredRoom} activeBeat={actingBeat} previewTime={performancePreviewTime}/>
      <div className="life-story-encounter__cast-names is-accessible-only">{participants.slice(0,3).map(person=><b key={person.id}>{person.name}{ROLE_COPY[dialogue.result?.roles[person.id]??'']&&<small>{ROLE_COPY[dialogue.result?.roles[person.id]??''][language==='zh'?0:1]}</small>}</b>)}</div>
      {participants.length>3&&<span className="life-story-encounter__more">+{participants.length-3}</span>}
     </div>

@@ -538,6 +538,7 @@ class NpcLifeContext:
     recent_action_types: tuple[str, ...] = ()
     available_home_meal: bool = False
     pending_home_dishes: bool = False
+    social_target_weights: Mapping[str, float] = field(default_factory=dict)
     rules_version: str = RULES_VERSION
 
 
@@ -798,8 +799,19 @@ def rank_life_actions(context: NpcLifeContext, catalog: LifeCatalog | None = Non
         target_npc_id = None
         if template.requires_resident_target:
             ordered = sorted(context.nearby_resident_ids)
-            target_npc_id = ordered[stable_number(context.npc_id, context.decision_key, template.type,
-                                                  rules_version=context.rules_version) % len(ordered)]
+            if context.social_target_weights and template.type in {"talk_to_resident", "seek_company"}:
+                # 个体关系与见闻影响找谁；稳定微扰允许普通来往而非永远只找最高好感。
+                target_npc_id = max(ordered, key=lambda key: (
+                    float(context.social_target_weights.get(key, 0))
+                    + stable_fraction(context.npc_id, context.decision_key, key, "social-choice") * 12,
+                    key,
+                ))
+                preference = float(context.social_target_weights.get(target_npc_id, 0))
+                score += max(-18, min(10, preference * .2))
+                reasons.append("personal_social_preference")
+            else:
+                target_npc_id = ordered[stable_number(context.npc_id, context.decision_key, template.type,
+                                                      rules_version=context.rules_version) % len(ordered)]
         # A bounded routine preference prevents equally healthy residents from
         # marching into the same umbrella activity. Urgent needs still dwarf
         # this range, while ordinary days gain visible, replayable variety.

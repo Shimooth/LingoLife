@@ -6,6 +6,8 @@
 - 文档性质：目标设计契约
 - 实施计划：[`docs/LIFE_SIMULATION_IMPLEMENTATION_PLAN.md`](docs/LIFE_SIMULATION_IMPLEMENTATION_PLAN.md)
 
+> 2026-09-26 本地实施补充：[个人视角与持续社交第一版](docs/NPC_PERSON_SOCIAL_REFACTOR.md)。已接入价值排序/自我形象、事实与个人知情分层、方向性评价、有限心事驱动的后续行动、真实履约回执及单跳公开转告。保留原世界与记忆规则；不代表本文全部目标已经完成，尚未部署。
+
 ---
 
 # 一、系统目标与边界

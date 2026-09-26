@@ -1,4 +1,5 @@
-import {CITY_PLATFORM_OUTLINE,ROAD_TILES,ROAD_TILE_STEP,STREET_PROPS,TREES,type WorldPoint} from './worldData'
+import {CITY_PLATFORM_OUTLINE,KAYKIT_VEHICLE_HALF_EXTENTS,ROAD_TILES,ROAD_TILE_SCALE,ROAD_TILE_STEP,STREET_PROPS,TREES,type KayKitVehicleModel,type RoadTilePlacement,type WorldPoint} from './worldData.ts'
+import type {WorldLayoutPlacement} from '../../worldLayout.ts'
 
 export const WORLD_DECORATION_STORAGE_KEY='lingolife.world-decorations.v1'
 export const WORLD_DECORATION_LIMIT=120
@@ -79,7 +80,7 @@ const footprintForDecoration=(decoration:Pick<WorldDecoration,'kind'|'position'|
 const footprintForFixedProp=(item:typeof STREET_PROPS[number]):Footprint=>{
  let half:readonly [number,number]=[.34,.34]
  if(item.model==='watertower')half=[.7,.7]
- else if(item.model.startsWith('car_'))half=[.82,.4]
+ else if(isParkedVehicle(item))half=KAYKIT_VEHICLE_HALF_EXTENTS[item.model as KayKitVehicleModel]
  else if(item.model==='bench')half=[.7,.28]
  else if(item.model==='dumpster')half=[.52,.38]
  else if(item.model.startsWith('box_'))half=[.34,.34]
@@ -92,7 +93,7 @@ const footprintForFixedProp=(item:typeof STREET_PROPS[number]):Footprint=>{
 }
 const footprintRadius=(footprint:Footprint)=>Math.hypot(footprint.half[0],footprint.half[1])
 const footprintAxes=(rotation:number):readonly [readonly [number,number],readonly [number,number]]=>[
- [Math.cos(rotation),Math.sin(rotation)],[-Math.sin(rotation),Math.cos(rotation)],
+ [Math.cos(rotation),-Math.sin(rotation)],[Math.sin(rotation),Math.cos(rotation)],
 ]
 const footprintsOverlap=(first:Footprint,second:Footprint,padding=0)=>{
  const delta:[number,number]=[second.center[0]-first.center[0],second.center[1]-first.center[1]]
@@ -109,6 +110,98 @@ const COURTYARD_BLOCKS=[
  {center:[0,6.5] as [number,number],half:[2.75,2.2] as [number,number]},
  {center:[16,6.5] as [number,number],half:[3.85,2.2] as [number,number]},
 ] as const
+
+export type VehicleParkingPlacement={
+ id:string
+ model:string
+ position:readonly [number,number]
+ rotation:number
+ scale:number
+ scaleZ?:number
+ tilted?:boolean
+}
+export type VehicleParkingBuilding={position:readonly [number,number];rotation:number;scale:number}
+export type VehicleParkingConstraints={
+ roads:readonly (RoadTilePlacement&{scale?:number})[]
+ buildings:readonly VehicleParkingBuilding[]
+ /** Previously accepted vehicles, ordered by rendering priority. */
+ vehicles?:readonly VehicleParkingPlacement[]
+}
+export type VehicleParkingValidation={valid:true}|{valid:false;reason:'road'|'building'|'pedestrian_area'|'outside_city'|'fixed_decor'|'parked_vehicle'|'invalid_transform'}
+
+export const isParkedVehicle=(item:{model:string})=>Object.hasOwn(KAYKIT_VEHICLE_HALF_EXTENTS,item.model)
+
+const footprintForVehicle=(item:VehicleParkingPlacement):Footprint=>{
+ const half=KAYKIT_VEHICLE_HALF_EXTENTS[item.model as KayKitVehicleModel]
+ return {center:item.position,half:[half[0]*item.scale,half[1]*(item.scaleZ??item.scale)],rotation:item.rotation}
+}
+
+const footprintCorners=(footprint:Footprint)=>{
+ const axes=footprintAxes(footprint.rotation)
+ return [-1,1].flatMap(x=>[-1,1].map(z=>[
+  footprint.center[0]+x*axes[0][0]*footprint.half[0]+z*axes[1][0]*footprint.half[1],
+  footprint.center[1]+x*axes[0][1]*footprint.half[0]+z*axes[1][1]*footprint.half[1],
+ ] as [number,number]))
+}
+
+/** Validate rendered geometry; never alter an authored map or relocate a car. */
+export function validateParkedVehiclePlacement(item:VehicleParkingPlacement,constraints:VehicleParkingConstraints):VehicleParkingValidation{
+ if(!isParkedVehicle(item))return {valid:true}
+ if(item.tilted||![...item.position,item.rotation,item.scale,item.scaleZ??item.scale].every(Number.isFinite)||item.scale<=0||(item.scaleZ??item.scale)<=0)return {valid:false,reason:'invalid_transform'}
+ const footprint=footprintForVehicle(item)
+ // Reserve the entire road module, including crossings and sidewalks. The
+ // extra clearance protects a pedestrian whose centre is 1.04 from the road.
+ if(constraints.roads.some(road=>{
+  const half=road.scale??ROAD_TILE_SCALE
+  return footprintsOverlap(footprint,{center:road.position,half:[half,half],rotation:road.rotation},.15)
+ }))return {valid:false,reason:'road'}
+ if(footprintCorners(footprint).some(point=>!pointInsidePlatform(...point)||platformEdgeDistance(point)<.15))return {valid:false,reason:'outside_city'}
+ if(constraints.buildings.some(building=>{
+  // Include both the full KayKit facade (largest mesh extent is 1.021) and
+  // its 1.3-unit parcel base, with enough room to enter the building.
+  const half=Math.max(ROAD_TILE_SCALE,1.021*building.scale)
+  return footprintsOverlap(footprint,{center:building.position,half:[half,half],rotation:building.rotation},.24)
+ }))return {valid:false,reason:'building'}
+ // The station's third courtyard is paved for parking; the campus garden
+ // and central fountain square are pedestrian spaces.
+ if(COURTYARD_BLOCKS.slice(0,2).some(block=>footprintsOverlap(footprint,{...block,rotation:0},.2)))return {valid:false,reason:'pedestrian_area'}
+ if(TREES.some(tree=>footprintsOverlap(footprint,{center:tree,half:[.58,.58],rotation:0},.12)))return {valid:false,reason:'fixed_decor'}
+ if(STREET_PROPS.some(prop=>!isParkedVehicle(prop)&&footprintsOverlap(footprint,footprintForFixedProp(prop),.12)))return {valid:false,reason:'fixed_decor'}
+ if(constraints.vehicles?.some(other=>isParkedVehicle(other)&&footprintsOverlap(footprint,footprintForVehicle(other),.16)))return {valid:false,reason:'parked_vehicle'}
+ return {valid:true}
+}
+
+/** Stable order preserves the highest-priority legal parking at every quality. */
+export function filterSafeParkedVehicles<T extends VehicleParkingPlacement>(placements:readonly T[],constraints:VehicleParkingConstraints):T[]{
+ const accepted:T[]=[],vehicles=[...(constraints.vehicles??[])]
+ for(const item of placements){
+  if(!isParkedVehicle(item)){accepted.push(item);continue}
+  if(!validateParkedVehiclePlacement(item,{...constraints,vehicles}).valid)continue
+  accepted.push(item);vehicles.push(item)
+ }
+ return accepted
+}
+
+/** Preserve both horizontal scale axes of full authored glTF transforms. */
+export function parkedVehicleFromAuthored(item:WorldLayoutPlacement):VehicleParkingPlacement|null{
+ const model=item.asset.split('/').pop()?.replace(/\.gltf$/,'')??''
+ if(!isParkedVehicle({model}))return null
+ const turn=Math.PI*2
+ const tilted=[item.rotation.x,item.rotation.z].some(angle=>!Number.isFinite(angle)||Math.abs(Math.atan2(Math.sin(angle%turn),Math.cos(angle%turn)))>1e-6)
+ return {id:item.id,model,position:[item.position.x,item.position.z],rotation:item.rotation.y,scale:item.scale.x,scaleZ:item.scale.z,tilted}
+}
+
+/** Filtering is a render-only safety boundary: surviving objects keep identity. */
+export function filterSafeAuthoredVehicles<T extends WorldLayoutPlacement>(placements:readonly T[],constraints:VehicleParkingConstraints):T[]{
+ const accepted:T[]=[],vehicles=[...(constraints.vehicles??[])]
+ for(const item of placements){
+  const vehicle=parkedVehicleFromAuthored(item)
+  if(!vehicle){accepted.push(item);continue}
+  if(!validateParkedVehiclePlacement(vehicle,{...constraints,vehicles}).valid)continue
+  accepted.push(item);vehicles.push(vehicle)
+ }
+ return accepted
+}
 
 export const snapWorldDecorationPosition=(position:[number,number]):[number,number]=>[
  Math.round(position[0]*4)/4,

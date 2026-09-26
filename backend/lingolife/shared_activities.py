@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta
 import re
 from .life import stable_id, stable_fraction
+from .city import LOCATION_BY_ID
 from . import pair_memory
 
 FINAL = {'completed', 'declined', 'interrupted', 'missed'}
@@ -59,6 +60,18 @@ def active_for(state, npc_id):
                  if npc_id in item['participants'] and item['phase'] not in FINAL), None)
 
 
+def is_cafe(location):
+    venue = LOCATION_BY_ID.get(location)
+    return bool(venue and venue.kind == 'cafe')
+
+
+def present_at_cafe(resident, location):
+    action = resident.get('current_action') or {}
+    return (resident.get('current_location_id') == location
+            and action.get('location_id') == location
+            and action.get('status') == 'performing')
+
+
 def offer(state, collision, profiles, now):
     if collision.topic != 'companionship' or len(collision.participant_ids) != 2:
         return None
@@ -67,10 +80,15 @@ def offer(state, collision, profiles, now):
     if residents[0]['household_id'] != residents[1]['household_id'] or any(active_for(state, key) for key in ids):
         return None
     location = collision.location_id
-    if not location or not all(location == r.get('home_location_id') or location.startswith(r['household_id'] + ':') for r in residents):
+    cafe = is_cafe(location)
+    home = bool(location) and all(location == r.get('home_location_id') or location.startswith(r['household_id'] + ':') for r in residents)
+    if not home and not cafe:
         return None
-    if location != residents[0].get('home_location_id') and location.split(':')[1] not in {'living-room', 'living_room', 'kitchen', 'shared-kitchen'}:
+    if home and location != residents[0].get('home_location_id') and location.split(':')[1] not in {'living-room', 'living_room', 'kitchen', 'shared-kitchen'}:
         return None  # Never turn a private bedroom/bathroom encounter into a group session.
+    if cafe and not all(present_at_cafe(r, location)
+                        and r['current_action'].get('action_type') in LEISURE for r in residents):
+        return None  # A journey, shift or meal is not a voluntary drink together.
     history = list(state.get('shared_activities', {}).values())
     recent = [item for item in history if set(item['participants']) == set(ids)
               and now-clock(item['created_at']) < timedelta(hours=24 if item['phase'] == 'declined' else 8)]
@@ -80,17 +98,17 @@ def offer(state, collision, profiles, now):
     common = sorted(set(first) & set(second))
     kinds = []
     drink = preferred_drink(first+second)
-    # This first embodied scene has seating in the shared lounge, not a
-    # bedroom or a kitchen work lane. Other activities keep their own places.
-    lounge = location == residents[0].get('home_location_id') or location.split(':')[1] in {'living-room', 'living_room'}
-    if drink and lounge:
+    # Public cafes support this same limited drink contract indoors. Other
+    # joint activities retain their existing household-only locations.
+    lounge = home and (location == residents[0].get('home_location_id') or location.split(':')[1] in {'living-room', 'living_room'})
+    if drink and (lounge or cafe):
         kinds.append('drink_break')
     reading = ('book', 'read', 'literature', 'history', '读', '书', '文学', '历史')
-    if any(any(token in word.casefold() for token in reading) for word in first+second):
+    if not cafe and any(any(token in word.casefold() for token in reading) for word in first+second):
         kinds.append('reading')
-    if first or second:
+    if not cafe and (first or second):
         kinds.append('lesson')
-    if common:
+    if not cafe and common:
         kinds.append('practice')
     if not kinds:
         return None  # Do not manufacture an interest just to fill a quota.
@@ -187,11 +205,16 @@ def started(state, npc_id, action, now):
     item = hint(state, npc_id, now)
     if not item or action.status != 'performing' or item['assigned_actions'].get(npc_id) != action.id:
         return
+    if is_cafe(item['location_id']) and (action.location_id != item['location_id']
+            or (state['residents'][npc_id].get('current_action') or {}).get('id') != action.id
+            or not present_at_cafe(state['residents'][npc_id], item['location_id'])):
+        return
     item['actions'].setdefault(npc_id, {'id': action.id, 'start': now.isoformat(), 'end': None})
     if len(item['actions']) == len(item['participants']):
         # Both must actually be present, not merely have started at different times.
         if all((state['residents'][key].get('current_action') or {}).get('id') == item['actions'][key]['id']
                and (state['residents'][key].get('current_action') or {}).get('status') == 'performing'
+               and (not is_cafe(item['location_id']) or present_at_cafe(state['residents'][key], item['location_id']))
                for key in item['participants']):
             set_phase(state, item, 'active', now)
 
@@ -220,6 +243,11 @@ def advance(state, now):
                  and key in item['assigned_actions'] and (
                      (state['residents'][key].get('current_action') or {}).get('id') != item['assigned_actions'][key]
                      or (state['residents'][key].get('current_action') or {}).get('status') in {'interrupted', 'abandoned'})) for key in item['participants']):
+            set_phase(state, item, 'interrupted', now)
+        elif is_cafe(item['location_id']) and any(
+                key in item['actions'] and key not in item['completed_ids']
+                and not present_at_cafe(state['residents'][key], item['location_id'])
+                for key in item['participants']):
             set_phase(state, item, 'interrupted', now)
 
 

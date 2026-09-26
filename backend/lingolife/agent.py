@@ -216,9 +216,20 @@ def project_public_life_context(context: Mapping[str, Any] | None) -> dict[str, 
 
 
 def project_dialogue_life_context(context: Mapping[str, Any] | None) -> dict[str, Any]:
-    """Provider projection of life context, without household identifiers."""
+    """Provider-only projection; a resident's perspective is never a public DTO.
+
+    Keep private reasoning out of the browser while allowing the dialogue
+    writer a bounded, owner-scoped view. The sanitizer drops private events,
+    exact appraisals, internal source identifiers and unreviewed nested fields.
+    """
     result = project_public_life_context(context)
     result.pop("household_id", None)
+    if isinstance(context, Mapping) and isinstance(context.get("speaker_perspective"), Mapping):
+        from .social_mind import sanitize_perspective
+
+        perspective = sanitize_perspective(context["speaker_perspective"], for_player=True)
+        if perspective:
+            result["speaker_perspective"] = perspective
     return result
 
 

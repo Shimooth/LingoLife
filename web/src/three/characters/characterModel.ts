@@ -1,8 +1,8 @@
 import { AnimationClip, Color, Mesh, MeshStandardMaterial, Object3D, PropertyBinding, SkinnedMesh, type Group, type Material, type Skeleton } from 'three'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import type { AvatarConfig } from '../../types'
-import { CHIBI_ACCESSORIES, CHIBI_HAIR, CHIBI_OUTFITS, resolveChibiAccessory, resolveChibiHair, resolveChibiOutfit } from './characterAssets'
-import { prepareCharacterFace } from './facialGeometry'
+import { CHIBI_ACCESSORIES, CHIBI_HAIR, CHIBI_OUTFITS, resolveChibiAccessory, resolveChibiHair, resolveChibiOutfit } from './characterAssets.ts'
+import { prepareCharacterFace } from './facialGeometry.ts'
 
 export function disposeCharacterInstance(model: Group): void {
   const skeletons = new Set<Skeleton>()
@@ -22,6 +22,10 @@ const optionalChibiNodes = new Set([
   ...CHIBI_OUTFITS.flatMap((entry) => entry.nodes),
   ...CHIBI_ACCESSORIES.flatMap((entry) => entry.nodes),
 ])
+
+// GLTFLoader sanitizes node names for animation bindings (hairvariant.001
+// becomes hairvariant001). Resolve both spellings without changing avatar IDs.
+const characterNode=(model:Group,name:string)=>model.getObjectByName(name)??model.getObjectByName(PropertyBinding.sanitizeNodeName(name))
 
 function cloneMaterial(material: Material): Material {
   const copy = material.clone()
@@ -71,22 +75,22 @@ export function prepareChibi(source: Group, avatar: Pick<AvatarConfig,'hair'|'ha
   const accessory = CHIBI_ACCESSORIES.find((entry) => entry.id === resolveChibiAccessory(avatar.accessory)) ?? CHIBI_ACCESSORIES[0]
 
   optionalChibiNodes.forEach((name) => {
-    const object = model.getObjectByName(name)
+    const object = characterNode(model,name)
     if (object) object.visible = false
   })
 
   if (accessory.id !== 'helmet') {
-    const hairObject = model.getObjectByName(hair.node)
+    const hairObject = characterNode(model,hair.node)
     if (hairObject) hairObject.visible = true
     tintObject(hairObject, avatar.hairColor, .08)
   }
   outfit.nodes.forEach((name) => {
-    const object = model.getObjectByName(name)
+    const object = characterNode(model,name)
     if (object) object.visible = true
     tintObject(object, avatar.outfitColor, .34)
   })
   accessory.nodes.forEach((name) => {
-    const object = model.getObjectByName(name)
+    const object = characterNode(model,name)
     if (object) object.visible = true
   })
   tintObject(model.getObjectByName('character_low'), avatar.skin, .5)

@@ -1,6 +1,8 @@
 import type { AvatarConfig, Message } from '../../types'
 import type {WorldLayoutInteriorPlacement} from '../../worldLayout'
 import type {LifeMotion} from './lifeRetarget'
+import type {SocialPerformance} from './socialPerformance'
+import type {StandingTurnPose} from './standingTurn'
 
 export type CharacterMotion =
   | 'idle'
@@ -65,15 +67,21 @@ export type Character3DProps = {
   scale?: number
   seed?: string | number
   animationKey?: string | number
+  /** Optional shipped clip name; unknown names retain the normal cue fallback. */
+  animationClip?: string
   animationLoop?: boolean
   animationSpeed?: number
+  /** Stable frame-updated native playback; time is optional continuous seconds. */
+  animationPlayback?: {speed:number;time?:number}
   animationPaused?: boolean
   lifeMotion?: LifeMotion
   lifeAttention?: number
   lifeHandTarget?: [number,number,number]
   lifeProp?: 'cup'|'spoon'|'utensil'|'book'|'cloth'
+  /** Optional close-up speech layer; keeps the current lower-body activity. */
+  socialPerformance?: SocialPerformance
   /** Stable frame-updated pose, used only for authored contact performances. */
-  lifePerformancePose?: {time:number;handTarget?:[number,number,number];seatHeight?:number;seatWeight?:number;bodyLean?:number}
+  lifePerformancePose?: {time:number;motion?:LifeMotion;onBasePose?:()=>void;handTarget?:[number,number,number];handWeight?:number;handQuaternion?:[number,number,number,number];handPole?:[number,number,number];handWristWeight?:number;headYaw?:number;headPitch?:number;seatHeight?:number;seatWeight?:number;bodyLean?:number;standingTurn?:StandingTurnPose}
   faceExpression?: 'neutral'|'happy'|'displeased'|'sleepy'|'curious'
   faceAttention?: number
   faceSpeaking?: boolean

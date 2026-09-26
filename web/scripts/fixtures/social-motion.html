@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>说话、倾听与落脚验收</title><style>body{margin:0}#social-qa-controls{position:fixed;top:5px;left:5px;z-index:1000;display:flex;gap:5px;flex-wrap:wrap}#social-qa-controls button{min-height:28px;border:1px solid #bdc9c0;border-radius:7px;background:#fffaf2;padding:4px 8px;font:12px system-ui}</style></head>
+<body><div id="root"></div><script type="module">
+import React from 'react';
+import {createRoot} from 'react-dom/client';
+import {MotionConfig} from 'motion/react';
+import {LifeStoryEncounter} from '/src/components/LifeStoryEncounter.tsx';
+import {defaultAvatar} from '/src/avatar.ts';
+import '/src/styles.css';
+
+// Presentation-only fabricated facts. The fixture calls the production story
+// component, including its real speech timer, and never calls an API or AI.
+const h=React.createElement,query=new URLSearchParams(location.search);
+const people=[{id:'mira',name:'米拉'},{id:'noah',name:'诺亚'}];
+const fixtureLines=[
+ ['mira','The little garden looked different this morning.','今天早上，小花园看起来不太一样。'],
+ ['noah','I noticed the new flowers by the gate.','我看到门口新开的花了。'],
+ ['mira','We can take the long way back.','回去的时候，我们可以绕过去看看。'],
+];
+function Fixture(){
+ const [family,setFamily]=React.useState(query.get('family')==='chibi'?'chibi':'city');
+ const [scenario,setScenario]=React.useState(query.get('case')||'standing');
+ const [run,setRun]=React.useState(0),[phase,setPhase]=React.useState('active');
+ const [reduced,setReduced]=React.useState(query.get('reduced')==='1');
+ const [sampleTime,setTime]=React.useState(query.get('case')==='seated'?12:undefined);
+ const replay=React.useCallback(()=>{setRun(value=>value+1);setPhase('active');setTime(scenario==='seated'?12:undefined)},[scenario]);
+ React.useEffect(()=>{window.socialQaControls={replay,setPhase,setTime,setReduced,setFamily,setScenario};return()=>{delete window.socialQaControls}},[replay]);
+ const drink=scenario!=='standing',terminal=phase==='completed'||phase==='interrupted';
+ const story={id:`qa-social-${scenario}-${run}`,level:'moment',status:terminal?'resolved_autonomously':'observed',title:'A moment of conversation',title_zh:'聊一会儿',summary:'Two residents share a short conversation.',summary_zh:'两位居民聊起刚才看到的小事。',participant_ids:['mira','noah'],participants:people,location_id:drink?'moonlight_cafe':'town_square',observed_at:'seen',outcome:terminal?{mode:'autonomous',tone:'positive',result:'autonomous',consequences:[]}:null,presentation:{beats:fixtureLines.map(([speaker_id,text,translation_zh],index)=>({id:`qa-line-${run}-${index}`,speaker_id,addressee_id:speaker_id==='mira'?'noah':'mira',text,translation_zh,animation_cue:'talk',duration_ms:3000})),...(drink?{staging:{kind:'shared_drink',phase,participant_ids:['mira','noah'],initiator_id:'mira',beverage:'tea'},location:{id:'moonlight_cafe',label:'Moonlight Café',label_zh:'月光咖啡馆'}}:{})}};
+ const avatars={mira:{...defaultAvatar,model:family==='city'?'city-01':'chibi',outfit:'student'},noah:{...defaultAvatar,model:family==='city'?'city-03':'chibi',hair:'hair-tail',outfit:'traveller'}};
+ return h(MotionConfig,{reducedMotion:reduced?'always':'never'},
+  query.get('clean')==='1'?null:h('nav',{id:'social-qa-controls'},h('button',{onClick:replay},'重播'),h('button',{onClick:()=>setFamily(value=>value==='city'?'chibi':'city')},'换人物'),h('button',{onClick:()=>setReduced(value=>!value)},reduced?'完整动作':'减少动作'),h('button',{onClick:()=>setPhase('completed')},'收尾离开')),
+  h(LifeStoryEncounter,{key:`${family}-${scenario}-${run}`,story,language:'zh',participantAvatars:avatars,reducedMotionOverride:reduced,performancePreviewTime:sampleTime,locationName:drink?'月光咖啡馆':'城市广场',onClose:replay,onObserve:async()=>story,onIntervene:async()=>story}));
+}
+createRoot(document.getElementById('root')).render(h(Fixture));
+</script></body></html>

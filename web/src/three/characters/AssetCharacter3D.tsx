@@ -14,6 +14,9 @@ import type { Character3DProps, CharacterMotion } from './types'
 import {LifeRigAnimation} from './LifeRigAnimation'
 import {LifeHandProp} from './LifeHandProp'
 import {CharacterFace} from './CharacterFace'
+import {advanceAnimationSpeed,rigPoseContinuity,sampleAnimationTime} from './animationContinuity'
+import {SocialMotionLoader} from './SocialMotionLoader'
+import {applySocialPerformance,QUIET_SOCIAL_CLIPS} from './socialPerformance'
 
 const oneShotMotions = new Set<CharacterMotion>(['happy', 'jump', 'push'])
 const cityJumpSequences = {
@@ -36,27 +39,49 @@ function useCharacterAnimation(
   speed = 1,
   transitionMs = 220,
   paused = false,
+  playback?: Character3DProps['animationPlayback'],
+  requestedClip?: string,
+  socialPerformance?: Character3DProps['socialPerformance'],
 ) {
   // Actions must belong to this skeleton, including when only a Chibi outfit changes.
   // useAnimations caches actions by clip name and can retain the previous root.
   const mixer = useMemo(() => new AnimationMixer(model), [model])
-  const evaluatedPose = useRef(false)
+  const continuity=useMemo(()=>rigPoseContinuity(model),[model])
+  const active=useRef<{action:AnimationAction;once:boolean;speedFactor:number}|undefined>(undefined)
+  const playbackSpeed=useRef(speed)
+  const options=useRef({transitionMs})
+  useEffect(()=>{options.current={transitionMs}},[transitionMs])
   const actions = useMemo(() => {
     const bound: Record<string, AnimationAction> = {}
     clips.forEach(clip => Object.defineProperty(bound, clip.name, { get: () => mixer.clipAction(clip, model) }))
     return bound
   }, [clips, mixer, model])
-  useFrame((_, delta) => { if (!paused) mixer.update(Math.min(delta, .05)) })
+  useFrame((_, delta) => {
+    if(paused)return
+    continuity.restoreAnimation()
+    const step=Math.min(delta,.1),sample=advanceAnimationSpeed(playbackSpeed.current,playback?.speed??speed,step)
+    playbackSpeed.current=sample.speed
+    if(active.current)active.current.action.setEffectiveTimeScale(sample.average*active.current.speedFactor)
+    mixer.update(step)
+    if(active.current&&playback?.time!==undefined){
+      active.current.action.time=sampleAnimationTime(playback.time,active.current.action.getClip().duration,active.current.once)
+      mixer.update(0)
+    }
+    continuity.saveAnimation()
+    applySocialPerformance(model,socialPerformance,step,paused)
+    continuity.finish(step)
+  },-2)
   useEffect(() => () => {
     mixer.stopAllAction()
     mixer.uncacheRoot(model)
-    evaluatedPose.current = false
-  }, [mixer, model])
+    continuity.restoreVisible()
+    active.current=undefined
+  }, [continuity,mixer, model])
   const previousMotion = useRef<CharacterMotion | undefined>(undefined)
   const candidates = family === 'chibi' && motion === 'crouch'
     ? (loopOverride === false ? ['anim_crouch'] : ['anim_crouchiddle'])
     : family === 'chibi' ? CHIBI_CLIPS[motion] : CITY_CLIPS[motion]
-  const clipName = stableChoice(candidates, `${seed ?? ''}:${motion}:${performanceKey ?? ''}`)
+  const clipName = requestedClip&&clips.some(clip=>clip.name===requestedClip)?requestedClip:stableChoice(candidates, `${seed ?? ''}:${motion}:${performanceKey ?? ''}`)
   const idleName = stableChoice(family === 'chibi' ? CHIBI_CLIPS.idle : CITY_CLIPS.idle, `${seed ?? ''}:idle:${performanceKey ?? ''}`)
   const jumpSequenceKey = stableChoice(Object.keys(cityJumpSequences), `${seed ?? ''}:${motion}:${performanceKey ?? ''}:jump`) as keyof typeof cityJumpSequences
   const sequenceNames = useMemo<readonly string[]>(
@@ -72,16 +97,26 @@ function useCharacterAnimation(
     if (!action) return
     const settleName = family === 'chibi' && motion === 'crouch' ? 'anim_crouchiddle' : idleName
     const idleAction = actions[settleName]
-    const transition = Math.max(0, Math.min(2.5, transitionMs / 1_000))
+    const transition = Math.max(0, Math.min(2.5, options.current.transitionMs / 1_000))
     const enteringFromCrouch = family === 'chibi' && previousMotion.current === 'crouch' && motion !== 'crouch'
     previousMotion.current = motion
     const exitCrouchAction = enteringFromCrouch ? actions.anim_uncrouch : undefined
-    const started = new Set<AnimationAction>()
+    const activate=(next:AnimationAction,once:boolean,speedFactor=1,duration=transition)=>{
+      // Repeating the same loop cue or changing playback speed must not rewind it.
+      if(active.current?.action===next&&!once){active.current.speedFactor=speedFactor;return}
+      continuity.begin(duration)
+      mixer.stopAllAction()
+      continuity.restoreAnimation()
+      next.reset().setEffectiveTimeScale(playbackSpeed.current*speedFactor).setEffectiveWeight(1)
+      next.setLoop(once?LoopOnce:LoopRepeat,once?1:Infinity)
+      next.clampWhenFinished=once
+      next.play()
+      active.current={action:next,once,speedFactor}
+    }
     let sequenceIndex = 0
     const settleIntoIdle = () => {
       if (!idleAction || idleAction === sequence[sequence.length - 1]) return
-      idleAction.reset().setEffectiveTimeScale(Math.max(.2, speed * .88)).fadeIn(Math.max(.12, transition)).play()
-      started.add(idleAction)
+      activate(idleAction,false,.88,Math.max(.12,transition))
     }
     const startSequenceAction = (index: number) => {
       const next = sequence[index]
@@ -91,18 +126,7 @@ function useCharacterAnimation(
       }
       const sequenceContinues = index < sequence.length - 1
       const oneShot = sequenceContinues || loopOverride === false || (loopOverride === undefined && oneShotMotions.has(motion))
-      next.reset().setEffectiveTimeScale(Math.max(.2, speed))
-      // A fade from zero total weight exposes the asset's bind/T pose. The
-      // first clip establishes a full pose immediately; only transitions blend.
-      if (evaluatedPose.current) next.fadeIn(index ? Math.min(.1, transition) : transition)
-      next.clampWhenFinished = false
-      next.setLoop(oneShot ? LoopOnce : LoopRepeat, oneShot ? 1 : Infinity)
-      next.play()
-      started.add(next)
-      if (!evaluatedPose.current) {
-        mixer.update(0)
-        evaluatedPose.current = true
-      }
+      activate(next,oneShot,1,index?Math.min(.1,transition):transition)
     }
     const onFinished = (event: AnimationMixerEventMap['finished']) => {
       if (event.action === exitCrouchAction) {
@@ -115,17 +139,16 @@ function useCharacterAnimation(
     }
     mixer.addEventListener('finished', onFinished)
     if (exitCrouchAction) {
-      exitCrouchAction.reset().setEffectiveTimeScale(Math.max(.2, speed)).fadeIn(Math.min(.12, transition)).setLoop(LoopOnce, 1).play()
-      exitCrouchAction.clampWhenFinished = false
-      started.add(exitCrouchAction)
+      activate(exitCrouchAction,true,1,Math.min(.12,transition))
     } else startSequenceAction(0)
-    // Demand-rendered portraits still need one fully evaluated idle pose, not a T-pose.
-    if (paused) mixer.update(.35)
+    // Establish a real pose immediately, including demand-rendered portraits.
+    mixer.update(0)
+    continuity.saveAnimation()
+    continuity.finish(0,options.current.transitionMs===0)
     return () => {
       mixer.removeEventListener('finished', onFinished)
-      started.forEach(startedAction => startedAction.fadeOut(Math.max(.1, transition * .8)))
     }
-  }, [actions, family, idleName, loopOverride, mixer, motion, paused, performanceKey, sequenceNames, speed, transitionMs])
+  }, [actions,continuity, family, idleName, loopOverride, mixer, motion, performanceKey, sequenceNames])
 }
 
 function AssetTransform({ children, family, props }: { children: React.ReactNode; family: 'chibi' | 'city'; props: Character3DProps }) {
@@ -169,14 +192,20 @@ function AssetTransform({ children, family, props }: { children: React.ReactNode
 }
 
 function NativeAnimation({clips,model,family,props}:{clips:AnimationClip[];model:Group;family:'chibi'|'city';props:Character3DProps}) {
-  useCharacterAnimation(clips, model, props.animation ?? 'idle', family, props.seed ?? props.name, props.animationKey, props.animationLoop, props.animationSpeed, props.animationTransitionMs, props.animationPaused)
+  // Dedicated upper-body speech rides a quiet native stance; it must not blend
+  // on top of an unrelated full-body talk loop or restart the feet per sentence.
+  const quietSocial=Boolean(props.socialPerformance&&['idle','listen','talk'].includes(props.animation??'idle'))
+  const motion=quietSocial?'idle':props.animation??'idle'
+  const requestedClip=quietSocial?QUIET_SOCIAL_CLIPS[family]:props.animationClip
+  useCharacterAnimation(clips, model, motion, family, props.seed ?? props.name, props.socialPerformance?undefined:props.animationKey, props.animationLoop, props.animationSpeed, props.animationTransitionMs, props.animationPaused,props.animationPlayback,requestedClip,props.socialPerformance)
   return null
 }
 
 function RigPlayback({clips,model,family,props}:{clips:AnimationClip[];model:Group;family:'chibi'|'city';props:Character3DProps}) {
  const native=<NativeAnimation clips={clips} model={model} family={family} props={props}/>
  return <>
-  {props.lifeMotion?<Suspense fallback={native}><LifeRigAnimation model={model} family={family} motion={props.lifeMotion} attention={props.lifeAttention} handTarget={props.lifeHandTarget} performancePose={props.lifePerformancePose} paused={props.animationPaused}/></Suspense>:native}
+  {props.lifeMotion?<Suspense fallback={native}><LifeRigAnimation model={model} family={family} motion={props.lifeMotion} attention={props.lifeAttention} handTarget={props.lifeHandTarget} performancePose={props.lifePerformancePose} socialPerformance={props.socialPerformance} paused={props.animationPaused}/></Suspense>:native}
+  {props.socialPerformance&&<Suspense fallback={null}><SocialMotionLoader model={model} family={family}/></Suspense>}
   {props.lifeProp&&<LifeHandProp model={model} family={family} kind={props.lifeProp}/>}
   <CharacterFace model={model} props={props}/>
  </>

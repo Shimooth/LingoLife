@@ -16,7 +16,7 @@ assert.equal(regular.usable,true,'default chairs and cups must be physically rea
 near(regular.table.topY,.6,'default table height')
 for(let index=0;index<2;index++){
  const seat=regular.seats[index],cup=regular.cupRest[index]
- near(seat.seatTopY,.388,'cushion height comes from the asset')
+ near(seat.seatTopY,.400,'cushion height comes from the asset')
  assert.ok(Math.hypot(cup[0]-seat.position[0],cup[2]-seat.position[2])<.52,'resting cup is within arm reach')
  near(cup[1],regular.table.topY,'cup sits exactly on the tabletop')
 }
@@ -54,7 +54,7 @@ const {householdDrinkPlacements,householdSharedDrink}=await import(`data:text/ja
 const preview=householdDrinkPlacements()
 const previewLayout=resolveSharedDrinkLayout(preview)
 near(previewLayout.table.topY,.6*.99-.08,'preview floor transform is also used by hand targets')
-near(previewLayout.seats[0].seatTopY,.388*.99-.08,'preview seat matches rendered chair')
+near(previewLayout.seats[0].seatTopY,.400*.99-.08,'preview seat matches rendered chair')
 const context={activity_id:'tea-for-two',activity_kind:'drink_break',activity_phase:'active',activity_beverage:'tea',activity_participant_ids:['a','b'],activity_initiator_id:'a',visibility:'open'}
 const person=id=>({id,name:id,avatar:{},isHome:true,currentAction:{source:'life',type:'talk_to_resident',status:'performing',locationId:'house',raw:{visible_context:{...context}}}})
 const residents=[person('a'),person('b'),person('outsider')]

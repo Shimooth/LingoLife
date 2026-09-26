@@ -5,6 +5,7 @@ import {AVATAR_HAIR_COLORS,AVATAR_OUTFIT_COLORS,AVATAR_SKIN_COLORS} from "../ava
 import {isAdultProfile,ROMANCE_ADULT_AGE,romanceIsEnabled,withProfileAge,withRomancePreference} from "../profilePolicy";
 import { CharacterCanvas3D } from "../three/characters";
 import { CharacterModelPicker } from './CharacterModelPicker';
+import { PersonalValuesFields } from './PersonalValuesFields';
 import {
   CHIBI_ACCESSORIES,
   CHIBI_HAIR,
@@ -196,6 +197,7 @@ export function CharacterStudio({
                         onChange={(e) => set("longTermGoal", e.target.value)}
                       />
                     </label>
+                    <PersonalValuesFields profile={profile} language={language} onChange={change=>onChange({...profile,...change})}/>
                   </>
                 ) : tab === "relationships" ? (
                   <>

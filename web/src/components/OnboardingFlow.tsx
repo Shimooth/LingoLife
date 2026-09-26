@@ -17,6 +17,7 @@ import {
 import {normalizeNpcProfilePolicy,withProfileAge,withRomancePreference} from '../profilePolicy'
 import {CharacterCanvas3D} from '../three/characters'
 import {CharacterModelPicker} from './CharacterModelPicker'
+import {PersonalValuesFields} from './PersonalValuesFields'
 import {CharacterPortrait} from './CharacterPortrait'
 import type {CharacterMotion} from '../three/characters/types'
 import type {NpcProfile,OnboardingCompleteRequest} from '../types'
@@ -169,6 +170,7 @@ export function OnboardingFlow({language,minimum,maximum,introAcknowledged,savin
        </div>
        <fieldset className={invalid('chores')?'has-error':''}><legend>{copy.chores}</legend><div className="onboarding-chore-options">{(Object.entries(copy.choreNames) as [NpcProfile['chorePreferences'][number],string][]).map(([value,label])=><button type="button" className={selected.profile.chorePreferences.includes(value)?'is-selected':''} aria-pressed={selected.profile.chorePreferences.includes(value)} onClick={()=>toggleChore(value)} key={value}>{selected.profile.chorePreferences.includes(value)?'✓ ':'＋ '}{label}</button>)}</div>{fieldMessage('chores')}</fieldset>
        <label className={invalid('goal')?'has-error':''}>{copy.goal}<textarea rows={3} maxLength={180} value={selected.profile.longTermGoal} onChange={event=>setField('longTermGoal',event.target.value)}/>{fieldMessage('goal')}</label>
+       <PersonalValuesFields profile={selected.profile} language={language} onChange={change=>updateProfile(profile=>({...profile,...change}))}/>
        <OnboardingRelationships language={language} selected={selected} drafts={drafts} bonds={familyBonds} histories={historyHooks} setBonds={setFamilyBonds} setHistories={setHistoryHooks} disabled={saving}/>
        {attempted&&!socialValid&&<p role="alert">{language==='zh'?'请补充已添加关系的简短说明，或移除这条关系。':'Describe the connection you added, or remove it.'}</p>}
        <fieldset className="onboarding-appearance"><legend>{copy.appearance}</legend><p>{language==='zh'?'点击缩略图试穿造型；左侧可预览实际动作。外观不会改变已经填写的性格和生活设定。':'Choose a look and preview its animations. Your personality and life settings stay unchanged.'}</p><CharacterModelPicker avatar={selected.profile.avatar} language={language} onChange={model=>setField('avatar',{...selected.profile.avatar,model,strokes:[]})}/></fieldset>

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>车流验收 · LingoLife</title></head>
+<body><div id="root"></div>
+<script type="module">
+import React,{Suspense,useEffect,useState} from 'react'
+import {createRoot} from 'react-dom/client'
+import {Canvas,useFrame} from '@react-three/fiber'
+import {WorldScene} from '/src/three/world/WorldScene.tsx'
+import {WorldEffects} from '/src/three/world/WorldEffects.tsx'
+import {ROAD_TILES,ROAD_TILE_SCALE,KAYKIT_ASSET_BASE,DEFAULT_WORLD_LANDMARKS,STREET_PROPS,worldPosition} from '/src/three/world/worldData.ts'
+import {getLocationAsset,locationCopy} from '/src/locationAssets.ts'
+import '/src/styles.css'
+import '/src/ThreeIntegration.css'
+import '/src/three/world/world.css'
+const h=React.createElement,noop=()=>{},params=new URLSearchParams(location.search)
+const round=n=>Math.round(n*10000)/10000
+const placement=(id,model,x,z,rotation,scale,y=.37)=>({id,asset:`${KAYKIT_ASSET_BASE}/${model}.gltf`,position:{x,y,z},rotation:{x:0,y:round(rotation),z:0},scale:{x:scale,y:scale,z:scale}})
+// Exact public layout wire shape: no surface metadata and four-decimal rotations.
+// These legacy car locations reproduce the public map's occupied driving lanes.
+const oldCars=[placement('car-taxi-centre','car_taxi',1.1,.28,Math.PI/2,1.16),placement('car-sedan-west','car_sedan',-16.6,-.28,-Math.PI/2,1.16),placement('car-police-dawn','car_police',23.3,.28,Math.PI/2,1.16)]
+const layout={version:1,city:{roads:ROAD_TILES.map(r=>placement(r.id,r.model,...r.position,r.rotation,ROAD_TILE_SCALE,.245)),buildings:[],props:[...STREET_PROPS.filter(p=>!p.model.startsWith('car_')).map(p=>placement(p.id,p.model,...p.position,p.rotation,p.scale)),...oldCars],decorations:[]},interior:{rooms:[]}}
+const source=params.get('source')??'published',quality=params.get('quality')==='low'?'low':'high'
+if(source==='broken')layout.city.roads=layout.city.roads.filter(r=>r.id!=='road-12-0')
+if(source==='empty')layout.city.roads=[]
+const reduced=params.get('reduced')==='1'
+const indoorResidents=['qa-aria','qa-nora'].map((id,index)=>({id,name:index?'诺亚':'米拉',home:{x:120,y:120},location:{x:120,y:120,place:'共享住宅'},householdId:'qa-home',homeLocationId:'qa-home:living-room',spatialPresence:{mode:'indoor',building_id:'qa-home',location_id:'qa-home:living-room'}}))
+window.trafficQa={source,ready:false,samples:[],frames:0,loadedAssets:0}
+function Probe(){
+ useFrame(({scene,gl,camera},delta)=>{
+  const root=scene.getObjectByName('ambient-road-traffic')
+  const cars=root?root.children.filter(x=>x.type==='Group').map(x=>({id:x.name,route:x.userData.routeId,closed:x.userData.closed,visible:x.visible,x:x.position.x,y:x.position.y,z:x.position.z,yaw:x.rotation.y,scale:x.scale.x,opacity:x.userData.opacity??1,speed:x.userData.speed,trips:x.userData.trips})):[]
+  const parked=[],capacityViolations=[],batches=[];scene.traverse(x=>{if(x.userData.parkedVehicle)parked.push({id:x.name,...x.userData});if(x.isInstancedMesh){batches.push({name:x.name,count:x.count,capacity:x.instanceMatrix.count});if(x.count>x.instanceMatrix.count)capacityViolations.push(x.name||x.uuid)}})
+  const streetscape=scene.getObjectByName('city-streetscape')?.userData
+  const terraces=[],outdoorResidents=[];scene.traverse(x=>{if(x.name.startsWith('cafe-terrace:'))terraces.push({name:x.name,position:x.position.toArray()});if(x.name.startsWith('city-resident:'))outdoorResidents.push(x.name)})
+  window.trafficQa={...window.trafficQa,ready:true,frames:window.trafficQa.frames+1,delta,cars,parked,batches,capacityViolations,streetscape,terraces,outdoorResidents,gatewayClouds:scene.getObjectByName('sky-road-gateway-clouds')?.children.length??0,drawCalls:gl.info.render.calls,camera:camera.position.toArray()}
+  window.trafficQa.zoomOut=()=>{camera.zoom*=.7;camera.updateProjectionMatrix()}
+  window.trafficQa.sample=()=>({at:performance.now(),cars:cars.map(x=>({...x}))})
+ })
+ return null
+}
+function Preview(){
+ const [viewMode,setViewMode]=useState(params.get('view')==='top'?'top':'isometric')
+ const [injected,setInjected]=useState(null),[places,setPlaces]=useState(DEFAULT_WORLD_LANDMARKS),[residents,setResidents]=useState([]),[focusId,setFocusId]=useState(params.get('focus')??''),[timeSlot,setTimeSlot]=useState(params.get('time')??'afternoon')
+ useEffect(()=>{
+  if(source!=='production')return
+  let active=true
+  fetch('/scripts/fixtures/city-published-layout.json').then(response=>{if(!response.ok)throw new Error('QA layout unavailable');return response.json()}).then(data=>{
+   if(!active)return
+   window.cityVisualQa.setLayout(data.layout,data.places,indoorResidents)
+   window.cityVisualLoaded=true
+  }).catch(error=>{window.cityVisualError=String(error)})
+  return ()=>{active=false}
+ },[])
+ window.cityVisualQa={setLayout:(value,landmarks,people)=>{window.trafficQa.frames=0;window.trafficQa.ready=false;setInjected(value);if(landmarks)setPlaces(landmarks.map(place=>({...place,name:locationCopy(getLocationAsset(place.id,place.kind),'zh').name})));if(people)setResidents(people)},focus:setFocusId,setTime:setTimeSlot}
+ const focused=places.find(place=>place.id===focusId),focus=focused?worldPosition(focused.x,focused.y):null
+ return h(React.Fragment,null,h('nav',{className:'qa-toolbar'},h('strong',null,'城市验收'),h('button',{onClick:()=>setViewMode(v=>v==='top'?'isometric':'top')},'切换视角'),h('select',{'aria-label':'查看地点',value:focusId,onChange:event=>setFocusId(event.target.value)},h('option',{value:''},'全城'),...places.map(place=>h('option',{key:place.id,value:place.id},place.name))),h('span',null,`${source} · ${quality} · 仅虚构预览`)),h('main',{className:'qa-world'},h(Canvas,{orthographic:true,shadows:true,dpr:1,camera:{position:[38,36,44],zoom:20,near:.1,far:250},gl:{antialias:true,alpha:false,powerPreference:'high-performance'}},h(WorldEffects,{timeSlot,quality,reducedMotion:reduced,postProcessing:quality==='high'}),h(Suspense,{fallback:null},h(WorldScene,{characters:residents,landmarks:places,language:'zh',timeSlot,reducedMotion:reduced,selectedLandmarkId:focusId,focus,focusVersion:0,viewMode,quality,layout:injected??(source==='builtin'?undefined:layout),onCharacterClick:noop,onCharacterEvent:noop,onLandmarkSelect:place=>setFocusId(place.id)}),h(Probe)))))
+}
+createRoot(document.getElementById('root')).render(h(Preview))
+</script>
+<style>html,body,#root{margin:0;width:100%;height:100%;overflow:hidden}.qa-toolbar{height:44px;box-sizing:border-box;padding:6px 14px;display:flex;gap:14px;align-items:center;background:#fbf6ea;color:#365447;font:13px system-ui}.qa-toolbar button{min-height:32px;padding:4px 12px}.qa-toolbar span{margin-left:auto}.qa-world{height:calc(100% - 44px)}@media(max-width:500px){.qa-toolbar{gap:8px;padding:6px;font-size:11px}}</style>
+</body></html>

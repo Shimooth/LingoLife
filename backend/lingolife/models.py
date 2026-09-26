@@ -271,6 +271,8 @@ class NpcProfile(BaseModel):
     boundaries: list[str] = Field(default_factory=list, max_length=8)
     occupation: str = Field(max_length=48)
     longTermGoal: str = Field(default="", max_length=180)
+    values: list[Literal["honesty", "fairness", "care", "autonomy", "belonging", "achievement"]] = Field(default_factory=list, max_length=3)
+    selfImage: str = Field(default="", max_length=180)
     householdRole: Optional[Literal[
         "organizer", "caretaker", "mediator", "cook", "fixer", "free_spirit",
     ]] = None
@@ -306,7 +308,7 @@ class NpcProfile(BaseModel):
 
     @field_validator(
         "personality", "interests", "likes", "dislikes", "quirks", "habits",
-        "boundaries", "relationshipBoundaries",
+        "boundaries", "relationshipBoundaries", "values",
     )
     @classmethod
     def normalize_public_lists(cls, values: list[str]) -> list[str]:
@@ -324,6 +326,11 @@ class NpcProfile(BaseModel):
             result.append(value)
             seen.add(key)
         return result
+
+    @field_validator("selfImage")
+    @classmethod
+    def normalize_self_image(cls, value: str) -> str:
+        return " ".join(value.split())
 
     @field_validator("familyIds", "householdWithIds")
     @classmethod

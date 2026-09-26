@@ -7,7 +7,7 @@ import {GTAOPass} from 'three/addons/postprocessing/GTAOPass.js'
 import {OutputPass} from 'three/addons/postprocessing/OutputPass.js'
 import {RenderPass} from 'three/addons/postprocessing/RenderPass.js'
 import {SMAAPass} from 'three/addons/postprocessing/SMAAPass.js'
-import {WORLD_DEPTH,WORLD_WIDTH,type TimeSlot} from './worldData'
+import {SKY_ROAD_EXITS,WORLD_DEPTH,WORLD_WIDTH,type TimeSlot} from './worldData'
 
 type Quality='low'|'high'
 
@@ -33,7 +33,7 @@ type Palette={
 
 const PALETTES:Record<TimeSlot,Palette>={
  morning:{zenith:'#388bb8',horizon:'#e3b892',lowerSky:'#64a8c8',sun:'#ffe1ad',sunFill:'#8bc2de',groundBounce:'#6b6363',cloudLight:'#fff7e9',cloudShade:'#9ebdca',exposure:1.02},
- afternoon:{zenith:'#337fac',horizon:'#78b3ce',lowerSky:'#5598bc',sun:'#fff0cd',sunFill:'#7bb4d4',groundBounce:'#586365',cloudLight:'#fff8e9',cloudShade:'#9abcca',exposure:1.04},
+ afternoon:{zenith:'#70a6bd',horizon:'#c4dce0',lowerSky:'#89b5c5',sun:'#ffe7c5',sunFill:'#c1deea',groundBounce:'#887969',cloudLight:'#fff7e7',cloudShade:'#a6bdc3',exposure:1.02},
  evening:{zenith:'#233653',horizon:'#bd7f74',lowerSky:'#536a83',sun:'#ffc58f',sunFill:'#7890c2',groundBounce:'#343b49',cloudLight:'#ddd9de',cloudShade:'#78899c',exposure:.94},
 }
 
@@ -126,20 +126,48 @@ function createCloudPuffs(clusterCount:number,distant=false):CloudPuff[]{
  }).flat()
 }
 
+function createGatewayCloudPuffs():CloudPuff[]{
+ // These banks straddle the actual deck ends. Their inward shoulders also
+ // cover the final road cells, where approaching vehicles fade into cloud.
+ const offsets:readonly (readonly [number,number,number,number,number,number])[]=[
+  [-1.65,0,.12,2.35,1.2,3.45],
+  [-3.65,0,.4,1.7,1.1,1.85],
+  [-2.5,1.15,.14,1.6,.9,2.2],
+  [.85,-.75,.04,1.75,1.22,2.35],
+  [1,.9,.04,1.75,1.22,2.35],
+ ]
+ return SKY_ROAD_EXITS.flatMap(exit=>{
+  const axisX=Math.sin(exit.rotation),axisZ=Math.cos(exit.rotation)
+  const sign=exit.position[0]*axisX+exit.position[1]*axisZ<0?-1:1
+  const outwardX=axisX*sign,outwardZ=axisZ*sign
+  const endX=exit.position[0]+outwardX*exit.length/2
+  const endZ=exit.position[1]+outwardZ*exit.length/2
+  return offsets.map(([along,across,y,width,height,length])=>({
+   position:[endX+outwardX*along+outwardZ*across,y,endZ+outwardZ*along-outwardX*across] as [number,number,number],
+   scale:[width,height,length] as [number,number,number],
+   rotation:Math.atan2(outwardX,outwardZ),
+  }))
+ })
+}
+
 function CloudRim({palette,quality,reducedMotion}:{palette:Palette;quality:Quality;reducedMotion:boolean}){
- const group=useRef<THREE.Group>(null)
+ const group=useRef<THREE.Group>(null),gateways=useRef<THREE.Group>(null)
  const puffs=useMemo(()=>[...createCloudPuffs(quality==='high'?13:10),...createCloudPuffs(quality==='high'?16:10,true)],[quality])
+ const gatewayPuffs=useMemo(createGatewayCloudPuffs,[])
  useFrame(({clock})=>{
   if(reducedMotion||!group.current)return
   group.current.position.y=Math.sin(clock.elapsedTime*.18)*.16
   group.current.position.x=Math.sin(clock.elapsedTime*.035)*2.1
   group.current.position.z=Math.sin(clock.elapsedTime*.026)*1.25
+  // Keep gateway coverage anchored even while the outer cloud ring drifts.
+  if(gateways.current)gateways.current.position.y=Math.sin(clock.elapsedTime*.12)*.035
  })
- return <group ref={group} renderOrder={-20}>
-  <Instances limit={puffs.length} frustumCulled>
+ return <group renderOrder={-20}>
+  <Instances key={puffs.length+gatewayPuffs.length} limit={puffs.length+gatewayPuffs.length} frustumCulled>
    <sphereGeometry args={[1,quality==='high'?16:10,quality==='high'?10:7]}/>
    <meshStandardMaterial color={palette.cloudLight} roughness={1} depthWrite/>
-   {puffs.map((puff,index)=><Instance key={index} position={puff.position} scale={puff.scale} rotation={[0,puff.rotation,0]}/>) }
+   <group ref={group}>{puffs.map((puff,index)=><Instance key={index} position={puff.position} scale={puff.scale} rotation={[0,puff.rotation,0]}/>)}</group>
+   <group ref={gateways} name="sky-road-gateway-clouds">{gatewayPuffs.map((puff,index)=><Instance key={index} name={`gateway-cloud-${index}`} position={puff.position} scale={puff.scale} rotation={[0,puff.rotation,0]}/>)}</group>
   </Instances>
  </group>
 }
@@ -147,7 +175,7 @@ function CloudRim({palette,quality,reducedMotion}:{palette:Palette;quality:Quali
 function StudioEnvironment({palette,quality}:{palette:Palette;quality:Quality}){
  return <Environment resolution={quality==='high'?192:64} frames={1} environmentIntensity={quality==='high'?.62:.42}>
   <color attach="background" args={[palette.horizon]}/>
-  <Lightformer form="rect" intensity={4.2} color={palette.sun} position={[-8,10,-6]} rotation-x={Math.PI/2} scale={[10,10,1]}/>
+  <Lightformer form="rect" intensity={4.2} color={palette.sun} position={[-8,10,6]} rotation-x={Math.PI/2} scale={[10,10,1]}/>
   <Lightformer form="rect" intensity={2.2} color={palette.sunFill} position={[10,4,5]} rotation-y={-Math.PI/2} scale={[8,5,1]}/>
   <Lightformer form="ring" intensity={1.4} color={palette.horizon} position={[0,1,-8]} scale={12}/>
  </Environment>
@@ -158,11 +186,11 @@ function WorldLighting({palette,quality,shadowSize}:{palette:Palette;quality:Qua
  const shadowDepth=Math.max(28,WORLD_DEPTH*.82)
  return <>
   <ambientLight intensity={.12} color={palette.horizon}/>
-  <hemisphereLight args={[palette.sunFill,palette.groundBounce,.56]}/>
+  <hemisphereLight args={[palette.sunFill,palette.groundBounce,.5]}/>
   <directionalLight
    castShadow
-   position={[-34,46,-28]}
-   intensity={2.05}
+   position={[-26,48,32]}
+   intensity={2.12}
    color={palette.sun}
    shadow-mapSize={[shadowSize,shadowSize]}
    shadow-bias={-.00018}
@@ -175,7 +203,7 @@ function WorldLighting({palette,quality,shadowSize}:{palette:Palette;quality:Qua
    shadow-camera-top={shadowDepth}
    shadow-camera-bottom={-shadowDepth}
   />
-  <directionalLight position={[22,18,30]} intensity={.24} color={palette.sunFill}/>
+  <directionalLight position={[24,18,-26]} intensity={.32} color={palette.sunFill}/>
  </>
 }
 

@@ -16,6 +16,7 @@ export function EncounterResident3D({story,person,index,count,avatar,activeBeat,
    <Character3D avatar={avatar} name={person.name} seed={person.id} scale={count===3?.7:.78}
     animation={plan.animation} animationKey={activeBeat?.id??'waiting'} animationSpeed={plan.speaking?.83:.72}
     animationTransitionMs={350} animationPaused={reducedMotion} motionScale={.18}
+    socialPerformance={{speaking:plan.speaking,listening:Boolean(activeBeat&&!plan.speaking),key:activeBeat?.id,seated:false,enabled:!reducedMotion}}
     faceExpression={plan.expression} faceSpeaking={plan.speaking} faceAttention={plan.direction*.35}/>
   </group>
   <Html center position={[0,.04,1]} zIndexRange={[5,3]} style={{pointerEvents:'none'}}>

@@ -404,7 +404,7 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         """Build dialogue context without running the retired daily scheduler."""
         assert life_world is not None
         entries = life_profiles(player_id)
-        life_context = life_world.npc_context(player_id, entries, npc_id)
+        life_context = life_world.npc_context(player_id, entries, npc_id, include_private=True)
         resident_state = life_world.load(player_id, entries)["residents"][npc_id]
         runtime = resident_state["runtime"]
         relationship = db.get_relationship(player_id, npc_id) or initial_relationship(stats.relationship)

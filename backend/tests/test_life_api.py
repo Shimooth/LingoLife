@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
 
@@ -10,7 +11,7 @@ from fastapi.testclient import TestClient
 from lingolife.app import DEFAULT_NPC_PROFILE, create_app
 from lingolife.config import Settings
 from lingolife.db import LifeWorldRevisionConflict
-from lingolife.life import CORE_NEEDS
+from lingolife.life import CORE_NEEDS, LifeAction
 from lingolife.life_world import LifeWorldEngine
 from lingolife.models import AIResult, EnglishFeedback
 
@@ -114,8 +115,13 @@ def _assert_safe_agent(agent: dict) -> None:
         assert forbidden not in encoded
 
 
-def _install_open_story(client: TestClient, player_id: str) -> str:
-    """Install a deterministic, still-open collision through the public core contract."""
+def _install_open_story(client: TestClient, player_id: str, *, now: datetime | None = None) -> str:
+    """Arrange an arrived social encounter, then use the real collision pipeline.
+
+    Random account ids and the wall-clock period influence initial plans. Both
+    residents may legitimately still be traveling immediately after initialize,
+    so initialization itself is not a deterministic source of an open story.
+    """
     db = client.app.state.db
     emma = _profile("Emma", personality=["warm", "quiet"], interests=["music", "cooking"])
     alex = _profile("Alex", personality=["warm", "assertive"], interests=["music", "books"])
@@ -124,7 +130,7 @@ def _install_open_story(client: TestClient, player_id: str) -> str:
     db.save_npc_profile(player_id, "emma", emma)
     db.save_npc_profile(player_id, "alex", alex)
 
-    now = datetime.now(timezone.utc)
+    now = now or datetime.now(timezone.utc)
     needs = {need: 100 for need in CORE_NEEDS}
     needs.update({"social": 0, "love": 0})
     runtime_seeds = {
@@ -144,11 +150,35 @@ def _install_open_story(client: TestClient, player_id: str) -> str:
         None,
         now,
     )
+    # This fixture tests authorization, observation and intervention, not the
+    # initial action selector. Explicitly place both people in the shared
+    # lounge instead of assuming a planned conversation has already occurred.
+    location = "household-shared:living-room"
+    action_ids = set()
+    for npc_id, target_id in (("alex", "emma"), ("emma", "alex")):
+        resident = state["residents"][npc_id]
+        action = replace(
+            LifeAction.from_dict(resident["current_action"]),
+            id=f"fixture-arrived-social-{npc_id}", action_type="talk_to_resident",
+            status="performing", location_id=location, target_resource_id=None,
+            target_npc_id=target_id, planned_at=now, started_at=now,
+            duration_seconds=1800, ends_at=now + timedelta(minutes=30),
+            arrives_at=None, retry_at=None, completed_at=None,
+            interruptible=True, animation_cue="talk",
+        )
+        resident.update(current_action=action.to_dict(), current_location_id=location, current_journey=None)
+        action_ids.add(action.id)
+    # Remove incidental initialization stories/cooldowns in this fresh test
+    # world, so only the deliberately arranged encounter owns this test case.
+    state.update(stories={}, open_story_ids=[], active_collision_fact_ids=[],
+                 processed_collision_ids=[], collision_cooldowns={}, shared_activities={})
+    engine._detect_and_record(state, {"alex": alex, "emma": emma}, "fixture-arrived-social", now)
     story_id = next(
-        (story_id for story_id, record in state["stories"].items() if record.get("collision")),
+        (story_id for story_id, record in state["stories"].items()
+         if record.get("collision") and action_ids <= set(record["collision"]["action_ids"])),
         None,
     )
-    assert story_id is not None, "the deterministic shared-home fixture must create a collision"
+    assert story_id is not None, "the arrived, co-located social actions must produce a collision"
     story = state["stories"][story_id]["story"]
     expires_at = now + timedelta(minutes=10)
     story.update({
@@ -172,6 +202,24 @@ def _install_open_story(client: TestClient, player_id: str) -> str:
     )
     assert saved["revision"] == 1
     return story_id
+
+
+@pytest.mark.parametrize("hour", [0, 12, 20])
+def test_open_story_fixture_arranges_a_real_encounter_across_time_periods(tmp_path, hour):
+    client = _client(tmp_path)
+    _, user = _auth(client, f"arrived-story-{hour}")
+    now = datetime(2026, 9, 26, hour, 0, tzinfo=timezone.utc)
+    story_id = _install_open_story(client, user["player_id"], now=now)
+    state = client.app.state.db.get_life_world_state(user["player_id"])
+    collision = state["stories"][story_id]["collision"]
+    assert collision["participant_ids"] == ["alex", "emma"]
+    assert set(collision["action_ids"]) == {"fixture-arrived-social-alex", "fixture-arrived-social-emma"}
+    assert collision["facts"]["target_busy"] is False
+    assert collision["occurred_at"] == now.isoformat()
+    for resident in state["residents"].values():
+        assert resident["current_action"]["status"] == "performing"
+        assert resident["current_location_id"] == collision["location_id"]
+        assert resident["current_journey"] is None
 
 
 def test_first_world_is_a_life_city_dto_and_repeated_read_keeps_revision(tmp_path):
