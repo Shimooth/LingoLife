@@ -1,6 +1,5 @@
 import {
  OPPOSITE_ROAD_DIRECTION,
- ROAD_DIRECTION_OFFSET,
  ROAD_TILES,
  ROAD_TILE_STEP,
  roadConnections,
@@ -9,6 +8,7 @@ import {
  type RoadTilePlacement,
  type WorldPoint,
 } from './worldData'
+import {TOWN_CENTER,townDestination,townStandingPosition} from './townCenterLayout.ts'
 
 type Point2=[number,number]
 type CornerName='nw'|'ne'|'se'|'sw'
@@ -28,6 +28,8 @@ type LotEntry={
 export type PedestrianRouteOptions={
  /** Stable tie-breaker when two sidewalk paths have exactly the same length. */
  seed?:string|number
+ /** Connect the town's front doors and square to the authored sidewalk graph. */
+ townCenter?:boolean
  /** World-space height of the character root. */
  y?:number
  /** Sideways adjustment along the origin pavement, useful for separated actors. */
@@ -331,39 +333,72 @@ export function buildPedestrianRoute(origin:BuildingLot,target:BuildingLot,optio
 export function buildPedestrianRouteForRoads(origin:BuildingLot,target:BuildingLot,roads:readonly RoadTilePlacement[],options:PedestrianRouteOptions={}):PedestrianRoute{
  if(!roads.length)return buildPedestrianRoute(origin,target,options)
  const y=Number.isFinite(options.y)?Number(options.y):PEDESTRIAN_HEIGHT
+ const nodes=new Map<string,Point2>(),edges=new Map<string,Map<string,number>>()
  const byCell=new Map<string,RoadTilePlacement>(),ports=new Map<string,ReadonlySet<RoadDirection>>()
- roads.forEach(road=>{const [gx,gz]=cellForPoint(road.position);byCell.set(cellKey(gx,gz),road);ports.set(road.id,new Set(roadConnections(road)))})
- const entry=(lot:BuildingLot,lateralOffset=0)=>{
-  const [gx,gz]=cellForPoint(lot.position),desired:[number,number]=[Math.sin(lot.rotation),Math.cos(lot.rotation)]
+ const put=(id:string,point:Point2)=>{nodes.set(id,point);if(!edges.has(id))edges.set(id,new Map())}
+ const join=(a:string,b:string)=>{if(!nodes.has(a)||!nodes.has(b))return;const length=distance2(nodes.get(a)!,nodes.get(b)!);edges.get(a)!.set(b,length);edges.get(b)!.set(a,length)}
+ roads.forEach(road=>{
+  const [gx,gz]=cellForPoint(road.position),connections=new Set(roadConnections(road))
+  byCell.set(cellKey(gx,gz),road);ports.set(road.id,connections)
+  for(const [corner,offset] of Object.entries(CORNERS) as [CornerName,Point2][])put(nodeId(road,corner),[road.position[0]+offset[0],road.position[1]+offset[1]])
+  // Straight street crossings occur at a marked crossing or an intersection.
+  // The other edges remain on the outside pavement, never through lane centres.
+  const crossing=/crossing|junction|tsplit/.test(road.model)
+  for(const [side,a,b] of [['north','nw','ne'],['east','ne','se'],['south','sw','se'],['west','nw','sw']] as const){
+   if(!connections.has(side)||crossing)join(nodeId(road,a),nodeId(road,b))
+  }
+ })
+ for(const road of roads){
+  const [gx,gz]=cellForPoint(road.position)
+  for(const [direction,dx,dz,pairs] of [['east',1,0,[['ne','nw'],['se','sw']]],['south',0,1,[['sw','nw'],['se','ne']]]] as const){
+   const neighbour=byCell.get(cellKey(gx+dx,gz+dz))
+   if(!neighbour||!ports.get(road.id)?.has(direction)||!ports.get(neighbour.id)?.has(OPPOSITE_ROAD_DIRECTION[direction]))continue
+   for(const [a,b] of pairs)join(nodeId(road,a),nodeId(neighbour,b))
+  }
+ }
+ const townKey=(point:readonly number[])=>`town:${point[0]}:${point[1]}`
+ if(options.townCenter){
+  for(const path of TOWN_CENTER.walkways){
+   path.points.forEach(point=>put(townKey(point),point))
+   path.points.slice(1).forEach((point,index)=>join(townKey(path.points[index]),townKey(point)))
+  }
+  const portal=TOWN_CENTER.pedestrian.road_portal
+  const road=roads.find(item=>distance2(item.position,portal.road_position)<.01)
+  if(road)for(const corner of portal.corners)join(townKey(portal.position),nodeId(road,corner))
+ }
+ const attach=(id:string,lot:BuildingLot,lateralOffset=0)=>{
+  const destination=options.townCenter?townDestination(lot):undefined
+  const standing=options.townCenter?townStandingPosition(lot,lateralOffset,y):undefined
+  if(destination&&standing){put(id,[standing[0],standing[2]]);join(id,townKey(destination.position));return standing}
+  const [gx,gz]=cellForPoint(lot.position),desired:Point2=[Math.sin(lot.rotation),Math.cos(lot.rotation)]
   const candidates=CARDINAL_DIRECTIONS.flatMap(([dx,dz])=>{
    const road=byCell.get(cellKey(gx+dx,gz+dz));if(!road)return []
-   const normal:[number,number]=[-dx,-dz],tangent:[number,number]=[-normal[1],normal[0]],lateral=clampLateral(lateralOffset)
-   const towardRoad:[number,number]=[-normal[0],-normal[1]]
-   return [{road,score:desired[0]*towardRoad[0]+desired[1]*towardRoad[1],point:[road.position[0]+normal[0]*PEDESTRIAN_SIDEWALK_OFFSET+tangent[0]*lateral,road.position[1]+normal[1]*PEDESTRIAN_SIDEWALK_OFFSET+tangent[1]*lateral] as Point2}]
-  })
-  return candidates.sort((a,b)=>b.score-a.score||a.road.id.localeCompare(b.road.id))[0]
+   const normal:Point2=[-dx,-dz],tangent:Point2=[-normal[1],normal[0]],lateral=clampLateral(lateralOffset)
+   const corners:CornerName[]=normal[0]<0?['nw','sw']:normal[0]>0?['ne','se']:normal[1]<0?['nw','ne']:['sw','se']
+   return [{road,corners,score:-desired[0]*normal[0]-desired[1]*normal[1],point:[road.position[0]+normal[0]*PEDESTRIAN_SIDEWALK_OFFSET+tangent[0]*lateral,road.position[1]+normal[1]*PEDESTRIAN_SIDEWALK_OFFSET+tangent[1]*lateral] as Point2}]
+  }).sort((a,b)=>b.score-a.score||a.road.id.localeCompare(b.road.id))
+  const entry=candidates[0];if(!entry)return undefined
+  put(id,entry.point);entry.corners.forEach(corner=>join(id,nodeId(entry.road,corner)))
+  return [entry.point[0],y,entry.point[1]] as WorldPoint
  }
- const start=entry(origin,options.startLateralOffset),end=entry(target,options.endLateralOffset)
- if(!start||!end)return makeRoute([[origin.position[0],y,origin.position[1]]],false,origin.rotation)
- if(start.road.id===end.road.id)return makeRoute([[start.point[0],y,start.point[1]],[end.point[0],y,end.point[1]]],true,origin.rotation)
- const previous=new Map<string,string>(),queue=[start.road.id],visited=new Set(queue)
- const roadById=new Map(roads.map(road=>[road.id,road]))
- while(queue.length){
-  const currentId=queue.shift()!,current=roadById.get(currentId);if(!current)continue
-  if(currentId===end.road.id)break
-  const [gx,gz]=cellForPoint(current.position)
-  const neighbours=(Object.entries(ROAD_DIRECTION_OFFSET) as [RoadDirection,readonly [number,number]][]).flatMap(([direction,[dx,dz]])=>{
-   if(!ports.get(current.id)?.has(direction))return []
-   const candidate=byCell.get(cellKey(gx+dx,gz+dz))
-   return candidate&&ports.get(candidate.id)?.has(OPPOSITE_ROAD_DIRECTION[direction])?[candidate]:[]
-  }).sort((a,b)=>stableHash(`${options.seed??''}:${a.id}`)-stableHash(`${options.seed??''}:${b.id}`)||a.id.localeCompare(b.id))
-  for(const neighbour of neighbours){if(visited.has(neighbour.id))continue;visited.add(neighbour.id);previous.set(neighbour.id,currentId);queue.push(neighbour.id)}
+ const start=attach('route:start',origin,options.startLateralOffset),end=attach('route:end',target,options.endLateralOffset)
+ const stationary=start??[origin.position[0],y,origin.position[1]] as WorldPoint
+ if(!start||!end)return makeRoute([stationary],false,origin.rotation)
+ const costs=new Map([['route:start',0]]),previous=new Map<string,string>(),open=new Set(['route:start'])
+ while(open.size){
+  const current=[...open].sort((a,b)=>(costs.get(a)!-costs.get(b)!)||stableHash(`${options.seed??''}:${a}`)-stableHash(`${options.seed??''}:${b}`))[0]
+  if(current==='route:end')break
+  open.delete(current)
+  for(const [next,length] of edges.get(current)??[]){
+   const cost=costs.get(current)!+length
+   if(cost+EPSILON>=(costs.get(next)??Infinity))continue
+   costs.set(next,cost);previous.set(next,current);open.add(next)
+  }
  }
- if(!visited.has(end.road.id))return makeRoute([[start.point[0],y,start.point[1]]],false,origin.rotation)
- const path=[end.road.id]
- while(path[0]!==start.road.id){const parent=previous.get(path[0]);if(!parent)break;path.unshift(parent)}
- const centres=path.map(id=>roadById.get(id)!).map(road=>[road.position[0],y,road.position[1]] as WorldPoint)
- return makeRoute([[start.point[0],y,start.point[1]],...centres,[end.point[0],y,end.point[1]]],true,origin.rotation)
+ if(!costs.has('route:end'))return makeRoute([stationary],false,origin.rotation)
+ const path=['route:end']
+ while(path[0]!=='route:start'){const parent=previous.get(path[0]);if(!parent)return makeRoute([stationary],false,origin.rotation);path.unshift(parent)}
+ return makeRoute(path.map(id=>{const point=nodes.get(id)!;return [point[0],y,point[1]] as WorldPoint}),true,origin.rotation)
 }
 
 /** Sample a route at normalized progress using cumulative world-space length. */

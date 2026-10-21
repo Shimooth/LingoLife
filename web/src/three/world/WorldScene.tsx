@@ -12,7 +12,7 @@ import {
  buildingModelFor,hashString,worldPosition,
  type BuildingLot,type CityBuildingPlacement,type KayKitBuildingModel,type KayKitPropModel,type KayKitRoadModel,type PropPlacement,type TimeSlot,type WorldPoint,
 } from './worldData'
-import {cameraDampingAlpha,cameraPoseSettled,followCameraZoom,followViewOffset,topViewOffset} from './worldCamera'
+import {cameraDampingAlpha,cameraPoseSettled,neighborhoodCameraZoom,followCameraZoom,followViewOffset,topViewOffset} from './worldCamera'
 import {buildPedestrianRoute,buildPedestrianRouteForRoads,samplePedestrianRoute,type PedestrianRoute} from './worldNavigation'
 import {residentSidewalkOffset,uniformBuildingScale} from './worldTransforms'
 import {trafficRoadsFromLayout} from './ambientTraffic'
@@ -20,8 +20,15 @@ import {AmbientTraffic} from './AmbientTrafficVehicles'
 import {CityFacadeDetails} from './CityFacadeDetails'
 import {fabricBuildingStyle,type FacadeBuilding} from './cityArtDirection'
 import {CityStreetscape} from './CityStreetscape'
+import {TownBuilding3D} from './TownBuildings3D'
+import {TOWN_VEHICLE_SCALE,vehiclePivotForSurface} from './townScale'
+import {TOWN_CENTER,isTownCenterLayout,townStandingPosition,townDestination} from './townCenterLayout'
+import {TownSquare3D} from './TownSquare3D'
+import type {ResidentDragController} from './residentDrag'
+import {ResidentDragBridge} from './ResidentDragBridge'
 import {resolveStreetscapeLayout,streetscapeObstacleFromAuthored} from './streetscapeLayout'
 import {filterSafeParkedVehicles,filterSafeAuthoredVehicles,isParkedVehicle} from './worldDecorations'
+import {NeighborhoodLandmarks3D,type NeighborhoodFacilities,type NeighborhoodFacilityFocus} from '../../neighborhood/NeighborhoodLandmarks3D'
 import type {WorldLayoutBuilding,WorldLayoutDocument,WorldLayoutPlacement} from '../../worldLayout'
 
 type Quality='low'|'high'
@@ -29,6 +36,7 @@ export type WorldQuality='auto'|Quality
 export type WorldViewMode='isometric'|'top'
 
 type SceneProps={
+ residentDrag?:ResidentDragController
  characters:readonly CityCharacter[]
  landmarks:readonly CityLandmark[]
  followedCharacterId?:string
@@ -40,8 +48,13 @@ type SceneProps={
  focus:WorldPoint|null
  focusVersion:number
  viewMode:WorldViewMode
+ neighborhoodView?:boolean
  quality:Quality
  layout?:WorldLayoutDocument
+ neighborhood?:NeighborhoodFacilities
+ facilityFocus?:NeighborhoodFacilityFocus
+ facilityRevealEnabled?:boolean
+ onFacilityRevealFocus:(focus:NeighborhoodFacilityFocus)=>void
  onCharacterClick:(id:string)=>void
  onCharacterEvent:(eventId:string)=>void
  onCharacterTrouble?:(characterId:string)=>void
@@ -170,7 +183,7 @@ function AuthoredAssets({placements,quality}:{placements:readonly WorldLayoutPla
 
 type ActorRegistry=MutableRefObject<Map<string,THREE.Group>>
 
-function CameraRig({focus,focusVersion,followedCharacterId,followCameraOffset,followWalking,actors,reducedMotion,viewMode}:{focus:WorldPoint|null;focusVersion:number;followedCharacterId?:string;followCameraOffset:WorldPoint;followWalking:boolean;actors:ActorRegistry;reducedMotion:boolean;viewMode:WorldViewMode}){
+function CameraRig({interactionLocked=false,focus,focusVersion,facilityKey,neighborhoodView=false,followedCharacterId,followCameraOffset,followWalking,actors,reducedMotion,viewMode}:{interactionLocked?:boolean;focus:WorldPoint|null;focusVersion:number;facilityKey?:string;neighborhoodView?:boolean;followedCharacterId?:string;followCameraOffset:WorldPoint;followWalking:boolean;actors:ActorRegistry;reducedMotion:boolean;viewMode:WorldViewMode}){
  const {camera,size}=useThree()
  const controls=useRef<ComponentRef<typeof OrbitControls>>(null)
  const moving=useRef(false)
@@ -186,7 +199,7 @@ function CameraRig({focus,focusVersion,followedCharacterId,followCameraOffset,fo
  const previousCameraCommand=useRef('')
 
  useEffect(()=>{
-  const cameraCommand=[viewMode,focusVersion,followedCharacterId??'',focus?.join(',')??'',staticFollowOffset.toArray().join(',')].join(':')
+  const cameraCommand=[viewMode,neighborhoodView,focusVersion,facilityKey??'',followedCharacterId??'',focus?.join(',')??'',staticFollowOffset.toArray().join(',')].join(':')
   const semanticChange=cameraCommand!==previousCameraCommand.current
   previousCameraCommand.current=cameraCommand
   if(semanticChange)manuallyControlled.current=false
@@ -200,7 +213,7 @@ function CameraRig({focus,focusVersion,followedCharacterId,followCameraOffset,fo
   // origin while its actor is unavailable. CharacterMarker registers in a
   // layout effect, so a valid resident is normally ready before this effect.
   if(following&&!actor){moving.current=false;return}
-  const target=new THREE.Vector3(...(focus??[0,0,-1.5]))
+  const target=new THREE.Vector3(...(focus??(neighborhoodView?TOWN_CENTER.camera.target:[0,0,-1.5])))
   if(actor){actor.getWorldPosition(target);target.add(followLookOffset.current)}
   desiredTarget.current.copy(target)
   const focused=Boolean(focus||following)
@@ -212,7 +225,10 @@ function CameraRig({focus,focusVersion,followedCharacterId,followCameraOffset,fo
    ?smoothedFollowOffset.current
    :viewMode==='top'
     ?new THREE.Vector3(...topViewOffset(focused?28:54))
-    :(focused?new THREE.Vector3(12.5,14,15):new THREE.Vector3(38,36,44))
+    // The south fountain parcel has a tall building immediately east. Frame
+    // facilities from the open western side and above its foreground facade.
+    :facilityKey?new THREE.Vector3(-8,22,14)
+     :(focused?new THREE.Vector3(12.5,14,15):neighborhoodView?new THREE.Vector3(...TOWN_CENTER.camera.position).sub(new THREE.Vector3(...TOWN_CENTER.camera.target)):new THREE.Vector3(38,36,44))
   desiredPosition.current.copy(target).add(offset)
   const portrait=size.height>size.width*1.25
   const overviewFit=portrait
@@ -220,7 +236,7 @@ function CameraRig({focus,focusVersion,followedCharacterId,followCameraOffset,fo
    :Math.min(size.width/(viewMode==='top'?52:56),size.height/(viewMode==='top'?35:33))*.96
   const focusFit=Math.min(52,Math.max(30,size.height/17))
   const followFit=followCameraZoom(size.width)
-  desiredZoom.current=following?followFit:focused?(viewMode==='top'?Math.min(30,focusFit):focusFit):overviewFit*(viewMode==='top'?1.08:1.18)
+  desiredZoom.current=facilityKey?Math.min(104,Math.max(66,Math.min(size.width/4.5,size.height/5.2))):following?followFit:focused?(viewMode==='top'?Math.min(30,focusFit):focusFit):neighborhoodView?neighborhoodCameraZoom(size.width,size.height,viewMode==='top'):overviewFit*(viewMode==='top'?1.08:1.18)
   moving.current=true
   if(reducedMotion){
    camera.position.copy(desiredPosition.current)
@@ -229,9 +245,10 @@ function CameraRig({focus,focusVersion,followedCharacterId,followCameraOffset,fo
    controls.current?.update()
    moving.current=false
   }
- },[actors,camera,focus,focusVersion,followedCharacterId,reducedMotion,size.height,size.width,staticFollowOffset,viewMode])
+ },[actors,camera,focus,focusVersion,facilityKey,neighborhoodView,followedCharacterId,reducedMotion,size.height,size.width,staticFollowOffset,viewMode])
 
  useFrame((_,delta)=>{
+  if(interactionLocked)return
   if(followedCharacterId){
    const actor=actors.current.get(followedCharacterId)
    if(actor){
@@ -265,7 +282,7 @@ function CameraRig({focus,focusVersion,followedCharacterId,followCameraOffset,fo
  })
 
  const cancelProgrammaticMove=()=>{if(!followedCharacterId){manuallyControlled.current=true;moving.current=false}}
- return <OrbitControls ref={controls} makeDefault enableDamping={!followedCharacterId&&!reducedMotion} dampingFactor={.08} minZoom={5} maxZoom={120} minPolarAngle={viewMode==='top' ? .01 : .5} maxPolarAngle={1.22} enablePan={!followedCharacterId} enableRotate={!followedCharacterId} enableZoom={!followedCharacterId} screenSpacePanning maxDistance={110} minDistance={2} onStart={cancelProgrammaticMove}/>
+ return <OrbitControls ref={controls} enabled={!interactionLocked} makeDefault enableDamping={!followedCharacterId&&!reducedMotion} dampingFactor={.08} minZoom={5} maxZoom={120} minPolarAngle={viewMode==='top' ? .01 : .5} maxPolarAngle={1.22} enablePan={!followedCharacterId} enableRotate={!followedCharacterId} enableZoom={!followedCharacterId} screenSpacePanning maxDistance={110} minDistance={2} onStart={cancelProgrammaticMove}/>
 }
 
 // A manufactured, chamfered city deck reads as one district in a much larger
@@ -333,12 +350,12 @@ function RoadNetwork({placements}:{placements?:readonly WorldLayoutPlacement[]})
 }
 
 const COURTYARD_CARS:readonly PropPlacement[]=[
- {id:'station-yard-car-a',model:'car_sedan',position:[13.4,5.4],rotation:0,scale:1.12,detail:true},
- {id:'station-yard-car-b',model:'car_hatchback',position:[16,5.4],rotation:0,scale:1.12,detail:true},
- {id:'station-yard-car-c',model:'car_stationwagon',position:[18.6,5.4],rotation:0,scale:1.12,detail:true},
+ {id:'station-yard-car-a',model:'car_sedan',position:[13.4,5.4],rotation:0,scale:TOWN_VEHICLE_SCALE,detail:true},
+ {id:'station-yard-car-b',model:'car_hatchback',position:[16,5.4],rotation:0,scale:TOWN_VEHICLE_SCALE,detail:true},
+ {id:'station-yard-car-c',model:'car_stationwagon',position:[18.6,5.4],rotation:0,scale:TOWN_VEHICLE_SCALE,detail:true},
 ]
 
-function CourtyardFeatures({quality,cars}:{quality:Quality;cars:readonly PropPlacement[]}){
+function CourtyardFeatures({quality,cars,townCenter=false}:{quality:Quality;cars:readonly PropPlacement[];townCenter?:boolean}){
  return <group>
   <group position={[-.8,.3,-6.5]}>
    <mesh receiveShadow><boxGeometry args={[14.4,.12,4.25]}/><meshStandardMaterial color="#8daf76" roughness={.96}/></mesh>
@@ -347,17 +364,17 @@ function CourtyardFeatures({quality,cars}:{quality:Quality;cars:readonly PropPla
    <mesh position={[0,.16,0]} castShadow={quality==='high'}><cylinderGeometry args={[.62,.78,.28,20]}/><meshStandardMaterial color="#d6c7a4" roughness={.84}/></mesh>
    <mesh position={[0,.32,0]} rotation-x={-Math.PI/2}><circleGeometry args={[.5,24]}/><meshStandardMaterial color="#7fc4cf" roughness={.32} metalness={.06}/></mesh>
   </group>
-  <group position={[0,.3,6.5]}>
+  {!townCenter&&<group position={[0,.3,6.5]}>
    <mesh receiveShadow><boxGeometry args={[5.5,.12,4.4]}/><meshStandardMaterial color="#d9c89f" roughness={.9}/></mesh>
    <mesh position-y={.075} rotation-x={-Math.PI/2}><ringGeometry args={[.65,1.05,28]}/><meshStandardMaterial color="#eee2c3" roughness={.9}/></mesh>
    <mesh position-y={.25} castShadow={quality==='high'}><cylinderGeometry args={[.52,.67,.38,20]}/><meshStandardMaterial color="#b9a481" roughness={.84}/></mesh>
    <mesh position-y={.455} rotation-x={-Math.PI/2}><circleGeometry args={[.43,24]}/><meshStandardMaterial color="#77bfcd" roughness={.3} metalness={.07}/></mesh>
-  </group>
+  </group>}
   <group position={[16,.3,6.5]}>
    <mesh receiveShadow><boxGeometry args={[7.7,.12,4.4]}/><meshStandardMaterial color="#4e5a61" roughness={.88}/></mesh>
    {[-2.6,-1.3,0,1.3,2.6].map(offset=><group key={offset} position={[offset,.08,0]}>{[-.57,.57].flatMap(side=>[-1,1].map(row=><mesh key={`${side}-${row}`} position={[side,0,row*1.13]}><boxGeometry args={[.04,.025,1.32]}/><meshBasicMaterial color="#e5e2d7"/></mesh>))}</group>)}
   </group>
-  {cars.map(item=><group key={item.id} name={`parked-${item.id}`} userData={{parkedVehicle:true,position:item.position,scale:item.scale,model:item.model,rotation:item.rotation}}><AssetObject model={item.model} item={{id:item.id,position:[item.position[0],.43,item.position[1]],rotation:item.rotation,scale:item.scale}} castShadow={quality==='high'} receiveShadow/></group>)}
+  {cars.map(item=><group key={item.id} name={`parked-${item.id}`} userData={{parkedVehicle:true,position:item.position,scale:item.scale,model:item.model,rotation:item.rotation}}><AssetObject model={item.model} item={{id:item.id,position:[item.position[0],vehiclePivotForSurface(.369),item.position[1]],rotation:item.rotation,scale:item.scale}} castShadow={quality==='high'} receiveShadow/></group>)}
  </group>
 }
 
@@ -511,11 +528,12 @@ function CityFabric({buildings}:{buildings:readonly FabricBuildingPlacement[];qu
  </group>
 }
 
-function ResidentialHomes({homes,language,onSelect}:{homes:readonly HomePlacement[];quality:Quality;language:'zh'|'en';onSelect:(home:HomePlacement)=>void}){
+function ResidentialHomes({homes,language,onSelect,townCenter=false,quality}:{townCenter?:boolean;homes:readonly HomePlacement[];quality:Quality;language:'zh'|'en';onSelect:(home:HomePlacement)=>void}){
  return <group>
   <AssetInstances model="base" receiveShadow items={homes.map(home=>({id:`home-lot-${home.character.id}`,position:[home.position[0],.238,home.position[2]],rotation:home.rotation,scale:ROAD_TILE_SCALE}))}/>
-  {BUILDING_MODELS.residential.map(model=><StableBuildingInstances key={model} model={model} castShadow receiveShadow items={homes.filter(home=>home.model===model).map(home=>({id:`home-${home.character.id}`,position:home.position,rotation:home.rotation,scale:home.scale}))}/>) }
-  {homes.map(home=><Html key={`home-label-${home.character.id}`} center position={[home.position[0],home.position[1]+BUILDING_HEIGHT[home.model]*home.scale+.58,home.position[2]]} zIndexRange={[24,2]}>
+  {!townCenter&&BUILDING_MODELS.residential.map(model=><StableBuildingInstances key={model} model={model} castShadow receiveShadow items={homes.filter(home=>home.model===model).map(home=>({id:`home-${home.character.id}`,position:home.position,rotation:home.rotation,scale:home.scale}))}/>) }
+  {townCenter&&homes.map(home=><group key={`town-home-${home.character.id}`} onClick={event=>{event.stopPropagation();onSelect(home)}}><TownBuilding3D kind="home" id="shared-home" position={home.position} rotation={home.rotation} scale={home.scale} quality={quality}/></group>)}
+  {homes.map(home=><Html key={`home-label-${home.character.id}`} center position={[home.position[0],home.position[1]+(townCenter?2.12:BUILDING_HEIGHT[home.model]*home.scale)+.42,home.position[2]]} zIndexRange={[24,2]}>
    <button type="button" className="world3d-home" onClick={event=>{event.stopPropagation();onSelect(home)}} aria-label={language==='zh'?'共享住宅':'Shared home'}><span aria-hidden>⌂</span>{language==='zh'?'共享住宅':'Shared home'}<small>{language==='zh'?`${home.residents.length} 位居民`:`${home.residents.length} residents`}</small></button>
   </Html>)}
  </group>
@@ -536,7 +554,7 @@ function StreetLife({quality,occupiedPositions,source}:{quality:Quality;occupied
    rotation:item.rotation,
    scale:item.scale,
   }))}/>) }
-  {cars.map(item=><group key={item.id} name={`parked-${item.id}`} userData={{parkedVehicle:true,position:item.position,scale:item.scale,model:item.model,rotation:item.rotation}}><AssetObject model={item.model} item={{id:item.id,position:[item.position[0],item.y??.433,item.position[1]],rotation:item.rotation,scale:item.scale}} castShadow={quality==='high'} receiveShadow/></group>)}
+  {cars.map(item=><group key={item.id} name={`parked-${item.id}`} userData={{parkedVehicle:true,position:item.position,scale:item.scale,model:item.model,rotation:item.rotation}}><AssetObject model={item.model} item={{id:item.id,position:[item.position[0],item.y??vehiclePivotForSurface(.369),item.position[1]],rotation:item.rotation,scale:item.scale}} castShadow={quality==='high'} receiveShadow/></group>)}
  </group>
 }
 
@@ -597,8 +615,8 @@ function LandmarkBuildings({placements,selectedId,hoveredId,language,night,quali
  </group>
 }
 
-const waitingFacing=(lot:BuildingLot,participantIndex:number)=>{
- const side:[number,number]=[Math.cos(lot.rotation),-Math.sin(lot.rotation)]
+const waitingFacing=(lot:BuildingLot,participantIndex:number,rotation=lot.rotation)=>{
+ const side:[number,number]=[Math.cos(rotation),-Math.sin(rotation)]
  const direction=participantIndex%2===0?side:[-side[0],-side[1]]
  return Math.atan2(direction[0],direction[1])
 }
@@ -617,15 +635,18 @@ const characterStandingPosition=(character:CityCharacter,lot?:BuildingLot,parcel
  ]
 }
 
-function CharacterMarker({character,lot,parcelIndex,parcelCount,route,active,actors,serverTime,reducedMotion,language,onClick,onEvent,onTrouble,onJourneyElapsed}:{character:CityCharacter;lot?:BuildingLot;parcelIndex:number;parcelCount:number;route?:PedestrianRoute;active:boolean;actors:ActorRegistry;serverTime?:string;reducedMotion:boolean;language:'zh'|'en';onClick:()=>void;onEvent:(eventId:string)=>void;onTrouble?:()=>void;onJourneyElapsed?:()=>void}){
+function CharacterMarker({residentDrag,character,lot,parcelIndex,parcelCount,route,townCenter=false,active,actors,serverTime,reducedMotion,language,onClick,onEvent,onTrouble,onJourneyElapsed}:{residentDrag?:ResidentDragController;character:CityCharacter;lot?:BuildingLot;parcelIndex:number;parcelCount:number;route?:PedestrianRoute;townCenter?:boolean;active:boolean;actors:ActorRegistry;serverTime?:string;reducedMotion:boolean;language:'zh'|'en';onClick:()=>void;onEvent:(eventId:string)=>void;onTrouble?:()=>void;onJourneyElapsed?:()=>void}){
  const [hovered,setHovered]=useState(false)
  useCursor(hovered)
  const actor=useRef<THREE.Group>(null)
+ const held=residentDrag?.snapshot?.phase==='dragging'&&residentDrag.snapshot.sourceId===character.id?residentDrag.snapshot:undefined
+ const dropTarget=residentDrag?.snapshot?.phase==='dragging'&&residentDrag.snapshot.targetId===character.id
  const characterHash=hashString(character.id)
  const action=character.worldAction as DirectedWorldAction|undefined
  // Rotation points from a parcel to its nearest road. Residents stand on that
  // pavement, so moving a building to a legal parcel also moves its resident.
- const position=characterStandingPosition(character,lot,parcelIndex,parcelCount)
+ const lateral=action?.state==='waiting_at_event'?(action.participant_index ? .7 : -.7):residentSidewalkOffset(parcelIndex,parcelCount)
+ const position=(townCenter&&lot?townStandingPosition(lot,lateral):undefined)??characterStandingPosition(character,lot,parcelIndex,parcelCount)
  const serverSkew=useMemo(()=>{const parsed=Date.parse(serverTime||'');return Number.isFinite(parsed)?parsed-Date.now():0},[serverTime])
  const startedAt=Date.parse(action?.started_at||''),arrivesAt=Date.parse(action?.arrives_at||'')
  const alreadyArrived=action?.state==='walking_to_event'&&Number.isFinite(arrivesAt)&&Date.now()+serverSkew>=arrivesAt
@@ -653,9 +674,10 @@ function CharacterMarker({character,lot,parcelIndex,parcelCount,route,active,act
   },Math.min(2147483647,Math.max(0,remaining)+80))
   return()=>window.clearTimeout(timer)
  },[action?.state,arrivesAt,journeyKey,onJourneyElapsed,serverSkew])
- const waitingRotation=visualState==='waiting_at_event'&&lot?waitingFacing(lot,action?.participant_index??0):undefined
+ const standingRotation=(townCenter&&lot?townDestination(lot)?.rotation:undefined)??lot?.rotation??0
+ const waitingRotation=visualState==='waiting_at_event'&&lot?waitingFacing(lot,action?.participant_index??0,standingRotation):undefined
  useFrame((_,delta)=>{
-  if(!actor.current)return
+  if(!actor.current||held)return
   if(visualState==='waiting_at_event'&&waitingRotation!==undefined){
    const difference=Math.atan2(Math.sin(waitingRotation-actor.current.rotation.y),Math.cos(waitingRotation-actor.current.rotation.y))
    actor.current.rotation.y+=difference*(1-Math.exp(-delta*5.2))
@@ -702,22 +724,22 @@ function CharacterMarker({character,lot,parcelIndex,parcelCount,route,active,act
  const stateLabel=language==='zh'?({idle:'空闲',living:'正在生活',event_pending:'有待办',walking_to_event:lifeJourney?'正在路上':'前往事件',waiting_at_event:lifeJourney?'正在确认到达':'等待查看'} as const)[visualState]:({idle:'Idle',living:'Living their day',event_pending:'Pending',walking_to_event:'On the way',waiting_at_event:lifeJourney?'Confirming arrival':'Waiting'} as const)[visualState]
  const livingDetail=language==='zh'?character.visibleIntentZh?.trim()||character.visibleIntent?.trim():character.visibleIntent?.trim()||character.visibleIntentZh?.trim()
  const troubleCopy=language==='zh'?character.troubleSignal?.summary_zh?.trim()||'似乎遇到了一点麻烦':character.troubleSignal?.summary?.trim()||'Something seems to be troubling them'
- return <group name={`city-resident:${character.id}`} ref={actor} position={position} rotation-y={waitingRotation??lot?.rotation??0} onClick={event=>{event.stopPropagation();onClick()}} onPointerDown={event=>event.stopPropagation()} onPointerOver={event=>{event.stopPropagation();setHovered(true)}} onPointerOut={()=>setHovered(false)}>
-  <DirectedCharacter3D avatar={avatar} animation={animation} performance={directedPerformance} performanceMode={performanceMode} performanceKey={`${action?.event_id??'daily'}:${visualState}:${expression.key}:${animation}`} performanceVariant={action?.participant_index??characterHash%2} playbackRate={playbackRate} reducedMotion={reducedMotion} name={character.name} seed={character.id} scale={characterScale}/>
+ return <group name={`city-resident:${character.id}`} ref={actor} position={held?.position??position} rotation-y={waitingRotation??standingRotation} onClick={event=>{event.stopPropagation();if(!residentDrag?.suppressClick(character.id))onClick()}} onPointerDown={event=>{event.stopPropagation();residentDrag?.begin(event.nativeEvent,character.id,'map')}} onPointerOver={event=>{event.stopPropagation();setHovered(true)}} onPointerOut={()=>setHovered(false)}>
+  <DirectedCharacter3D avatar={avatar} animation={held?'idle':animation} performance={directedPerformance} performanceMode={performanceMode} performanceKey={`${action?.event_id??'daily'}:${visualState}:${expression.key}:${animation}`} performanceVariant={action?.participant_index??characterHash%2} playbackRate={playbackRate} reducedMotion={reducedMotion} name={character.name} seed={character.id} scale={characterScale}/>
   <mesh position-y={.5}>
    <cylinderGeometry args={[.48,.48,1,12]}/><meshBasicMaterial transparent opacity={0} depthWrite={false}/>
   </mesh>
-  {active&&<mesh position-y={.01} rotation-x={-Math.PI/2}>
-   <circleGeometry args={[.47,36]}/><meshBasicMaterial color="#ff9a68" transparent opacity={.18} depthWrite={false} side={THREE.DoubleSide}/>
+  {(active||dropTarget)&&<mesh position-y={.01} rotation-x={-Math.PI/2}>
+   <circleGeometry args={[dropTarget?.64:.47,36]}/><meshBasicMaterial color={dropTarget?"#8bdf9a":"#ff9a68"} transparent opacity={.18} depthWrite={false} side={THREE.DoubleSide}/>
   </mesh>}
   <mesh position-y={.012} rotation-x={-Math.PI/2} scale={1}>
-   <ringGeometry args={active?[.264,.376,36]:[.25,.34,32]}/><meshBasicMaterial color={active?'#ff8d5b':color} transparent opacity={active ? .94 : .62} depthWrite={false} side={THREE.DoubleSide}/>
+   <ringGeometry args={dropTarget?[.48,.6,36]:active?[.264,.376,36]:[.25,.34,32]}/><meshBasicMaterial color={dropTarget?'#3aab69':held?'#fff6c9':active?'#ff8d5b':color} transparent opacity={active ? .94 : .62} depthWrite={false} side={THREE.DoubleSide}/>
   </mesh>
-  {active&&<Html center position={[0,1.72,0]} zIndexRange={[40,10]}><CharacterEmote key={expression.key} expression={expression} language={language} size={28} className="world3d-character-follow-emote"/></Html>}
-  {!active&&<Html center position={[0,1.72,0]} zIndexRange={[40,10]}>
+  {active&&!held&&<Html center position={[0,.99,0]} zIndexRange={[40,10]} style={{pointerEvents:"none"}}><CharacterEmote key={expression.key} expression={expression} language={language} size={28} className="world3d-character-follow-emote"/></Html>}
+  {!active&&!held&&<Html center position={[0,.99,0]} zIndexRange={[40,10]} style={{pointerEvents:"none"}}>
    <div className="world3d-character-ui" style={{'--character-color':color,'--character-ui-shift':action?.event_id?`${action.participant_index ? 12 : -12}px`:'0px'} as React.CSSProperties}>
     <button type="button" className={`world3d-character-status has-expression is-${visualState} ${character.troubleSignal?'has-trouble':''}`} onPointerDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();if(character.troubleSignal&&onTrouble)onTrouble();else if(action?.event_id&&visualState!=='event_pending')onEvent(action.event_id);else onClick()}} aria-label={character.troubleSignal?troubleCopy:`${stateLabel} · ${expression.label[language]}`}><CharacterEmote key={expression.key} expression={expression} language={language} size={28} decorative/></button>
-    <button type="button" className={`world3d-character world3d-character--model ${active?'is-active':''}`} onPointerDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();onClick()}} aria-label={`${language==='zh'?'跟随':'Follow '}${character.name}`}>
+    <button type="button" data-resident-drop-id={character.id} className={`world3d-character world3d-character--model ${active?'is-active':''}`} onPointerDown={event=>{event.stopPropagation();residentDrag?.begin(event.nativeEvent,character.id,'map')}} onClick={event=>{event.stopPropagation();if(!residentDrag?.suppressClick(character.id))onClick()}} aria-label={`${language==='zh'?'跟随':'Follow '}${character.name}`}>
      <b>{character.name}</b>
      {(hovered||moving||waiting||visualState==='event_pending')&&<small>{moving||waiting||visualState==='event_pending'?stateLabel:livingDetail||character.location.place||(language==='zh'?'正在城市中':'Around town')}</small>}
     </button>
@@ -726,16 +748,19 @@ function CharacterMarker({character,lot,parcelIndex,parcelCount,route,active,act
  </group>
 }
 
-export function WorldScene({characters,landmarks,followedCharacterId,serverTime,language,timeSlot,reducedMotion,selectedLandmarkId,focus,focusVersion,viewMode,quality,layout:worldLayout,onCharacterClick,onCharacterEvent,onCharacterTrouble,onHouseholdOpen,onJourneyElapsed,onLandmarkSelect}:SceneProps){
+export function WorldScene({residentDrag,characters,landmarks,followedCharacterId,serverTime,language,timeSlot,reducedMotion,selectedLandmarkId,focus,focusVersion,viewMode,neighborhoodView=false,quality,layout:worldLayout,neighborhood,facilityFocus,facilityRevealEnabled=true,onFacilityRevealFocus,onCharacterClick,onCharacterEvent,onCharacterTrouble,onHouseholdOpen,onJourneyElapsed,onLandmarkSelect}:SceneProps){
  const night=timeSlot==='evening'
+ const townCenter=isTownCenterLayout(worldLayout)
+ const townRoles=TOWN_CENTER.building_roles as Record<string,'home'|'cafe'|'community'|'plaza'|undefined>
  const [hoveredLandmarkId,setHoveredLandmarkId]=useState<string>()
  const actors=useRef(new Map<string,THREE.Group>())
  const layout=useMemo(()=>resolveCityLayout(landmarks,characters,worldLayout?.city.buildings),[characters,landmarks,worldLayout?.city.buildings])
- const facadeBuildings=useMemo<FacadeBuilding[]>(()=>[
+ const physicalBuildings=useMemo<FacadeBuilding[]>(()=>[
   ...layout.fillerBuildings.map(item=>({id:item.id,model:item.model,position:[item.position[0],item.y??.369,item.position[1]] as WorldPoint,rotation:item.rotation,scale:item.scale})),
-  ...layout.landmarkPlacements.map(item=>({id:`landmark-${item.landmark.id}`,model:item.model,position:item.position,rotation:item.rotation,scale:item.scale})),
+  ...layout.landmarkPlacements.filter(item=>!townCenter||townRoles[`landmark-${item.landmark.id}`]!=='plaza').map(item=>({id:`landmark-${item.landmark.id}`,model:item.model,position:item.position,rotation:item.rotation,scale:item.scale})),
   ...layout.homePlacements.map(item=>({id:'shared-home',model:item.model,position:item.position,rotation:item.rotation,scale:item.scale})),
- ],[layout])
+ ],[layout,townCenter,townRoles])
+ const facadeBuildings=useMemo(()=>physicalBuildings.filter(item=>!townCenter||!townRoles[item.id]),[physicalBuildings,townCenter,townRoles])
  const roads=useMemo(()=>worldLayout?trafficRoadsFromLayout(worldLayout.city.roads):ROAD_TILES,[worldLayout])
  const visualRoads=useMemo(()=>worldLayout?worldLayout.city.roads.flatMap(item=>{
   const model=modelFromAsset(item.asset,KAYKIT_ROAD_MODELS)
@@ -747,12 +772,13 @@ export function WorldScene({characters,landmarks,followedCharacterId,serverTime,
    ...TREES.map(position=>({position,half:[.65,.65] as [number,number],rotation:0})),
   ]
   const courtyardObstacles=COURTYARD_CARS.map(item=>({position:item.position,half:[.24,.53] as [number,number],rotation:item.rotation}))
-  return resolveStreetscapeLayout({roads:visualRoads,
-   buildings:facadeBuildings.map(item=>({id:item.id,position:[item.position[0],item.position[2]],rotation:item.rotation,scale:item.scale})),
+  return resolveStreetscapeLayout({townCenter,roads:visualRoads,
+   buildings:physicalBuildings.map(item=>({id:item.id,position:[item.position[0],item.position[2]],rotation:item.rotation,scale:item.scale})),
    landmarks:layout.landmarkPlacements.map(item=>({locationId:item.landmark.id,kind:item.landmark.kind,position:[item.position[0],item.position[2]],rotation:item.rotation,scale:item.scale})),
    obstacles:[...authoredObstacles,...courtyardObstacles],
   })
- },[facadeBuildings,layout.landmarkPlacements,visualRoads,worldLayout])
+ },[physicalBuildings,layout.landmarkPlacements,visualRoads,worldLayout,townCenter])
+ const facilityConstraints=useMemo(()=>({townCenter,roads:visualRoads,buildings:physicalBuildings.map(item=>({position:[item.position[0],item.position[2]] as [number,number],rotation:item.rotation,scale:item.scale})),landmarks:[]}),[physicalBuildings,visualRoads,townCenter])
  const parking=useMemo(()=>{
   // Validate against the same published geometry that is actually rendered.
   // Courtyard -> props -> decorations is a stable priority across sources.
@@ -780,17 +806,18 @@ export function WorldScene({characters,landmarks,followedCharacterId,serverTime,
    const destination=character.worldAction?.target_location_id
    const target=destination===character.homeLocationId?layout.homeLots.get(character.id):destination?layout.landmarkLots.get(destination):undefined
    const participantIndex=character.worldAction?.participant_index??0
-   const route=character.worldAction?.state==='walking_to_event'&&origin&&target?(worldLayout?buildPedestrianRouteForRoads(origin,target,roads,{seed:`${character.worldAction.event_id}:${character.id}`,startLateralOffset:participantIndex ? .28 : -.28,endLateralOffset:participantIndex ? .7 : -.7}):buildPedestrianRoute(origin,target,{seed:`${character.worldAction.event_id}:${character.id}`,startLateralOffset:participantIndex ? .28 : -.28,endLateralOffset:participantIndex ? .7 : -.7})):undefined
+   const route=character.worldAction?.state==='walking_to_event'&&origin&&target?(worldLayout?buildPedestrianRouteForRoads(origin,target,roads,{townCenter,seed:`${character.worldAction.event_id}:${character.id}`,startLateralOffset:participantIndex ? .28 : -.28,endLateralOffset:participantIndex ? .7 : -.7}):buildPedestrianRoute(origin,target,{townCenter,seed:`${character.worldAction.event_id}:${character.id}`,startLateralOffset:participantIndex ? .28 : -.28,endLateralOffset:participantIndex ? .7 : -.7})):undefined
    const peers=origin?parcelResidents.get(origin.id)??[character.id]:[character.id]
    return {character,origin,route,parcelIndex:Math.max(0,peers.indexOf(character.id)),parcelCount:peers.length}
   })
- },[roads,worldLayout,characters,layout.homeLots,layout.landmarkLots])
+ },[roads,worldLayout,characters,layout.homeLots,layout.landmarkLots,townCenter])
  const followedCharacter=characters.find(character=>character.id===followedCharacterId&&visibleOnCityMap(character))
  const followedLot=followedCharacter?characterLot(followedCharacter):undefined
  const followedLotRotation=followedLot?.rotation
  const followCameraOffset=useMemo<WorldPoint>(()=>[...followViewOffset(followedLotRotation)],[followedLotRotation])
  const resolvedFocus=useMemo(()=>{
   if(!focus)return null
+  if(townCenter&&selectedLandmarkId===TOWN_CENTER.plaza.location_id)return [TOWN_CENTER.plaza.center[0],.5,TOWN_CENTER.plaza.center[1]] as WorldPoint
   const selectedLot=selectedLandmarkId?layout.landmarkLots.get(selectedLandmarkId):undefined
   if(selectedLot)return [selectedLot.position[0],.5,selectedLot.position[1]] as WorldPoint
   const candidates=[
@@ -800,24 +827,35 @@ export function WorldScene({characters,landmarks,followedCharacterId,serverTime,
   const rawFocus:[number,number]=[focus[0],focus[2]]
   const nearest=candidates.reduce<{raw:[number,number];lot:BuildingLot}|undefined>((best,item)=>!best||pointDistanceSquared(item.raw,rawFocus)<pointDistanceSquared(best.raw,rawFocus)?item:best,undefined)
   return nearest?[nearest.lot.position[0],.5,nearest.lot.position[1]] as WorldPoint:focus
- },[characters,focus,landmarks,layout.homeLots,layout.landmarkLots,selectedLandmarkId])
+ },[characters,focus,landmarks,layout.homeLots,layout.landmarkLots,selectedLandmarkId,townCenter])
  useCursor(Boolean(hoveredLandmarkId))
  return <>
   <FloatingCityBase quality={quality}/>
   <SkyRoadDecks quality={quality}/>
   <DistrictGround language={language}/>
   <RoadNetwork placements={worldLayout?.city.roads}/>
-  <CourtyardFeatures quality={quality} cars={parking.courtyard}/>
+  <CourtyardFeatures quality={quality} cars={parking.courtyard} townCenter={townCenter}/>
+  {townCenter&&<TownSquare3D quality={quality} night={night} improvements={neighborhood?.improvements}/>}
   <CityStreetscape layout={streetscape} quality={quality} reducedMotion={reducedMotion}/>
+  {neighborhood&&<NeighborhoodLandmarks3D facilities={neighborhood} language={language} worldLayout={worldLayout} constraints={facilityConstraints} streetscape={streetscape} reducedMotion={reducedMotion} revealEnabled={facilityRevealEnabled} onRevealFocus={onFacilityRevealFocus}/>}
   <CityFabric buildings={layout.fillerBuildings} quality={quality}/>
   <CityFacadeDetails buildings={facadeBuildings} quality={quality} night={night}/>
-  <ResidentialHomes homes={layout.homePlacements} quality={quality} language={language} onSelect={home=>{const householdId=home.character.householdId;if(householdId&&onHouseholdOpen)onHouseholdOpen(householdId);else onCharacterClick(home.character.id)}}/>
+  <ResidentialHomes townCenter={townCenter} homes={layout.homePlacements} quality={quality} language={language} onSelect={home=>{const householdId=home.character.householdId;if(householdId&&onHouseholdOpen)onHouseholdOpen(householdId);else onCharacterClick(home.character.id)}}/>
   <StreetLife quality={quality} occupiedPositions={layout.occupiedPositions} source={parking.street}/>
   <AmbientTraffic roads={roads} reducedMotion={reducedMotion} quality={quality}/>
   <Trees quality={quality} occupiedPositions={layout.occupiedPositions} authored={parking.decorations}/>
-  <LandmarkBuildings placements={layout.landmarkPlacements} selectedId={selectedLandmarkId} hoveredId={hoveredLandmarkId} language={language} night={night} quality={quality} onHover={setHoveredLandmarkId} onSelect={onLandmarkSelect}/>
-  {characterNavigation.map(({character,origin,route,parcelIndex,parcelCount})=><CharacterMarker key={character.id} character={character} lot={origin} parcelIndex={parcelIndex} parcelCount={parcelCount} route={route} active={character.id===followedCharacterId} actors={actors} serverTime={serverTime} reducedMotion={reducedMotion} language={language} onClick={()=>onCharacterClick(character.id)} onEvent={onCharacterEvent} onTrouble={onCharacterTrouble?()=>onCharacterTrouble(character.id):undefined} onJourneyElapsed={onJourneyElapsed}/>)}
-  <CameraRig focus={resolvedFocus} focusVersion={focusVersion} followedCharacterId={followedCharacter?.id} followCameraOffset={followCameraOffset} followWalking={followedCharacter?.worldAction?.state==='walking_to_event'} actors={actors} reducedMotion={reducedMotion} viewMode={viewMode}/>
+  <LandmarkBuildings placements={layout.landmarkPlacements.filter(item=>!townCenter||!townRoles[`landmark-${item.landmark.id}`])} selectedId={selectedLandmarkId} hoveredId={hoveredLandmarkId} language={language} night={night} quality={quality} onHover={setHoveredLandmarkId} onSelect={onLandmarkSelect}/>
+  {townCenter&&layout.landmarkPlacements.map(item=>{
+   const role=townRoles[`landmark-${item.landmark.id}`]
+   if(!role||role==='plaza'||role==='home')return null
+   return <group key={`town-${item.landmark.id}`} onClick={event=>{event.stopPropagation();onLandmarkSelect(item.landmark)}} onPointerOver={event=>{event.stopPropagation();setHoveredLandmarkId(item.landmark.id)}} onPointerOut={()=>setHoveredLandmarkId(undefined)}>
+    <TownBuilding3D kind={role} id={item.landmark.id} position={item.position} rotation={item.rotation} scale={item.scale} quality={quality}/>
+    <Html center position={[item.position[0],item.position[1]+1.95,item.position[2]]} zIndexRange={[12,0]}><button type="button" className="neighborhood-map-label" onClick={event=>{event.stopPropagation();onLandmarkSelect(item.landmark)}}><strong>{item.landmark.name}</strong></button></Html>
+   </group>
+  })}
+  {characterNavigation.map(({character,origin,route,parcelIndex,parcelCount})=><CharacterMarker residentDrag={residentDrag} key={character.id} character={character} lot={origin} parcelIndex={parcelIndex} parcelCount={parcelCount} route={route} townCenter={townCenter} active={character.id===followedCharacterId} actors={actors} serverTime={serverTime} reducedMotion={reducedMotion} language={language} onClick={()=>onCharacterClick(character.id)} onEvent={onCharacterEvent} onTrouble={onCharacterTrouble?()=>onCharacterTrouble(character.id):undefined} onJourneyElapsed={onJourneyElapsed}/>)}
+  {residentDrag&&<ResidentDragBridge actors={actors} drag={residentDrag}/>}
+  <CameraRig interactionLocked={Boolean(residentDrag?.snapshot&&(residentDrag.snapshot.phase==='dragging'||residentDrag.snapshot.origin==='map'&&residentDrag.snapshot.pointerType!=='touch'))} neighborhoodView={neighborhoodView} focus={facilityFocus?.position??resolvedFocus} facilityKey={facilityFocus?.key} focusVersion={focusVersion} followedCharacterId={facilityFocus?undefined:followedCharacter?.id} followCameraOffset={followCameraOffset} followWalking={followedCharacter?.worldAction?.state==='walking_to_event'} actors={actors} reducedMotion={reducedMotion} viewMode={viewMode}/>
  </>
 }
 

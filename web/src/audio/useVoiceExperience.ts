@@ -1,4 +1,6 @@
 import {useCallback,useEffect,useRef,useState} from 'react'
+import type {ResidentVoice} from '../arrival/types'
+import {DEFAULT_RESIDENT_VOICE,speakResident} from './residentVoice'
 
 type RecognitionEventLike={results:ArrayLike<{0:{transcript:string};isFinal:boolean}>}
 type RecognitionErrorLike={error:string}
@@ -29,8 +31,9 @@ export type VoiceStatus='idle'|'listening'|'speaking'|'unsupported'|'error'
  * browser capability, so text chat is always the reliable fallback. No audio is
  * persisted or uploaded by this hook.
  */
-export function useVoiceExperience({onTranscript}:{onTranscript:(text:string)=>void}){
+export function useVoiceExperience({onTranscript,residentVoice}:{onTranscript:(text:string)=>void;residentVoice?:ResidentVoice|null}){
  const recognitionRef=useRef<RecognitionLike|null>(null)
+ const cancelSpeech=useRef<()=>void>(()=>{})
  const [status,setStatus]=useState<VoiceStatus>('idle')
  const [interim,setInterim]=useState('')
  const recognitionAvailable=typeof window!=='undefined'&&Boolean(window.SpeechRecognition||window.webkitSpeechRecognition)
@@ -46,7 +49,7 @@ export function useVoiceExperience({onTranscript}:{onTranscript:(text:string)=>v
  const startListening=useCallback(()=>{
   const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition
   if(!Recognition){setStatus('unsupported');return}
-  window.speechSynthesis?.cancel()
+  cancelSpeech.current()
   recognitionRef.current?.abort()
   const recognition=new Recognition()
   recognition.lang='en-US'
@@ -81,22 +84,15 @@ export function useVoiceExperience({onTranscript}:{onTranscript:(text:string)=>v
   if(!synthesisAvailable||!text.trim()){setStatus(synthesisAvailable?'idle':'unsupported');return}
   recognitionRef.current?.abort()
   recognitionRef.current=null
-  const utterance=new SpeechSynthesisUtterance(text)
-  utterance.lang='en-US'
-  utterance.rate=.92
-  utterance.pitch=1.02
-  utterance.onstart=()=>setStatus('speaking')
-  utterance.onend=()=>setStatus('idle')
-  utterance.onerror=()=>setStatus('error')
-  window.speechSynthesis.cancel()
-  window.speechSynthesis.speak(utterance)
- },[synthesisAvailable])
+  cancelSpeech.current()
+  cancelSpeech.current=speakResident(text,residentVoice??DEFAULT_RESIDENT_VOICE,{onStart:()=>setStatus('speaking'),onEnd:()=>setStatus('idle'),onError:reason=>setStatus(reason==='unsupported'?'unsupported':'error')})
+ },[synthesisAvailable,residentVoice])
 
- const stopSpeaking=useCallback(()=>{window.speechSynthesis?.cancel();setStatus('idle')},[])
+ const stopSpeaking=useCallback(()=>{cancelSpeech.current();setStatus('idle')},[])
 
  useEffect(()=>()=>{
   recognitionRef.current?.abort()
-  window.speechSynthesis?.cancel()
+  cancelSpeech.current()
  },[])
 
  return {status,interim,recognitionAvailable,synthesisAvailable,startListening,stopListening,speak,stopSpeaking}

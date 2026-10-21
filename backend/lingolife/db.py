@@ -85,6 +85,10 @@ class Database:
         "npc_relationship_bonds",
         "relationship_evidence",
         "player_onboarding",
+        "player_arrival",
+        "arrival_receipts",
+        "player_neighborhood",
+        "neighborhood_receipts",
         "player_roster_migrations",
     )
 
@@ -107,6 +111,22 @@ class Database:
         with self._connection:
             self._connection.executescript("""
             CREATE TABLE IF NOT EXISTS players (id TEXT PRIMARY KEY, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+            CREATE TABLE IF NOT EXISTS player_arrival (
+              player_id TEXT PRIMARY KEY,state_json TEXT NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+            CREATE TABLE IF NOT EXISTS arrival_receipts (
+              player_id TEXT NOT NULL,idempotency_key TEXT NOT NULL,
+              fingerprint TEXT NOT NULL,response_json TEXT NOT NULL,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(player_id,idempotency_key));
+            CREATE TABLE IF NOT EXISTS player_neighborhood (
+              player_id TEXT PRIMARY KEY,state_json TEXT NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+            CREATE TABLE IF NOT EXISTS neighborhood_receipts (
+              player_id TEXT NOT NULL,idempotency_key TEXT NOT NULL,
+              fingerprint TEXT NOT NULL,response_json TEXT NOT NULL,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(player_id,idempotency_key));
             CREATE TABLE IF NOT EXISTS npc_states (
               player_id TEXT NOT NULL, npc_id TEXT NOT NULL, relationship INTEGER NOT NULL,
               mood INTEGER NOT NULL, english_xp INTEGER NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1730,6 +1750,12 @@ class Database:
         self.ensure_player(player_id)
 
         def write():
+            # Older Studio clients omit new creation metadata. Preserve it
+            # across their whole-profile saves unless explicitly replaced.
+            previous = self.get_npc_profile(player_id, npc_id) or {}
+            for field in ("voice", "personalityAxes", "residentNicknames"):
+                if profile.get(field) is None and previous.get(field) is not None:
+                    profile[field] = previous[field]
             self._assert_npc_name_available(player_id, profile, exclude_npc_id=npc_id)
             self._connection.execute(
                 """INSERT INTO npc_profiles(player_id,npc_id,profile_json) VALUES (?,?,?)
@@ -1964,7 +1990,8 @@ class Database:
         return hashlib.sha256(Database._json(payload).encode("utf-8")).hexdigest()
 
     def create_onboarding_residents(self, player_id: str, residents: list[dict],
-                                    household_name: str, *, maximum: int = 8) -> list[dict]:
+                                    household_name: str, *, maximum: int = 8,
+                                    minimum: int = 2) -> list[dict]:
         """Atomically stage a cast while keeping the gameplay gate closed.
 
         This is the durable first step of the setup saga. Replaying the same
@@ -1988,7 +2015,7 @@ class Database:
             self._connection.execute(
                 "INSERT OR IGNORE INTO players(id) VALUES (?)", (player_id,),
             )
-            if not 2 <= len(normalized_entries) <= maximum:
+            if not minimum <= len(normalized_entries) <= maximum:
                 raise ValueError("INVALID_ONBOARDING_RESIDENT_COUNT")
             stored_row = self._connection.execute(
                 "SELECT state_json FROM player_onboarding WHERE player_id=?", (player_id,),
@@ -2136,7 +2163,7 @@ class Database:
         return self._life_transaction(write)
 
     def finalize_onboarding_setup(self, player_id: str, setup_key: str, *,
-                                  require_life_world: bool) -> dict:
+                                  require_life_world: bool, minimum: int = 2) -> dict:
         """Open the world only after every idempotent setup projection exists."""
         def write():
             row = self._connection.execute(
@@ -2152,7 +2179,7 @@ class Database:
             if stored.get("setup_status") != "initializing":
                 raise ValueError("ONBOARDING_SETUP_NOT_INITIALIZING")
             staged_ids = {str(value) for value in stored.get("setup_resident_ids") or []}
-            if not 2 <= len(staged_ids) <= 8:
+            if not minimum <= len(staged_ids) <= 8:
                 raise ValueError("ONBOARDING_SETUP_CORRUPT")
             profile_ids = {
                 str(row["npc_id"]) for row in self._connection.execute(

@@ -687,9 +687,26 @@ def validate_layout_topology(
     decorations = city.get("decorations") if isinstance(city.get("decorations"), list) else []
     road_rectangles, road_edges, open_exits = _validate_roads(roads, assets, topology_policy["road_grid"], issues)
     building_rectangles = _layout_rectangles(buildings, "city.buildings", assets, issues)
-    _layout_rectangles(props, "city.props", assets, issues)
+    prop_rectangles = _layout_rectangles(props, "city.props", assets, issues)
     decoration_rectangles = _layout_rectangles(decorations, "city.decorations", assets, issues)
     overlap_tolerance = float(topology_policy["geometry"]["overlap_tolerance"])
+
+    if city.get("theme") == "resident-town-v1":
+        from .town_layout import town_center_config
+
+        town = town_center_config()
+        roles = town["building_roles"]
+        by_id = {item["id"]: item for item in buildings}
+        building_rectangles = [
+            (identifier, _Rectangle(
+                center=rectangle.center,
+                half=tuple(town["building_envelope"]["half"][axis] * _xyz(by_id[identifier]["scale"])[axis * 2] for axis in (0, 1)),
+                rotation=rectangle.rotation,
+            ) if identifier in roles else rectangle)
+            for identifier, rectangle in building_rectangles if roles.get(identifier) != "plaza"
+        ]
+        _validate_town_center(city, town, building_rectangles, road_rectangles,
+                              prop_rectangles, decoration_rectangles, issues)
 
     for building_id, building in building_rectangles:
         for road_id, road in road_rectangles:
@@ -725,6 +742,36 @@ def validate_layout_topology(
         shared_home_actions=action_count,
         private_sleep_slots=sleep_count,
     )
+
+
+def _validate_town_center(city, town, buildings, roads, props, decorations, issues):
+    """Reserve the actual public-space models and pedestrian corridors."""
+    building_ids = {item["id"] for item in city["buildings"]}
+    for identifier in sorted(set(town["building_roles"]) - building_ids):
+        issues.append(LayoutValidationIssue("town.missing_anchor", f"city.buildings.{identifier}", "the themed public-space plan requires this stable placement id"))
+    facilities = [(identifier, _Rectangle(tuple(item["position"]), tuple(item["half"]), item["rotation"]))
+                  for identifier, item in town["facilities"].items()]
+    for identifier, footprint in facilities:
+        for obstacle_id, obstacle in [*buildings, *roads, *props, *decorations]:
+            if _overlap(footprint, obstacle, .005):
+                issues.append(LayoutValidationIssue("town.facility_blocked", f"city.facilities.{identifier}", f"reserved footprint overlaps {obstacle_id}"))
+    for walkway in town["walkways"]:
+        for first, second in zip(walkway["points"], walkway["points"][1:]):
+            dx, dz = second[0] - first[0], second[1] - first[1]
+            corridor = _Rectangle(((first[0]+second[0])/2, (first[1]+second[1])/2),
+                                  (math.hypot(dx, dz)/2, walkway["width"]/2), math.atan2(dz, dx))
+            # The entrance deliberately joins an existing sidewalk. Only its
+            # road overlap is allowed; no building/prop/facility may block it.
+            for obstacle_id, obstacle in [*buildings, *facilities, *props, *decorations]:
+                if _overlap(corridor, obstacle, .005):
+                    issues.append(LayoutValidationIssue("town.walkway_blocked", f"city.walkways.{walkway['id']}", f"pedestrian corridor overlaps {obstacle_id}"))
+    by_id = {item["id"]: item for item in city["props"] + city["decorations"]}
+    vehicles = [(identifier, rectangle) for identifier, rectangle in [*props, *decorations]
+                if "/car_" in by_id[identifier]["asset"]]
+    for index, (identifier, vehicle) in enumerate(vehicles):
+        for obstacle_id, obstacle in [*roads, *buildings, *vehicles[index + 1:]]:
+            if _overlap(vehicle, obstacle, .005):
+                issues.append(LayoutValidationIssue("town.parking_blocked", f"city.props.{identifier}", f"parked vehicle overlaps {obstacle_id}"))
 
 
 __all__ = [

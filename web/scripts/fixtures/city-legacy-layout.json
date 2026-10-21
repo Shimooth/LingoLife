@@ -1,0 +1,4423 @@
+{
+  "layout": {
+    "version": 1,
+    "city": {
+      "buildings": [
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_F.gltf",
+          "id": "landmark-central_station",
+          "location_id": "central_station",
+          "position": {
+            "x": 0.0,
+            "y": 0.369,
+            "z": -15.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_G.gltf",
+          "id": "landmark-north_bus_terminal",
+          "location_id": "north_bus_terminal",
+          "position": {
+            "x": -15.6,
+            "y": 0.369,
+            "z": -15.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_H.gltf",
+          "id": "landmark-airport_express",
+          "location_id": "airport_express",
+          "position": {
+            "x": 15.6,
+            "y": 0.369,
+            "z": -13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": -1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_F.gltf",
+          "id": "landmark-business_center",
+          "location_id": "business_center",
+          "position": {
+            "x": 10.4,
+            "y": 0.369,
+            "z": -10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_G.gltf",
+          "id": "landmark-innovation_hub",
+          "location_id": "innovation_hub",
+          "position": {
+            "x": 15.6,
+            "y": 0.369,
+            "z": -10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_H.gltf",
+          "id": "landmark-design_studio",
+          "location_id": "design_studio",
+          "position": {
+            "x": 5.2,
+            "y": 0.369,
+            "z": -10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_F.gltf",
+          "id": "landmark-city_hospital",
+          "location_id": "city_hospital",
+          "position": {
+            "x": 20.8,
+            "y": 0.369,
+            "z": -5.2
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_G.gltf",
+          "id": "landmark-neighborhood_clinic",
+          "location_id": "neighborhood_clinic",
+          "position": {
+            "x": -15.6,
+            "y": 0.369,
+            "z": -7.8
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": -1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_H.gltf",
+          "id": "landmark-animal_shelter",
+          "location_id": "animal_shelter",
+          "position": {
+            "x": 20.8,
+            "y": 0.369,
+            "z": 5.2
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_A.gltf",
+          "id": "landmark-riverside_park",
+          "location_id": "riverside_park",
+          "position": {
+            "x": 18.2,
+            "y": 0.369,
+            "z": 2.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_B.gltf",
+          "id": "landmark-botanical_garden",
+          "location_id": "botanical_garden",
+          "position": {
+            "x": -15.6,
+            "y": 0.369,
+            "z": 2.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_C.gltf",
+          "id": "landmark-hilltop_park",
+          "location_id": "hilltop_park",
+          "position": {
+            "x": -18.2,
+            "y": 0.369,
+            "z": -15.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_F.gltf",
+          "id": "landmark-police_station",
+          "location_id": "police_station",
+          "position": {
+            "x": 20.8,
+            "y": 0.369,
+            "z": 10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_G.gltf",
+          "id": "landmark-city_hall",
+          "location_id": "city_hall",
+          "position": {
+            "x": 0.0,
+            "y": 0.369,
+            "z": -2.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_H.gltf",
+          "id": "landmark-fire_station",
+          "location_id": "fire_station",
+          "position": {
+            "x": -20.8,
+            "y": 0.369,
+            "z": -2.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_F.gltf",
+          "id": "landmark-community_center",
+          "location_id": "community_center",
+          "position": {
+            "x": 13.0,
+            "y": 0.369,
+            "z": 10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_D.gltf",
+          "id": "landmark-old_town_market",
+          "location_id": "old_town_market",
+          "position": {
+            "x": 2.6,
+            "y": 0.369,
+            "z": 10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_E.gltf",
+          "id": "landmark-harbor_mall",
+          "location_id": "harbor_mall",
+          "position": {
+            "x": 20.8,
+            "y": 0.369,
+            "z": 15.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_D.gltf",
+          "id": "landmark-maple_bookshop",
+          "location_id": "maple_bookshop",
+          "position": {
+            "x": -10.4,
+            "y": 0.369,
+            "z": 10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_E.gltf",
+          "id": "landmark-moonlight_cafe",
+          "location_id": "moonlight_cafe",
+          "position": {
+            "x": -5.2,
+            "y": 0.369,
+            "z": 7.8
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": -1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_D.gltf",
+          "id": "landmark-garden_cafe",
+          "location_id": "garden_cafe",
+          "position": {
+            "x": -15.6,
+            "y": 0.369,
+            "z": 5.2
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_E.gltf",
+          "id": "landmark-harbor_restaurant",
+          "location_id": "harbor_restaurant",
+          "position": {
+            "x": 15.6,
+            "y": 0.369,
+            "z": 15.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_G.gltf",
+          "id": "landmark-community_gallery",
+          "location_id": "community_gallery",
+          "position": {
+            "x": -7.8,
+            "y": 0.369,
+            "z": 10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_H.gltf",
+          "id": "landmark-city_museum",
+          "location_id": "city_museum",
+          "position": {
+            "x": -2.6,
+            "y": 0.369,
+            "z": -2.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_F.gltf",
+          "id": "landmark-aurora_theater",
+          "location_id": "aurora_theater",
+          "position": {
+            "x": 5.2,
+            "y": 0.369,
+            "z": 2.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_G.gltf",
+          "id": "landmark-music_hall",
+          "location_id": "music_hall",
+          "position": {
+            "x": 7.8,
+            "y": 0.369,
+            "z": 15.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_H.gltf",
+          "id": "landmark-city_library",
+          "location_id": "city_library",
+          "position": {
+            "x": -13.0,
+            "y": 0.369,
+            "z": -2.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_F.gltf",
+          "id": "landmark-community_school",
+          "location_id": "community_school",
+          "position": {
+            "x": -20.8,
+            "y": 0.369,
+            "z": -10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_G.gltf",
+          "id": "landmark-city_university",
+          "location_id": "city_university",
+          "position": {
+            "x": -7.8,
+            "y": 0.369,
+            "z": -10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_C.gltf",
+          "id": "landmark-sunny_plaza",
+          "location_id": "sunny_plaza",
+          "position": {
+            "x": 0.0,
+            "y": 0.369,
+            "z": 2.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_A.gltf",
+          "id": "landmark-canal_square",
+          "location_id": "canal_square",
+          "position": {
+            "x": 10.4,
+            "y": 0.369,
+            "z": -5.2
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_G.gltf",
+          "id": "landmark-greenway_gym",
+          "location_id": "greenway_gym",
+          "position": {
+            "x": 5.2,
+            "y": 0.369,
+            "z": 5.2
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_H.gltf",
+          "id": "landmark-city_stadium",
+          "location_id": "city_stadium",
+          "position": {
+            "x": -20.8,
+            "y": 0.369,
+            "z": 15.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_A.gltf",
+          "id": "landmark-canal_walk",
+          "location_id": "canal_walk",
+          "position": {
+            "x": 10.4,
+            "y": 0.369,
+            "z": -2.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_B.gltf",
+          "id": "landmark-south_harbor",
+          "location_id": "south_harbor",
+          "position": {
+            "x": 13.0,
+            "y": 0.369,
+            "z": 15.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_H.gltf",
+          "id": "landmark-co_working_loft",
+          "location_id": "co_working_loft",
+          "position": {
+            "x": 0.0,
+            "y": 0.369,
+            "z": 15.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_B.gltf",
+          "id": "shared-home",
+          "location_id": null,
+          "position": {
+            "x": -20.8,
+            "y": 0.369,
+            "z": 10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": -1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_G.gltf",
+          "id": "fabric--5--6",
+          "location_id": null,
+          "position": {
+            "x": -13.0,
+            "y": 0.369,
+            "z": -15.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_D.gltf",
+          "id": "fabric--4--6",
+          "location_id": null,
+          "position": {
+            "x": -10.4,
+            "y": 0.369,
+            "z": -15.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_F.gltf",
+          "id": "fabric--3--6",
+          "location_id": null,
+          "position": {
+            "x": -7.8,
+            "y": 0.369,
+            "z": -15.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_D.gltf",
+          "id": "fabric--1--6",
+          "location_id": null,
+          "position": {
+            "x": -2.6,
+            "y": 0.369,
+            "z": -15.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": -1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_H.gltf",
+          "id": "fabric-1--6",
+          "location_id": null,
+          "position": {
+            "x": 2.6,
+            "y": 0.369,
+            "z": -15.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_D.gltf",
+          "id": "fabric-2--6",
+          "location_id": null,
+          "position": {
+            "x": 5.2,
+            "y": 0.369,
+            "z": -15.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_G.gltf",
+          "id": "fabric-3--6",
+          "location_id": null,
+          "position": {
+            "x": 7.8,
+            "y": 0.369,
+            "z": -15.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_H.gltf",
+          "id": "fabric-4--6",
+          "location_id": null,
+          "position": {
+            "x": 10.4,
+            "y": 0.369,
+            "z": -15.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_E.gltf",
+          "id": "fabric-5--6",
+          "location_id": null,
+          "position": {
+            "x": 13.0,
+            "y": 0.369,
+            "z": -15.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_G.gltf",
+          "id": "fabric--8--5",
+          "location_id": null,
+          "position": {
+            "x": -20.8,
+            "y": 0.369,
+            "z": -13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_H.gltf",
+          "id": "fabric--6--4",
+          "location_id": null,
+          "position": {
+            "x": -15.6,
+            "y": 0.369,
+            "z": -10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": -1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_F.gltf",
+          "id": "fabric--5--4",
+          "location_id": null,
+          "position": {
+            "x": -13.0,
+            "y": 0.369,
+            "z": -10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_E.gltf",
+          "id": "fabric--4--4",
+          "location_id": null,
+          "position": {
+            "x": -10.4,
+            "y": 0.369,
+            "z": -10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_H.gltf",
+          "id": "fabric--2--4",
+          "location_id": null,
+          "position": {
+            "x": -5.2,
+            "y": 0.369,
+            "z": -10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_E.gltf",
+          "id": "fabric--1--4",
+          "location_id": null,
+          "position": {
+            "x": -2.6,
+            "y": 0.369,
+            "z": -10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_G.gltf",
+          "id": "fabric-0--4",
+          "location_id": null,
+          "position": {
+            "x": 0.0,
+            "y": 0.369,
+            "z": -10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/building_H.gltf",
+          "id": "fabric-1--4",
+          "location_id": null,
+          "position": {
+            "x": 2.6,
+            "y": 0.369,
+            "z": -10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        }
+      ],
+      "decorations": [
+        {
+          "asset": "/assets/life/interiors/park/tree.gltf",
+          "id": "tree-0",
+          "position": {
+            "x": -24.0,
+            "y": 0.37,
+            "z": -15.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 0.72,
+            "y": 0.72,
+            "z": 0.72
+          }
+        },
+        {
+          "asset": "/assets/life/interiors/park/tree.gltf",
+          "id": "tree-1",
+          "position": {
+            "x": -22.9,
+            "y": 0.37,
+            "z": -14.2
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.37,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 0.78,
+            "y": 0.78,
+            "z": 0.78
+          }
+        },
+        {
+          "asset": "/assets/life/interiors/park/tree.gltf",
+          "id": "tree-2",
+          "position": {
+            "x": -21.7,
+            "y": 0.37,
+            "z": -15.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.74,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 0.84,
+            "y": 0.84,
+            "z": 0.84
+          }
+        },
+        {
+          "asset": "/assets/life/interiors/park/tree.gltf",
+          "id": "tree-3",
+          "position": {
+            "x": -6.4,
+            "y": 0.37,
+            "z": -7.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.11,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 0.72,
+            "y": 0.72,
+            "z": 0.72
+          }
+        },
+        {
+          "asset": "/assets/life/interiors/park/tree.gltf",
+          "id": "tree-4",
+          "position": {
+            "x": -3.2,
+            "y": 0.37,
+            "z": -5.5
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.48,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 0.78,
+            "y": 0.78,
+            "z": 0.78
+          }
+        },
+        {
+          "asset": "/assets/life/interiors/park/tree.gltf",
+          "id": "tree-5",
+          "position": {
+            "x": 1.2,
+            "y": 0.37,
+            "z": -7.5
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.85,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 0.84,
+            "y": 0.84,
+            "z": 0.84
+          }
+        },
+        {
+          "asset": "/assets/life/interiors/park/tree.gltf",
+          "id": "tree-6",
+          "position": {
+            "x": 4.7,
+            "y": 0.37,
+            "z": -5.7
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 2.22,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 0.72,
+            "y": 0.72,
+            "z": 0.72
+          }
+        },
+        {
+          "asset": "/assets/life/interiors/park/tree.gltf",
+          "id": "tree-7",
+          "position": {
+            "x": 6.4,
+            "y": 0.37,
+            "z": -7.2
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 2.59,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 0.78,
+            "y": 0.78,
+            "z": 0.78
+          }
+        },
+        {
+          "asset": "/assets/life/interiors/park/tree.gltf",
+          "id": "tree-8",
+          "position": {
+            "x": -1.4,
+            "y": 0.37,
+            "z": 8.9
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 2.96,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 0.84,
+            "y": 0.84,
+            "z": 0.84
+          }
+        },
+        {
+          "asset": "/assets/life/interiors/park/tree.gltf",
+          "id": "tree-9",
+          "position": {
+            "x": -0.4,
+            "y": 0.37,
+            "z": 10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.33,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 0.72,
+            "y": 0.72,
+            "z": 0.72
+          }
+        },
+        {
+          "asset": "/assets/life/interiors/park/tree.gltf",
+          "id": "tree-10",
+          "position": {
+            "x": 24.2,
+            "y": 0.37,
+            "z": -14.1
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.7,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 0.78,
+            "y": 0.78,
+            "z": 0.78
+          }
+        },
+        {
+          "asset": "/assets/life/interiors/park/tree.gltf",
+          "id": "tree-11",
+          "position": {
+            "x": 25.1,
+            "y": 0.37,
+            "z": -12.7
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 4.07,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 0.84,
+            "y": 0.84,
+            "z": 0.84
+          }
+        },
+        {
+          "asset": "/assets/life/interiors/park/tree.gltf",
+          "id": "tree-12",
+          "position": {
+            "x": 23.6,
+            "y": 0.37,
+            "z": -11.8
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 4.44,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 0.72,
+            "y": 0.72,
+            "z": 0.72
+          }
+        },
+        {
+          "asset": "/assets/life/interiors/park/tree.gltf",
+          "id": "tree-13",
+          "position": {
+            "x": 19.6,
+            "y": 0.37,
+            "z": 7.7
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 4.81,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 0.78,
+            "y": 0.78,
+            "z": 0.78
+          }
+        },
+        {
+          "asset": "/assets/life/interiors/park/tree.gltf",
+          "id": "tree-14",
+          "position": {
+            "x": -21.0,
+            "y": 0.37,
+            "z": 3.5
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 5.18,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 0.84,
+            "y": 0.84,
+            "z": 0.84
+          }
+        },
+        {
+          "asset": "/assets/life/interiors/park/tree.gltf",
+          "id": "tree-15",
+          "position": {
+            "x": -16.8,
+            "y": 0.37,
+            "z": 16.1
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 5.55,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 0.72,
+            "y": 0.72,
+            "z": 0.72
+          }
+        },
+        {
+          "asset": "/assets/life/interiors/park/tree.gltf",
+          "id": "tree-16",
+          "position": {
+            "x": 10.5,
+            "y": 0.37,
+            "z": 16.1
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 5.92,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 0.78,
+            "y": 0.78,
+            "z": 0.78
+          }
+        },
+        {
+          "asset": "/assets/life/interiors/park/tree.gltf",
+          "id": "tree-17",
+          "position": {
+            "x": 16.8,
+            "y": 0.37,
+            "z": -2.8
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 6.29,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 0.84,
+            "y": 0.84,
+            "z": 0.84
+          }
+        },
+        {
+          "asset": "/assets/life/interiors/park/tree.gltf",
+          "id": "tree-18",
+          "position": {
+            "x": -11.2,
+            "y": 0.37,
+            "z": 2.8
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 6.66,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 0.72,
+            "y": 0.72,
+            "z": 0.72
+          }
+        },
+        {
+          "asset": "/assets/life/interiors/park/tree.gltf",
+          "id": "tree-19",
+          "position": {
+            "x": 10.5,
+            "y": 0.37,
+            "z": 4.9
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 7.03,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 0.78,
+            "y": 0.78,
+            "z": 0.78
+          }
+        },
+        {
+          "asset": "/assets/life/interiors/park/tree.gltf",
+          "id": "tree-20",
+          "position": {
+            "x": -25.2,
+            "y": 0.37,
+            "z": -4.9
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 7.4,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 0.84,
+            "y": 0.84,
+            "z": 0.84
+          }
+        },
+        {
+          "asset": "/assets/life/interiors/park/tree.gltf",
+          "id": "tree-21",
+          "position": {
+            "x": 16.1,
+            "y": 0.37,
+            "z": -16.1
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 7.77,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 0.72,
+            "y": 0.72,
+            "z": 0.72
+          }
+        },
+        {
+          "asset": "/assets/life/interiors/park/tree.gltf",
+          "id": "tree-22",
+          "position": {
+            "x": 18.2,
+            "y": 0.37,
+            "z": 16.1
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 8.14,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 0.78,
+            "y": 0.78,
+            "z": 0.78
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/bush.gltf",
+          "id": "park-bush-0",
+          "position": {
+            "x": 0.4,
+            "y": 0.37,
+            "z": -5.2
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.65,
+            "y": 1.65,
+            "z": 1.65
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/bush.gltf",
+          "id": "park-bush-1",
+          "position": {
+            "x": 1.5,
+            "y": 0.37,
+            "z": -6.1
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.68,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.77,
+            "y": 1.77,
+            "z": 1.77
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/bush.gltf",
+          "id": "park-bush-2",
+          "position": {
+            "x": 2.7,
+            "y": 0.37,
+            "z": -5.2
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.36,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.89,
+            "y": 1.89,
+            "z": 1.89
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/bush.gltf",
+          "id": "park-bush-3",
+          "position": {
+            "x": -4.8,
+            "y": 0.37,
+            "z": 10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 2.04,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.65,
+            "y": 1.65,
+            "z": 1.65
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/bush.gltf",
+          "id": "park-bush-4",
+          "position": {
+            "x": -2.5,
+            "y": 0.37,
+            "z": 10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 2.72,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.77,
+            "y": 1.77,
+            "z": 1.77
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/bush.gltf",
+          "id": "park-bush-5",
+          "position": {
+            "x": 2.8,
+            "y": 0.37,
+            "z": 3.5
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.4,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.89,
+            "y": 1.89,
+            "z": 1.89
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/bush.gltf",
+          "id": "park-bush-6",
+          "position": {
+            "x": -4.2,
+            "y": 0.37,
+            "z": 2.8
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 4.08,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.65,
+            "y": 1.65,
+            "z": 1.65
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/bush.gltf",
+          "id": "park-bush-7",
+          "position": {
+            "x": -13.3,
+            "y": 0.37,
+            "z": 10.5
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 4.76,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.77,
+            "y": 1.77,
+            "z": 1.77
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/bush.gltf",
+          "id": "park-bush-8",
+          "position": {
+            "x": -9.1,
+            "y": 0.37,
+            "z": 15.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 5.44,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.89,
+            "y": 1.89,
+            "z": 1.89
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/bush.gltf",
+          "id": "park-bush-9",
+          "position": {
+            "x": 3.5,
+            "y": 0.37,
+            "z": 15.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 6.12,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.65,
+            "y": 1.65,
+            "z": 1.65
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/bush.gltf",
+          "id": "park-bush-10",
+          "position": {
+            "x": 5.6,
+            "y": 0.37,
+            "z": 9.1
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 6.8,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.77,
+            "y": 1.77,
+            "z": 1.77
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/bush.gltf",
+          "id": "park-bush-11",
+          "position": {
+            "x": -15.4,
+            "y": 0.37,
+            "z": -4.9
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 7.48,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.89,
+            "y": 1.89,
+            "z": 1.89
+          }
+        }
+      ],
+      "props": [
+        {
+          "asset": "/assets/world/kaykit-city/gltf/streetlight.gltf",
+          "id": "cloudway-light-n-0",
+          "position": {
+            "x": -23.4,
+            "y": 0.37,
+            "z": -1.18
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/streetlight.gltf",
+          "id": "cloudway-light-s-0",
+          "position": {
+            "x": -23.4,
+            "y": 0.37,
+            "z": 1.18
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/streetlight.gltf",
+          "id": "cloudway-light-n-1",
+          "position": {
+            "x": -18.2,
+            "y": 0.37,
+            "z": -1.18
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/streetlight.gltf",
+          "id": "cloudway-light-s-1",
+          "position": {
+            "x": -18.2,
+            "y": 0.37,
+            "z": 1.18
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/streetlight.gltf",
+          "id": "cloudway-light-n-2",
+          "position": {
+            "x": -13.0,
+            "y": 0.37,
+            "z": -1.18
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/streetlight.gltf",
+          "id": "cloudway-light-s-2",
+          "position": {
+            "x": -13.0,
+            "y": 0.37,
+            "z": 1.18
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/streetlight.gltf",
+          "id": "cloudway-light-n-3",
+          "position": {
+            "x": -7.8,
+            "y": 0.37,
+            "z": -1.18
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/streetlight.gltf",
+          "id": "cloudway-light-s-3",
+          "position": {
+            "x": -7.8,
+            "y": 0.37,
+            "z": 1.18
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/streetlight.gltf",
+          "id": "cloudway-light-n-4",
+          "position": {
+            "x": -2.6,
+            "y": 0.37,
+            "z": -1.18
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/streetlight.gltf",
+          "id": "cloudway-light-s-4",
+          "position": {
+            "x": -2.6,
+            "y": 0.37,
+            "z": 1.18
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/streetlight.gltf",
+          "id": "cloudway-light-n-5",
+          "position": {
+            "x": 2.6,
+            "y": 0.37,
+            "z": -1.18
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/streetlight.gltf",
+          "id": "cloudway-light-s-5",
+          "position": {
+            "x": 2.6,
+            "y": 0.37,
+            "z": 1.18
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/streetlight.gltf",
+          "id": "cloudway-light-n-6",
+          "position": {
+            "x": 7.8,
+            "y": 0.37,
+            "z": -1.18
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/streetlight.gltf",
+          "id": "cloudway-light-s-6",
+          "position": {
+            "x": 7.8,
+            "y": 0.37,
+            "z": 1.18
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/streetlight.gltf",
+          "id": "cloudway-light-n-7",
+          "position": {
+            "x": 13.0,
+            "y": 0.37,
+            "z": -1.18
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/streetlight.gltf",
+          "id": "cloudway-light-s-7",
+          "position": {
+            "x": 13.0,
+            "y": 0.37,
+            "z": 1.18
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/streetlight.gltf",
+          "id": "cloudway-light-n-8",
+          "position": {
+            "x": 18.2,
+            "y": 0.37,
+            "z": -1.18
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/streetlight.gltf",
+          "id": "cloudway-light-s-8",
+          "position": {
+            "x": 18.2,
+            "y": 0.37,
+            "z": 1.18
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/streetlight.gltf",
+          "id": "cloudway-light-n-9",
+          "position": {
+            "x": 23.4,
+            "y": 0.37,
+            "z": -1.18
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/streetlight.gltf",
+          "id": "cloudway-light-s-9",
+          "position": {
+            "x": 23.4,
+            "y": 0.37,
+            "z": 1.18
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/trafficlight_A.gltf",
+          "id": "signal-west-a",
+          "position": {
+            "x": -23.9,
+            "y": 0.37,
+            "z": -1.03
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.35,
+            "y": 1.35,
+            "z": 1.35
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/trafficlight_B.gltf",
+          "id": "signal-west-b",
+          "position": {
+            "x": -23.1,
+            "y": 0.37,
+            "z": 1.06
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.35,
+            "y": 1.35,
+            "z": 1.35
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/trafficlight_C.gltf",
+          "id": "signal-centre-a",
+          "position": {
+            "x": -8.8,
+            "y": 0.37,
+            "z": -1.08
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.28,
+            "y": 1.28,
+            "z": 1.28
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/trafficlight_C.gltf",
+          "id": "signal-centre-b",
+          "position": {
+            "x": 8.8,
+            "y": 0.37,
+            "z": 1.08
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": -1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.28,
+            "y": 1.28,
+            "z": 1.28
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/trafficlight_B.gltf",
+          "id": "signal-dawn-a",
+          "position": {
+            "x": 22.3,
+            "y": 0.37,
+            "z": -1.05
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.35,
+            "y": 1.35,
+            "z": 1.35
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/trafficlight_A.gltf",
+          "id": "signal-dawn-b",
+          "position": {
+            "x": 23.1,
+            "y": 0.37,
+            "z": 1.04
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.35,
+            "y": 1.35,
+            "z": 1.35
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/firehydrant.gltf",
+          "id": "hydrant-cafe",
+          "position": {
+            "x": -4.45,
+            "y": 0.37,
+            "z": 2.35
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.2,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.65,
+            "y": 1.65,
+            "z": 1.65
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/firehydrant.gltf",
+          "id": "hydrant-library",
+          "position": {
+            "x": -14.7,
+            "y": 0.37,
+            "z": 0.95
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": -0.2,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.65,
+            "y": 1.65,
+            "z": 1.65
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/firehydrant.gltf",
+          "id": "hydrant-hospital",
+          "position": {
+            "x": 16.9,
+            "y": 0.37,
+            "z": 2.25
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.4,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.65,
+            "y": 1.65,
+            "z": 1.65
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/dumpster.gltf",
+          "id": "dumpster-market",
+          "position": {
+            "x": -11.7,
+            "y": 0.37,
+            "z": 10.2
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.45,
+            "y": 1.45,
+            "z": 1.45
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/trash_A.gltf",
+          "id": "trash-centre-a",
+          "position": {
+            "x": -1.1,
+            "y": 0.37,
+            "z": 2.05
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 2.0,
+            "y": 2.0,
+            "z": 2.0
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/trash_B.gltf",
+          "id": "trash-centre-b",
+          "position": {
+            "x": 4.25,
+            "y": 0.37,
+            "z": -2.1
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 2.0,
+            "y": 2.0,
+            "z": 2.0
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/box_A.gltf",
+          "id": "cargo-old-a",
+          "position": {
+            "x": -12.25,
+            "y": 0.37,
+            "z": 10.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.2,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 2.0,
+            "y": 2.0,
+            "z": 2.0
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/box_B.gltf",
+          "id": "cargo-old-b",
+          "position": {
+            "x": -11.8,
+            "y": 0.37,
+            "z": 10.9
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": -0.2,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 2.0,
+            "y": 2.0,
+            "z": 2.0
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/bench.gltf",
+          "id": "bench-campus-a",
+          "position": {
+            "x": -5.9,
+            "y": 0.37,
+            "z": -10.7
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 2.1,
+            "y": 2.1,
+            "z": 2.1
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/bench.gltf",
+          "id": "bench-sunny-a",
+          "position": {
+            "x": 0.7,
+            "y": 0.37,
+            "z": -5.5
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 2.1,
+            "y": 2.1,
+            "z": 2.1
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/watertower.gltf",
+          "id": "watertower-cloudgate",
+          "position": {
+            "x": -24.2,
+            "y": 0.37,
+            "z": -12.8
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.2,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 2.4,
+            "y": 2.4,
+            "z": 2.4
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/car_taxi.gltf",
+          "id": "car-taxi-centre",
+          "position": {
+            "x": 1.1,
+            "y": 0.37,
+            "z": 0.28
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/car_sedan.gltf",
+          "id": "car-sedan-west",
+          "position": {
+            "x": -16.6,
+            "y": 0.37,
+            "z": -0.28
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": -1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/car_police.gltf",
+          "id": "car-police-dawn",
+          "position": {
+            "x": 23.3,
+            "y": 0.37,
+            "z": 0.28
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.16,
+            "y": 1.16,
+            "z": 1.16
+          }
+        }
+      ],
+      "roads": [
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--14-0",
+          "position": {
+            "x": -36.4,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--13-0",
+          "position": {
+            "x": -33.8,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--12-0",
+          "position": {
+            "x": -31.2,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight_crossing.gltf",
+          "id": "road--11-0",
+          "position": {
+            "x": -28.6,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--10-0",
+          "position": {
+            "x": -26.0,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_tsplit.gltf",
+          "id": "road--9-0",
+          "position": {
+            "x": -23.4,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--8-0",
+          "position": {
+            "x": -20.8,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_tsplit.gltf",
+          "id": "road--7-0",
+          "position": {
+            "x": -18.2,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--6-0",
+          "position": {
+            "x": -15.6,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight_crossing.gltf",
+          "id": "road--5-0",
+          "position": {
+            "x": -13.0,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--4-0",
+          "position": {
+            "x": -10.4,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_tsplit.gltf",
+          "id": "road--3-0",
+          "position": {
+            "x": -7.8,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--2-0",
+          "position": {
+            "x": -5.2,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--1-0",
+          "position": {
+            "x": -2.6,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight_crossing.gltf",
+          "id": "road-0-0",
+          "position": {
+            "x": 0.0,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-1-0",
+          "position": {
+            "x": 2.6,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-2-0",
+          "position": {
+            "x": 5.2,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_tsplit.gltf",
+          "id": "road-3-0",
+          "position": {
+            "x": 7.8,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-4-0",
+          "position": {
+            "x": 10.4,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_tsplit.gltf",
+          "id": "road-5-0",
+          "position": {
+            "x": 13.0,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight_crossing.gltf",
+          "id": "road-6-0",
+          "position": {
+            "x": 15.6,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-7-0",
+          "position": {
+            "x": 18.2,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-8-0",
+          "position": {
+            "x": 20.8,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_junction.gltf",
+          "id": "road-9-0",
+          "position": {
+            "x": 23.4,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-10-0",
+          "position": {
+            "x": 26.0,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight_crossing.gltf",
+          "id": "road-11-0",
+          "position": {
+            "x": 28.6,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-12-0",
+          "position": {
+            "x": 31.2,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-13-0",
+          "position": {
+            "x": 33.8,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-14-0",
+          "position": {
+            "x": 36.4,
+            "y": 0.245,
+            "z": 0.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--7--4",
+          "position": {
+            "x": -18.2,
+            "y": 0.245,
+            "z": -10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-5--4",
+          "position": {
+            "x": 13.0,
+            "y": 0.245,
+            "z": -10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--7--3",
+          "position": {
+            "x": -18.2,
+            "y": 0.245,
+            "z": -7.8
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_tsplit.gltf",
+          "id": "road-5--3",
+          "position": {
+            "x": 13.0,
+            "y": 0.245,
+            "z": -7.8
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--7--2",
+          "position": {
+            "x": -18.2,
+            "y": 0.245,
+            "z": -5.2
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-5--2",
+          "position": {
+            "x": 13.0,
+            "y": 0.245,
+            "z": -5.2
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--7--1",
+          "position": {
+            "x": -18.2,
+            "y": 0.245,
+            "z": -2.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-5--1",
+          "position": {
+            "x": 13.0,
+            "y": 0.245,
+            "z": -2.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--6--5",
+          "position": {
+            "x": -15.6,
+            "y": 0.245,
+            "z": -13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--5--5",
+          "position": {
+            "x": -13.0,
+            "y": 0.245,
+            "z": -13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--4--5",
+          "position": {
+            "x": -10.4,
+            "y": 0.245,
+            "z": -13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--3--5",
+          "position": {
+            "x": -7.8,
+            "y": 0.245,
+            "z": -13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_tsplit.gltf",
+          "id": "road--2--5",
+          "position": {
+            "x": -5.2,
+            "y": 0.245,
+            "z": -13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--1--5",
+          "position": {
+            "x": -2.6,
+            "y": 0.245,
+            "z": -13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-0--5",
+          "position": {
+            "x": 0.0,
+            "y": 0.245,
+            "z": -13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-1--5",
+          "position": {
+            "x": 2.6,
+            "y": 0.245,
+            "z": -13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-2--5",
+          "position": {
+            "x": 5.2,
+            "y": 0.245,
+            "z": -13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-3--5",
+          "position": {
+            "x": 7.8,
+            "y": 0.245,
+            "z": -13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-4--5",
+          "position": {
+            "x": 10.4,
+            "y": 0.245,
+            "z": -13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_corner_curved.gltf",
+          "id": "road--7--5",
+          "position": {
+            "x": -18.2,
+            "y": 0.245,
+            "z": -13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_corner_curved.gltf",
+          "id": "road-5--5",
+          "position": {
+            "x": 13.0,
+            "y": 0.245,
+            "z": -13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": -1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--2--10",
+          "position": {
+            "x": -5.2,
+            "y": 0.245,
+            "z": -26.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--2--9",
+          "position": {
+            "x": -5.2,
+            "y": 0.245,
+            "z": -23.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--2--8",
+          "position": {
+            "x": -5.2,
+            "y": 0.245,
+            "z": -20.8
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight_crossing.gltf",
+          "id": "road--2--7",
+          "position": {
+            "x": -5.2,
+            "y": 0.245,
+            "z": -18.2
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--2--6",
+          "position": {
+            "x": -5.2,
+            "y": 0.245,
+            "z": -15.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--9-1",
+          "position": {
+            "x": -23.4,
+            "y": 0.245,
+            "z": 2.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-3-1",
+          "position": {
+            "x": 7.8,
+            "y": 0.245,
+            "z": 2.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--9-2",
+          "position": {
+            "x": -23.4,
+            "y": 0.245,
+            "z": 5.2
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-3-2",
+          "position": {
+            "x": 7.8,
+            "y": 0.245,
+            "z": 5.2
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_tsplit.gltf",
+          "id": "road--9-3",
+          "position": {
+            "x": -23.4,
+            "y": 0.245,
+            "z": 7.8
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-3-3",
+          "position": {
+            "x": 7.8,
+            "y": 0.245,
+            "z": 7.8
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--9-4",
+          "position": {
+            "x": -23.4,
+            "y": 0.245,
+            "z": 10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-3-4",
+          "position": {
+            "x": 7.8,
+            "y": 0.245,
+            "z": 10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--8-5",
+          "position": {
+            "x": -20.8,
+            "y": 0.245,
+            "z": 13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--7-5",
+          "position": {
+            "x": -18.2,
+            "y": 0.245,
+            "z": 13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--6-5",
+          "position": {
+            "x": -15.6,
+            "y": 0.245,
+            "z": 13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--5-5",
+          "position": {
+            "x": -13.0,
+            "y": 0.245,
+            "z": 13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--4-5",
+          "position": {
+            "x": -10.4,
+            "y": 0.245,
+            "z": 13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--3-5",
+          "position": {
+            "x": -7.8,
+            "y": 0.245,
+            "z": 13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--2-5",
+          "position": {
+            "x": -5.2,
+            "y": 0.245,
+            "z": 13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--1-5",
+          "position": {
+            "x": -2.6,
+            "y": 0.245,
+            "z": 13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-0-5",
+          "position": {
+            "x": 0.0,
+            "y": 0.245,
+            "z": 13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-1-5",
+          "position": {
+            "x": 2.6,
+            "y": 0.245,
+            "z": 13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-2-5",
+          "position": {
+            "x": 5.2,
+            "y": 0.245,
+            "z": 13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_corner_curved.gltf",
+          "id": "road--9-5",
+          "position": {
+            "x": -23.4,
+            "y": 0.245,
+            "z": 13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_tsplit.gltf",
+          "id": "road-3-5",
+          "position": {
+            "x": 7.8,
+            "y": 0.245,
+            "z": 13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--8-3",
+          "position": {
+            "x": -20.8,
+            "y": 0.245,
+            "z": 7.8
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--7-3",
+          "position": {
+            "x": -18.2,
+            "y": 0.245,
+            "z": 7.8
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight_crossing.gltf",
+          "id": "road--6-3",
+          "position": {
+            "x": -15.6,
+            "y": 0.245,
+            "z": 7.8
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--5-3",
+          "position": {
+            "x": -13.0,
+            "y": 0.245,
+            "z": 7.8
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--4-3",
+          "position": {
+            "x": -10.4,
+            "y": 0.245,
+            "z": 7.8
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--3-1",
+          "position": {
+            "x": -7.8,
+            "y": 0.245,
+            "z": 2.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road--3-2",
+          "position": {
+            "x": -7.8,
+            "y": 0.245,
+            "z": 5.2
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_corner.gltf",
+          "id": "road--3-3",
+          "position": {
+            "x": -7.8,
+            "y": 0.245,
+            "z": 7.8
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-4-5",
+          "position": {
+            "x": 10.4,
+            "y": 0.245,
+            "z": 13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-5-5",
+          "position": {
+            "x": 13.0,
+            "y": 0.245,
+            "z": 13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight_crossing.gltf",
+          "id": "road-6-5",
+          "position": {
+            "x": 15.6,
+            "y": 0.245,
+            "z": 13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-7-5",
+          "position": {
+            "x": 18.2,
+            "y": 0.245,
+            "z": 13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-8-5",
+          "position": {
+            "x": 20.8,
+            "y": 0.245,
+            "z": 13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_corner_curved.gltf",
+          "id": "road-9-5",
+          "position": {
+            "x": 23.4,
+            "y": 0.245,
+            "z": 13.0
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 3.1416,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-9-1",
+          "position": {
+            "x": 23.4,
+            "y": 0.245,
+            "z": 2.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-9-2",
+          "position": {
+            "x": 23.4,
+            "y": 0.245,
+            "z": 5.2
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-9-3",
+          "position": {
+            "x": 23.4,
+            "y": 0.245,
+            "z": 7.8
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-9-4",
+          "position": {
+            "x": 23.4,
+            "y": 0.245,
+            "z": 10.4
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_corner.gltf",
+          "id": "road-9--3",
+          "position": {
+            "x": 23.4,
+            "y": 0.245,
+            "z": -7.8
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": -1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-9--2",
+          "position": {
+            "x": 23.4,
+            "y": 0.245,
+            "z": -5.2
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight_crossing.gltf",
+          "id": "road-9--1",
+          "position": {
+            "x": 23.4,
+            "y": 0.245,
+            "z": -2.6
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-6--3",
+          "position": {
+            "x": 15.6,
+            "y": 0.245,
+            "z": -7.8
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-7--3",
+          "position": {
+            "x": 18.2,
+            "y": 0.245,
+            "z": -7.8
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        },
+        {
+          "asset": "/assets/world/kaykit-city/gltf/road_straight.gltf",
+          "id": "road-8--3",
+          "position": {
+            "x": 20.8,
+            "y": 0.245,
+            "z": -7.8
+          },
+          "rotation": {
+            "x": 0.0,
+            "y": 1.5708,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 1.3,
+            "y": 1.3,
+            "z": 1.3
+          }
+        }
+      ]
+    },
+    "interior": {
+      "rooms": []
+    }
+  }
+}

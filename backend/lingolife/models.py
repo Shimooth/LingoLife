@@ -256,6 +256,24 @@ class OnboardingSharedHistoryHook(BaseModel):
         return normalized
 
 
+class ResidentVoice(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    voice_uri: str = Field(default="", max_length=512)
+    language: str = Field(default="en-US", min_length=2, max_length=32)
+    rate: float = Field(default=1, ge=0.5, le=1.5)
+    pitch: float = Field(default=1, ge=0.5, le=1.5)
+
+
+class PersonalityAxes(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    warmth: int = Field(default=55, ge=0, le=100)
+    extraversion: int = Field(default=50, ge=0, le=100)
+    assertiveness: int = Field(default=50, ge=0, le=100)
+    openness: int = Field(default=55, ge=0, le=100)
+    emotional_stability: int = Field(default=55, ge=0, le=100)
+    humor: int = Field(default=40, ge=0, le=100)
+
+
 class NpcProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -294,6 +312,24 @@ class NpcProfile(BaseModel):
     householdWithIds: list[str] = Field(default_factory=list, max_length=7)
     shared_history_hooks: list[SharedHistoryHook] = Field(default_factory=list, max_length=4)
     avatar: AvatarConfig
+    voice: Optional[ResidentVoice] = None
+    personalityAxes: Optional[PersonalityAxes] = None
+    residentNicknames: Optional[dict[str, str]] = Field(default=None, max_length=8)
+
+    @field_validator("residentNicknames")
+    @classmethod
+    def normalize_resident_nicknames(cls, value):
+        if value is None:
+            return None
+        result = {}
+        for npc_id, nickname in value.items():
+            if not re.fullmatch(r"[a-z0-9-]{1,48}", npc_id):
+                raise ValueError("nickname references must be resident ids")
+            nickname = " ".join(nickname.split())
+            if not 1 <= len(nickname) <= 24:
+                raise ValueError("nicknames must contain 1 to 24 characters")
+            result[npc_id] = nickname
+        return result
 
     @field_validator("name", "relationship", "occupation", "longTermGoal")
     @classmethod
@@ -640,6 +676,7 @@ class InteriorLayoutPlacement(CityLayoutPlacement):
 class CityLayout(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    theme: Literal["resident-town-v1"] | None = None
     roads: list[CityLayoutPlacement] = Field(default_factory=list, min_length=1, max_length=512)
     buildings: list[BuildingLayoutPlacement] = Field(default_factory=list, min_length=1, max_length=512)
     props: list[CityLayoutPlacement] = Field(default_factory=list, max_length=1024)

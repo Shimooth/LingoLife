@@ -9,11 +9,13 @@ import './styles.css'
 const admin=window.location.hostname==='lingolife.admin.shimooth.me'||(import.meta.env.DEV&&new URLSearchParams(window.location.search).get('admin')==='1')
 const AdminApp=lazy(()=>import('./AdminApp').then(module=>({default:module.AdminApp})))
 const AuthGate=lazy(()=>import('./AuthGate').then(module=>({default:module.AuthGate})))
+const atelier=!admin&&window.location.pathname.replace(/\/$/,'')==='/atelier'
+const OriginalExperience=lazy(()=>import('./original/OriginalExperience'))
 // Returning players download the 3D experience in parallel with session setup.
-try{if(!admin&&localStorage.getItem('lingolife.session-token'))void import('./App')}catch{/* restricted storage: AuthGate remains usable */}
+try{if(!admin&&!atelier&&localStorage.getItem('lingolife.session-token'))void import('./App')}catch{/* restricted storage: AuthGate remains usable */}
 const startupLanguage=(()=>{try{return (localStorage.getItem('lingolife.language')||navigator.language).toLowerCase().startsWith('zh')?'zh':'en'}catch{return 'zh'}})()
 const startupMessage=admin
  ?(startupLanguage==='zh'?'正在打开管理中心…':'Opening the management centre…')
  :(startupLanguage==='zh'?'正在唤醒天空之城…':'Waking up the sky city…')
 const loading=<BrandedStartupShell message={startupMessage}/>
-createRoot(document.getElementById('root')!).render(<StrictMode><RootErrorBoundary><Suspense fallback={loading}>{admin?<AdminApp/>:<LanguageProvider><AuthGate/></LanguageProvider>}</Suspense></RootErrorBoundary></StrictMode>)
+createRoot(document.getElementById('root')!).render(<StrictMode><RootErrorBoundary><Suspense fallback={loading}>{admin?<AdminApp/>:atelier?<OriginalExperience/>:<LanguageProvider><AuthGate/></LanguageProvider>}</Suspense></RootErrorBoundary></StrictMode>)

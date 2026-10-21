@@ -14,6 +14,7 @@ export type WorldLayoutRoom={id:string;name:string;kind:string;placements:WorldL
 export type WorldLayoutDocument={
  version:1
  city:{
+  theme?:'resident-town-v1'
   roads:WorldLayoutPlacement[]
   buildings:WorldLayoutBuilding[]
   props:WorldLayoutPlacement[]
@@ -50,7 +51,7 @@ export type WorldLayoutResponse={
 export type WorldLayoutAdminResponse=WorldLayoutResponse&{
  draft:WorldLayoutDraft;versions:WorldLayoutVersion[];audit:WorldLayoutAudit[]
 }
-export type WorldLayoutCityLayer=keyof WorldLayoutDocument['city']
+export type WorldLayoutCityLayer=Exclude<keyof WorldLayoutDocument['city'],'theme'>
 
 export type LayoutAssetDefinition={
  asset:string
@@ -166,6 +167,7 @@ const interiorPlacementIsValid=(value:unknown):value is WorldLayoutInteriorPlace
 export const isWorldLayoutDocument=(value:unknown):value is WorldLayoutDocument=>{
  if(!objectValue(value)||value.version!==1||!objectValue(value.city)||!objectValue(value.interior))return false
  const city=value.city,interior=value.interior
+ if(city.theme!==undefined&&city.theme!=='resident-town-v1')return false
  if(!(['roads','buildings','props','decorations'] as const).every(layer=>Array.isArray(city[layer])&&city[layer].every(layoutPlacementIsValid)))return false
  if(!Array.isArray(interior.rooms)||!interior.rooms.every(room=>objectValue(room)&&typeof room.id==='string'&&typeof room.name==='string'&&typeof room.kind==='string'&&Array.isArray(room.placements)&&room.placements.every(interiorPlacementIsValid)))return false
  return true

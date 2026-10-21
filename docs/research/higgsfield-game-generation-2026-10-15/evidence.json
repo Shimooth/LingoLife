@@ -1,0 +1,27 @@
+{
+  "sources_reviewed": [
+    "higgsfield-websites/SKILL.md",
+    "higgsfield-websites/references/game-flow.md",
+    "higgsfield-websites/references/game-design-system.md",
+    "higgsfield-websites/references/game-stylization.md",
+    "higgsfield-websites/references/game-3d-animation.md",
+    "higgsfield-websites/references/game-meshy-input-rules.md"
+  ],
+  "official_skill_archive_sha256": "899b140d4a3bd44090ef58995320b4434ac412188b45e1d7a49530f51341d1a3",
+  "cli_on_initial_path": false,
+  "official_release_version": "v1.1.26",
+  "official_release_published_at": "2026-09-18T23:39:48Z",
+  "cli_download": "complete",
+  "account_status_checked": true,
+  "generation_jobs_submitted": 0,
+  "remote_projects_created": 0,
+  "deployments": 0,
+  "published_items": 0,
+  "cli_binary_sha256_verified": true,
+  "cli_version_runtime": "1.1.26",
+  "cli_runtime_commit": "69f3a33c3325d8fdde3a1ecb0b8e7cc5ebc7e8a3",
+  "cli_binary_path": "/private/tmp/higgsfield-cli-review-20261015/hf",
+  "account_status": "no_workspace_selected",
+  "workspace_list_status": "authentication_required",
+  "account_credits_verified": false
+}

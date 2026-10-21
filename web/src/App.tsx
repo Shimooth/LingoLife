@@ -5,6 +5,15 @@ import {selectConversationOpening} from './conversationOpening'
 import {defaultAvatar} from './avatar'
 import {CharacterStudio} from './components/CharacterStudio'
 import {OnboardingFlow} from './components/OnboardingFlow'
+import {ArrivalCreator} from './components/ArrivalCreator'
+import {ArrivalReplayDialog} from './arrival/ArrivalWelcomeScene'
+import {NeighborhoodOpeningNotice} from './neighborhood/NeighborhoodOpeningNotice'
+import {ArrivalCare} from './components/ArrivalCare'
+import {useArrival} from './arrival/useArrival'
+import {useNeighborhood} from './neighborhood/useNeighborhood'
+import {NeighborhoodPanel} from './components/NeighborhoodPanel'
+import './neighborhood/neighborhoodIntegration.css'
+import type {NeighborhoodCommand,NeighborhoodNews,NeighborhoodResident} from './neighborhood/types'
 import {CityPracticeGuide} from './components/CityPracticeGuide'
 import {useCityPractice} from './life/useCityPractice'
 import {BrandedStartupShell} from './components/BrandedStartupShell'
@@ -77,6 +86,7 @@ function TopBarToggle({collapsed,language,controls,attention=false,onToggle}:{co
 
 export default function App({user,initialQuota,onLogout}:{user:User;initialQuota:Quota;onLogout:()=>void}){
  const {language,t}=useLanguage(),zh=language==='zh'
+ const arrival=useArrival(language,user.id)
  const experience=useExperienceSettings()
  const reduce=useReducedMotion(),[stats,setStats]=useState<Stats|null>(null),[mood,setMood]=useState<Mood>('sad'),[animationCue,setAnimationCue]=useState<AnimationCue>('sad'),[messages,setMessages]=useState<Message[]>([]),[feedback,setFeedback]=useState<Feedback|null>(null),[text,setText]=useState(''),[busy,setBusy]=useState(false),[ready,setReady]=useState(false),[error,setError]=useState(''),[pending,setPending]=useState<Pending|null>(null)
  const [booting,setBooting]=useState(true),[onboarding,setOnboarding]=useState<OnboardingState|null>(null),[onboardingSaving,setOnboardingSaving]=useState(false),[onboardingError,setOnboardingError]=useState('')
@@ -84,6 +94,19 @@ export default function App({user,initialQuota,onLogout}:{user:User;initialQuota
  const [profile,setProfile]=useState<NpcProfile>(initialProfile),[studio,setStudio]=useState(false),[savingProfile,setSavingProfile]=useState(false),[profileError,setProfileError]=useState('')
  const [npcs,setNpcs]=useState<NpcEntry[]>([]),[npcId,setNpcId]=useState(localStorage.getItem('lingolife.npc-id')||'emma'),[creating,setCreating]=useState(false),[npcLimit,setNpcLimit]=useState(8)
  const [city,setCity]=useState<City|null>(null),[worldSeed,setWorldSeed]=useState<City|null>(null),[view,setView]=useState<'city'|'chat'>('city'),[settingsOpen,setSettingsOpen]=useState(false),[socialOpen,setSocialOpen]=useState(false),[storiesOpen,setStoriesOpen]=useState(false),[focusedLocationId,setFocusedLocationId]=useState<string>()
+ const [neighborhoodOpen,setNeighborhoodOpen]=useState(false),[neighborhoodTab,setNeighborhoodTab]=useState<'today'|'fountain'|'residents'|'wardrobe'|'wallet'|'news'>('today')
+ const [mapMeeting,setMapMeeting]=useState<{id:string;pair:[string,string]}|null>(null)
+ const [mapMeetingBusy,setMapMeetingBusy]=useState(false),[mapMeetingError,setMapMeetingError]=useState(''),[projectMapNotice,setProjectMapNotice]=useState('')
+ const [projectMapFocus,setProjectMapFocus]=useState<string>()
+ const meetingLock=useRef(false)
+ const returnToNeighborhood=useRef(false),profileSaveLock=useRef(false)
+ const [neighborhoodResidentId,setNeighborhoodResidentId]=useState<string>()
+ const [studioTab,setStudioTab]=useState<'story'|'voice'>('story')
+ const [welcomeReplay,setWelcomeReplay]=useState<NeighborhoodResident|null>(null)
+ const [opening,setOpening]=useState<{news:NeighborhoodNews;facility:'fountain'|'wardrobe';key:string;ready:boolean;complete:boolean}|null>(null)
+ const [openingError,setOpeningError]=useState('')
+ const presentedFacilities=useRef(new Set<string>())
+ const neighborhood=useNeighborhood(user.id,language,Boolean(onboarding?.completed&&city&&(!arrival.state?.enabled||arrival.state.stage==='complete')))
  const [worldLayout,setWorldLayout]=useState<WorldLayoutDocument>()
  const [followedCharacterId,setFollowedCharacterId]=useState<string>(),[socialEventId,setSocialEventId]=useState<string>(),[selectedLifeStory,setSelectedLifeStory]=useState<LifeStory>()
  const [dismissedMomentIds,setDismissedMomentIds]=useState<string[]>([]),[householdId,setHouseholdId]=useState<string>(),[householdDetail,setHouseholdDetail]=useState<Household|null>(null)
@@ -98,7 +121,59 @@ export default function App({user,initialQuota,onLogout}:{user:User;initialQuota
  const turnRef=useRef(0),speechKeyRef=useRef(0),streamTextRef=useRef(''),appliedWorldRef=useRef<City|null>(null),selectedLifeStoryMutationRef=useRef<LifeStory|undefined>(undefined)
  const worldSimulation=useWorldSimulation({enabled:Boolean(worldSeed),initialSnapshot:worldSeed})
  const refreshWorld=worldSimulation.refresh
- const practice=useCityPractice(Boolean(onboarding?.completed&&city),city?.world_version)
+ const dismissOpening=async()=>{
+  if(!opening)return true
+  if(neighborhood.busy)return false
+  setOpeningError('')
+  try{
+   if(!opening.news.read)await neighborhood.command({action:'read_news',news_id:opening.news.id})
+   setOpening(current=>current?.key===opening.key?null:current)
+   return true
+  }catch{setOpeningError(zh?'这条新闻暂时没有保存成功，请再试一次。':'This news could not be saved. Please try again.');return false}
+ }
+ const openNeighborhood=async(tab:typeof neighborhoodTab='today')=>{if(!await dismissOpening())return;setMapMeeting(null);setMapMeetingError('');setNeighborhoodTab(tab);setNeighborhoodOpen(true);void neighborhood.refresh().catch(()=>undefined)}
+ const showFacility=(facility:'fountain'|'wardrobe')=>{
+  const news=neighborhood.state?.news.find(item=>item.id===(facility==='fountain'?'fountain-open':'clothing-open'))
+  if(!news)return
+  presentedFacilities.current.add(news.id);setOpeningError('');setFollowedCharacterId(undefined);setFocusedLocationId(undefined);setView('city');setNeighborhoodOpen(false)
+  setOpening({news,facility,key:`${news.id}-${Date.now()}`,ready:false,complete:false})
+ }
+ useEffect(()=>{
+  if(!city||view!=='city'||opening||neighborhoodOpen||studio||welcomeReplay||settingsOpen||householdId||selectedLifeStory||socialEventId||storiesOpen||learningOpen)return
+  const news=neighborhood.state?.news.find(item=>!item.read&&!presentedFacilities.current.has(item.id)&&(item.id==='fountain-open'||item.id==='clothing-open'))
+  if(!news)return
+  presentedFacilities.current.add(news.id);setOpeningError('');setFollowedCharacterId(undefined);setFocusedLocationId(undefined)
+  setOpening({news,facility:news.id==='fountain-open'?'fountain':'wardrobe',key:news.id,ready:false,complete:false})
+ },[city,view,opening,neighborhoodOpen,studio,welcomeReplay,settingsOpen,householdId,selectedLifeStory,socialEventId,storiesOpen,learningOpen,neighborhood.state])
+ const neighborhoodCommand=async(intent:NeighborhoodCommand)=>{
+  const result=await neighborhood.command(intent)
+  if(!['read_news','wish','buy_clothing','buy_food','buy_gift','claim_support','fund_project'].includes(intent.action)){
+   // Settlement is authoritative even if the subsequent city refresh fails.
+   void refreshWorld('mutation').catch(()=>undefined)
+   void api.npcs().then(data=>setNpcs(data.npcs)).catch(()=>undefined)
+  }
+  return result
+ }
+ const meetOnMap=async(sourceId:string,targetId:string)=>{
+  if(sourceId===targetId||meetingLock.current||neighborhood.busy)return
+  meetingLock.current=true;setMapMeetingBusy(true);setMapMeetingError('');setProjectMapNotice('')
+  try{
+   if(!await dismissOpening())return
+   const result=await neighborhoodCommand({action:'meet',npc_id:sourceId,target_id:targetId})
+   const meeting=result.meetings.find(item=>item.id===result.last_receipt?.meeting_id)??[...result.meetings].reverse().find(item=>item.status==='awaiting_advice'&&[item.npc_id,item.target_id].includes(sourceId)&&[item.npc_id,item.target_id].includes(targetId))
+   if(!meeting)throw new Error('Meeting unavailable')
+   setMapMeeting({id:meeting.id,pair:[meeting.npc_id,meeting.target_id]});setNeighborhoodTab('residents');setNeighborhoodResidentId(sourceId)
+   setFollowedCharacterId(undefined);setFocusedLocationId(undefined);setNeighborhoodOpen(true)
+  }catch{setMapMeetingError(zh?'这次相遇暂时没有安排好。再拖一次即可安全重试。':'The meeting could not start. Drag them together again to retry safely.')}
+  finally{meetingLock.current=false;setMapMeetingBusy(false)}
+ }
+ const showCompletedProject=(projectId:string)=>{
+  setNeighborhoodOpen(false);setMapMeeting(null);setView('city');setFollowedCharacterId(undefined);setFocusedLocationId(undefined)
+  if(projectId==='flower_beds'||projectId==='plaza_lights')setProjectMapFocus(`${projectId}-${Date.now()}`)
+  if(projectId==='flower_beds'||projectId==='plaza_lights')setProjectMapNotice(projectId==='flower_beds'?(zh?'新的花坛已经摆在广场南侧，去看看吧。':'New flower beds are waiting on the south side of the square.'):(zh?'广场的暖灯已经装好，夜晚也有柔和的光。':'The square now has warm lights for the evening.'))
+ }
+ useEffect(()=>{if(!projectMapNotice)return;const timer=window.setTimeout(()=>setProjectMapNotice(''),9000);return()=>clearTimeout(timer)},[projectMapNotice])
+ const practice=useCityPractice(Boolean(onboarding?.completed&&city&&city.npcs.length>=2&&(!arrival.state?.enabled||arrival.state.stage==='complete')),city?.world_version)
  useEffect(()=>{const snapshot=worldSimulation.rawSnapshot;if(!snapshot||snapshot===worldSeed||snapshot===appliedWorldRef.current)return;appliedWorldRef.current=snapshot;setCity(snapshot)},[worldSeed,worldSimulation.rawSnapshot])
  const resetSpeech=()=>{turnRef.current+=1;streamTextRef.current='';setLiveSpeech(null)}
  const showOpening=(room:Room)=>{const opening=selectConversationOpening(room);if(!opening?.text)return;turnRef.current+=1;const key=++speechKeyRef.current;setLiveSpeech({key,speaker:'npc',text:opening.text,translation:opening.translation})}
@@ -120,6 +195,11 @@ export default function App({user,initialQuota,onLogout}:{user:User;initialQuota
  const load=async()=>{
   setBooting(true)
   try{
+   const arrivalData=await arrival.restore()
+   if(arrivalData?.enabled&&arrivalData.stage!=='complete'){
+    setNpcs([]);setCity(null);setWorldSeed(null);setReady(false)
+    return
+   }
    let onboardingData:OnboardingState|null=null
    try{onboardingData=await api.onboarding()}catch(cause){if(!(cause instanceof ApiError)||cause.status!==404)throw cause}
    if(onboardingData){
@@ -157,7 +237,21 @@ export default function App({user,initialQuota,onLogout}:{user:User;initialQuota
   const state=await api.acknowledgeOnboardingIntro(1)
   setOnboarding(state)
  }
- const saveProfile=async()=>{setSavingProfile(true);setProfileError('');const wasCreating=creating;try{const explicitProfile=normalizeNpcProfilePolicy({...profile,avatar:{...profile.avatar,strokes:[]}},creating?undefined:npcId);const saved=creating?await api.createNpc(explicitProfile):await api.saveNpc(npcId,explicitProfile);const data=await api.npcs();setNpcLimit(data.limit||8);setNpcs(data.npcs);await refreshWorld('mutation');setCreating(false);setStudio(false);await loadNpc(saved.id,data.npcs);if(wasCreating)setView('city')}catch(cause){setProfileError(cause instanceof ApiError&&cause.code==='NPC_LIMIT_REACHED'?t('character.limit'):t('character.saveError'))}finally{setSavingProfile(false)}}
+ const saveProfile=async()=>{
+  if(profileSaveLock.current)return
+  profileSaveLock.current=true
+  setSavingProfile(true);setProfileError('');const wasCreating=creating
+  try{
+   const explicitProfile=normalizeNpcProfilePolicy({...profile,avatar:{...profile.avatar,strokes:[]}},creating?undefined:npcId)
+   const saved=creating?await api.createNpc(explicitProfile):await api.saveNpc(npcId,explicitProfile)
+   const data=await api.npcs();setNpcLimit(data.limit||8);setNpcs(data.npcs);await refreshWorld('mutation')
+   setCreating(false);setStudio(false);await loadNpc(saved.id,data.npcs)
+   if(wasCreating)setView('city')
+   if(returnToNeighborhood.current){returnToNeighborhood.current=false;openNeighborhood('residents')}
+   else if(neighborhood.state)void neighborhood.refresh().catch(()=>undefined)
+  }catch(cause){setProfileError(cause instanceof ApiError&&cause.code==='NPC_LIMIT_REACHED'?t('character.limit'):t('character.saveError'))}
+  finally{profileSaveLock.current=false;setSavingProfile(false)}
+ }
  const beginCreate=()=>{setCreating(true);setProfile({...initialProfile,name:t('character.newName'),avatar:{...defaultAvatar,strokes:[]}});setStudio(true)}
  const openAgent=async()=>{setAgentOpen(true);try{setAgent(await api.npcAgent(npcId))}catch{setError(zh?'无法读取角色生活档案。':'Could not load the character profile.')}}
  const deleteMemory=async(memory:AgentMemory)=>{try{await api.deleteNpcMemory(npcId,memory.id);setAgent(value=>value?{...value,memories:(value.memories||[]).filter(item=>item.id!==memory.id)}:value)}catch{setError(zh?'无法删除这条记忆。':'Could not delete this memory.')}}
@@ -251,7 +345,9 @@ export default function App({user,initialQuota,onLogout}:{user:User;initialQuota
  const isToday=(value?:string)=>{if(!value)return true;const parsed=new Date(value.includes('T')?value:`${value.replace(' ','T')}Z`),now=new Date();return parsed.getFullYear()===now.getFullYear()&&parsed.getMonth()===now.getMonth()&&parsed.getDate()===now.getDate()}
  const archivedMessages=messages.slice(0,Math.min(archivedCount,messages.length)),olderCount=archivedMessages.filter(message=>!isToday(message.created_at)).length,visibleMessages=showOlder?archivedMessages:archivedMessages.filter(message=>isToday(message.created_at))
  const overlays=<AnimatePresence>
-  {studio&&<motion.div key="studio" className="experience-overlay-layer" initial={reduce?false:{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}><CharacterStudio language={language} profile={profile} relationshipCandidates={npcs.map(entry=>({id:entry.id,name:entry.profile.name}))} editingNpcId={creating?undefined:npcId} onChange={setProfile} onSave={()=>void saveProfile()} onClose={()=>{setStudio(false);if(creating){setCreating(false);const current=npcs.find(x=>x.id===npcId);if(current)setProfile(current.profile)}}} saving={savingProfile} error={profileError}/></motion.div>}
+  {welcomeReplay&&<ArrivalReplayDialog key={`arrival-replay-${welcomeReplay.id}`} profile={welcomeReplay.profile} managerName={arrival.state?.manager?.name} language={language} onClose={()=>{setWelcomeReplay(null);setNeighborhoodTab('residents');setNeighborhoodOpen(true)}}/>}
+  {neighborhoodOpen&&<motion.div key="neighborhood" className="experience-overlay-layer" initial={reduce?false:{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}>{neighborhood.state?<NeighborhoodPanel key={mapMeeting?.id??'community'} state={neighborhood.state} language={language} busy={neighborhood.busy} error={neighborhood.error} initialTab={neighborhoodTab} initialResidentId={neighborhoodResidentId} initialMeetingId={mapMeeting?.id} initialPair={mapMeeting?.pair} onProjectCompleted={showCompletedProject} onCommand={neighborhoodCommand} onCreateResident={()=>{setNeighborhoodOpen(false);returnToNeighborhood.current=true;setStudioTab('story');beginCreate()}} onEditVoice={id=>{const resident=neighborhood.state?.residents.find(item=>item.id===id);if(!resident)return;setNeighborhoodResidentId(id);setProfile(resident.profile);setNpcId(id);setCreating(false);setStudioTab('voice');setNeighborhoodOpen(false);returnToNeighborhood.current=true;setStudio(true)}} onReplayArrival={resident=>{setNeighborhoodResidentId(resident.id);setNeighborhoodOpen(false);setWelcomeReplay(resident)}} onClose={()=>{setNeighborhoodOpen(false);setMapMeeting(null);void refreshWorld('mutation').catch(()=>undefined)}}/>:<section className="neighborhood-loading" role="dialog" aria-modal="true" aria-label={zh?'生活广场':'Neighborhood'}><button onClick={()=>setNeighborhoodOpen(false)}>{zh?'返回城市':'Back to city'}</button><p role="status">{neighborhood.error||(zh?'正在准备生活广场…':'Preparing your neighborhood…')}</p>{neighborhood.error&&<button disabled={neighborhood.loading} onClick={()=>void neighborhood.refresh().catch(()=>undefined)}>{zh?'重试':'Retry'}</button>}</section>}</motion.div>}
+  {studio&&<motion.div key="studio" className="experience-overlay-layer" initial={reduce?false:{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}><CharacterStudio initialTab={studioTab} language={language} profile={profile} relationshipCandidates={npcs.map(entry=>({id:entry.id,name:entry.profile.name}))} editingNpcId={creating?undefined:npcId} onChange={setProfile} onSave={()=>void saveProfile()} onClose={()=>{if(profileSaveLock.current)return;setStudio(false);setCreating(false);setProfileError('');const current=npcs.find(x=>x.id===npcId);if(current)setProfile(current.profile);if(returnToNeighborhood.current){returnToNeighborhood.current=false;void openNeighborhood('residents')}}} saving={savingProfile} error={profileError}/></motion.div>}
   {learningOpen&&<motion.div key="learning" className="experience-overlay-layer" initial={reduce?false:{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}><LearningPanel progress={learning} onClose={()=>setLearningOpen(false)}/></motion.div>}
   {settingsOpen&&<motion.div key="settings" className="experience-overlay-layer" initial={reduce?false:{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}><SettingsPanel onPractice={()=>void startPractice()} practiceBusy={practice.busy} practiceFailed={practice.failed} hasPassword={hasPassword} onPasswordSet={()=>setHasPassword(true)} onClose={()=>setSettingsOpen(false)}/></motion.div>}
   {storiesOpen&&<StoryThreadsPanel key="life-stories" moments={city?.observable_moments||[]} threads={city?.story_threads||[]} incidents={city?.open_incidents||[]} recentAftermath={city?.recent_aftermath||[]} relationships={city?.relationships||[]} attentionBudget={city?.attention_budget} residentNames={residentNames} legacyCount={city?.social_interactions?.length||0} language={language} onClose={()=>setStoriesOpen(false)} onSelect={focusLifeStory} onOpenLegacy={()=>{setStoriesOpen(false);setSocialOpen(true)}}/>}
@@ -261,20 +357,22 @@ export default function App({user,initialQuota,onLogout}:{user:User;initialQuota
   {householdId&&<HouseholdInspector key={householdId} residentFocus={householdFocus} household={selectedHousehold} gameDate={city?.date} language={language} residentNames={residentNames} residentVisuals={householdResidentVisuals} layoutRooms={worldLayout?.interior.rooms} onClose={()=>{setHouseholdId(undefined);setHouseholdDetail(null)}} onDinnerCommand={async action=>{await dinnerApi.command(householdId,action);await refreshWorld('mutation')}} onMemberSelect={id=>{setHouseholdId(undefined);setFocusedLocationId(undefined);const resident=city?.npcs.find(item=>item.id===id);if(resident&&residentPresence(resident).mode==='indoor'){void openChat(id);return}setFollowedCharacterId(id);setView('city')}}/>}
   {agentOpen&&<AgentPanel key="agent" name={profile.name} agent={agent} onClose={()=>setAgentOpen(false)} onDeleteMemory={memory=>void deleteMemory(memory)}/>}
  </AnimatePresence>
- const cityView=<motion.main key="city" className="city-shell experience-view" initial={reduce?false:{opacity:0,scale:.992}} animate={{opacity:1,scale:1}} exit={reduce?{opacity:0}:{opacity:0,scale:1.012}} transition={{duration:reduce?0:.3,ease:[.22,.8,.25,1]}}>
+ const cityView=<motion.main key="city" inert={studio||neighborhoodOpen||Boolean(welcomeReplay)} className="city-shell experience-view" initial={reduce?false:{opacity:0,scale:.992}} animate={{opacity:1,scale:1}} exit={reduce?{opacity:0}:{opacity:0,scale:1.012}} transition={{duration:reduce?0:.3,ease:[.22,.8,.25,1]}}>
   <section className={`city-screen ${chromeCollapsed?'is-chrome-collapsed':''}`}>
    <header className="city-header">
     <div className="city-header__content" id="city-topbar-content" aria-hidden={chromeCollapsed} inert={chromeCollapsed}>
      <div className="city-header__brand"><p className="eyebrow">LingoLife</p><h1>{zh?'LingoLife 天空之城':'LingoLife Sky City'}</h1><span>{t('map.subtitle')}</span></div>
-     <div className="city-actions"><button disabled={npcs.length>=npcLimit} onClick={beginCreate}>＋ {t('nav.newCharacter')}</button><button onClick={openCityStories}>✦ {zh?'城市动态':'City stories'}{cityNeedsAttention&&<i/>}</button><button onClick={()=>setLearningOpen(true)}>◒ {t('nav.progress')}</button><button onClick={()=>setSettingsOpen(true)}>⚙ {t('nav.settings')}</button><span><b>{user.username}</b><small>{t('nav.quota',{count:quota.remaining})}</small></span><button onClick={async()=>{try{await api.logout()}finally{session.clear();onLogout()}}}>{t('nav.logout')}</button></div>
+     <div className="city-actions"><a className="city-original-atelier" href="/atelier">{zh?'原创创作室':'Original atelier'}</a>{neighborhood.state&&<button className="city-life-wallet" onClick={()=>openNeighborhood('wallet')} aria-label={zh?`生活币 ${neighborhood.state.coins}，查看收支和用途`:`${neighborhood.state.coins} life coins, view wallet`}>● {neighborhood.state.coins} <small>{zh?'生活币':'coins'}</small></button>}<button className="neighborhood-open-button" onClick={()=>openNeighborhood()}>✿ {zh?'生活广场':'Neighborhood'}{Boolean(neighborhood.state?.news.some(item=>!item.read))&&<i/>}</button>{neighborhood.state?.unlocks.fountain&&<button className="city-fountain-button" onClick={()=>showFacility('fountain')}>⛲ {zh?'地图喷泉':'Map fountain'}</button>}<button disabled={npcs.length>=npcLimit} onClick={()=>{returnToNeighborhood.current=false;setStudioTab('story');beginCreate()}}>＋ {t('nav.newCharacter')}</button><button onClick={openCityStories}>✦ {zh?'城市动态':'City stories'}{cityNeedsAttention&&<i/>}</button><button onClick={()=>setLearningOpen(true)}>◒ {t('nav.progress')}</button><button onClick={()=>setSettingsOpen(true)}>⚙ {t('nav.settings')}</button><span><b>{user.username}</b><small>{t('nav.quota',{count:quota.remaining})}</small></span><button onClick={async()=>{try{await api.logout()}finally{session.clear();onLogout()}}}>{t('nav.logout')}</button></div>
     </div>
     <div className="city-header__compact" aria-hidden={!chromeCollapsed} inert={!chromeCollapsed}><strong>LingoLife</strong><span>{zh?'天空之城':'Sky City'}</span></div>
     <TopBarToggle collapsed={chromeCollapsed} language={language} controls="city-topbar-content" attention={cityNeedsAttention} onToggle={()=>setChromeCollapsed(value=>!value)}/>
    </header>
-   {city?<><WorldObserver3D characters={cityCharacters} landmarks={cityLandmarks} followedCharacterId={followedCharacterId} activeLandmarkId={focusedLocationId} serverTime={city.server_time} language={language} timeSlot={city.time_slot} quality={experience.quality} layout={worldLayout} paused={Boolean(selectedLifeStory||selectedSocialEvent||householdId)} showPlaceCard={false} onCharacterFollow={followResident} onCharacterInteract={id=>void openChat(id)} onEventOpen={id=>setSocialEventId(id)} onTroubleOpen={openTrouble} onHouseholdOpen={(id,npcId)=>void openHousehold(id,npcId)} onJourneyElapsed={()=>void refreshWorld('transition')} onLandmarkClick={landmark=>{setFollowedCharacterId(undefined);setFocusedLocationId(landmark.id)}}/><LocationInspector landmark={focusedLandmark} name={focusedAsset?locationCopy(focusedAsset,language).name:undefined} description={focusedAsset?locationCopy(focusedAsset,language).description:undefined} image={focusedAsset?.image} language={language} residents={focusedResidents} onClose={()=>setFocusedLocationId(undefined)} onResidentClick={id=>void openChat(id)}/></>:<p className="city-loading">{t('common.loading')}</p>}
+   {city?<><WorldObserver3D characters={cityCharacters} landmarks={cityLandmarks} followedCharacterId={followedCharacterId} activeLandmarkId={focusedLocationId} serverTime={city.server_time} language={language} timeSlot={city.time_slot} quality={experience.quality} layout={worldLayout} neighborhood={neighborhood.state?{fountain:neighborhood.state.unlocks.fountain,clothingStore:neighborhood.state.unlocks.clothing_store,improvements:{flowerBeds:Boolean(neighborhood.state.projects?.some(project=>project.id==='flower_beds'&&project.status==='completed')),plazaLights:Boolean(neighborhood.state.projects?.some(project=>project.id==='plaza_lights'&&project.status==='completed'))},focus:projectMapFocus?{facility:'fountain',key:projectMapFocus}:undefined,pendingProjects:{fountain:Boolean(neighborhood.state.projects?.some(project=>project.id==='fountain'&&project.status==='proposed')),clothingStore:Boolean(neighborhood.state.projects?.some(project=>project.id==='clothing_store'&&project.status==='proposed'))},onOpen:openNeighborhood,reveal:opening?{facility:opening.facility,key:opening.key}:undefined,onRevealReady:facility=>setOpening(current=>current?.facility===facility?{...current,ready:true}:current),onRevealComplete:facility=>setOpening(current=>current?.facility===facility?{...current,ready:true,complete:true}:current)}:undefined} paused={Boolean(selectedLifeStory||selectedSocialEvent||householdId||neighborhoodOpen||welcomeReplay)} onResidentsMeet={meetOnMap} residentMeetingBusy={mapMeetingBusy||neighborhood.busy} showPlaceCard={false} onCharacterFollow={followResident} onCharacterInteract={id=>void openChat(id)} onEventOpen={id=>setSocialEventId(id)} onTroubleOpen={openTrouble} onHouseholdOpen={(id,npcId)=>void openHousehold(id,npcId)} onJourneyElapsed={()=>void refreshWorld('transition')} onLandmarkClick={landmark=>{setFollowedCharacterId(undefined);setFocusedLocationId(landmark.id)}}/><LocationInspector landmark={focusedLandmark} name={focusedAsset?locationCopy(focusedAsset,language).name:undefined} description={focusedAsset?locationCopy(focusedAsset,language).description:undefined} image={focusedAsset?.image} language={language} residents={focusedResidents} onClose={()=>setFocusedLocationId(undefined)} onResidentClick={id=>void openChat(id)}/></>:<p className="city-loading">{t('common.loading')}</p>}
+   {(mapMeetingError||projectMapNotice)&&<aside className="city-community-feedback" role={mapMeetingError?'alert':'status'}><span>{mapMeetingError||projectMapNotice}</span><button type="button" onClick={()=>{setMapMeetingError('');setProjectMapNotice('')}} aria-label={zh?'关闭提示':'Dismiss'}>×</button></aside>}
+   {opening&&<NeighborhoodOpeningNotice news={opening.news} language={language} ready={opening.ready} complete={opening.complete} busy={neighborhood.busy} error={openingError} onDismiss={dismissOpening} onEnter={()=>openNeighborhood(opening.facility)}/>}
   </section>
  </motion.main>
- const chatView=<motion.main key="chat" className="shell experience-view" initial={reduce?false:{opacity:0,scale:.985,x:18}} animate={{opacity:1,scale:1,x:0}} exit={reduce?{opacity:0}:{opacity:0,scale:.99,x:24}} transition={{duration:reduce?0:.34,ease:[.22,.8,.25,1]}}><section className={`room dialogue-room ${chromeCollapsed?'is-chrome-collapsed':''}`}>
+ const chatView=<motion.main key="chat" inert={studio} className="shell experience-view" initial={reduce?false:{opacity:0,scale:.985,x:18}} animate={{opacity:1,scale:1,x:0}} exit={reduce?{opacity:0}:{opacity:0,scale:.99,x:24}} transition={{duration:reduce?0:.34,ease:[.22,.8,.25,1]}}><section className={`room dialogue-room ${chromeCollapsed?'is-chrome-collapsed':''}`}>
   <header className="dialogue-header">
    <div className="dialogue-header__content" id="chat-topbar-content" aria-hidden={chromeCollapsed} inert={chromeCollapsed}><div><button className="back-city" onClick={()=>void returnToCity()}>← {t('map.back')}</button><p className="room-location">⌖ {currentPlace}</p></div><div className="account"><select className="npc-switch" value={npcId} disabled={busy} onChange={e=>void (async()=>{const room=await loadNpc(e.target.value,undefined,true);if(room)showOpening(room)})()} aria-label={t('nav.switchCharacter')}>{npcs.map(x=><option key={x.id} value={x.id}>{x.profile.name}</option>)}</select><button className="learn-button" onClick={()=>setLearningOpen(true)}>◒ {t('nav.progress')}</button><button onClick={()=>setSettingsOpen(true)}>⚙ {t('nav.settings')}</button><span><b>{user.username}</b><small>{t('nav.quota',{count:quota.remaining})}</small></span></div></div>
    <div className="dialogue-header__compact" aria-hidden={!chromeCollapsed} inert={!chromeCollapsed}><button className="back-city" onClick={()=>void returnToCity()}>← {t('map.back')}</button><strong>{profile.name}</strong><span>⌖ {currentPlace}</span></div>
@@ -282,16 +380,18 @@ export default function App({user,initialQuota,onLogout}:{user:User;initialQuota
   </header>
   <StatBar stats={stats}/>
   <section className="dialogue-main">
-   <ConversationScene npcName={profile.name} playerName={zh?'我':'You'} avatar={profile.avatar} mood={mood} place={currentPlace} locationDescription={locationCopy(currentLocationAsset,language).description} locationId={chatLocation.id} locationKind={chatLocation.kind} locationBackground={currentLocationAsset.image} locationBackgroundPosition={currentLocationAsset.imagePosition} locationAccent={currentLocationAsset.accent} messages={visibleMessages} liveSpeech={liveSpeech} historyOpen={historyOpen} sceneryOpen={sceneryOpen} olderCount={olderCount} showOlder={showOlder} ready={ready} story={(activeEvent||eventUpdate?.completed)?<EventCard language={language} event={activeEvent} update={eventUpdate}/>:null} visualStage={<ConversationStage3D npcAvatar={profile.avatar} npcName={profile.name} place={currentPlace} locationKind={chatLocation.kind} npcAnimation={animationCue} performance={conversationPerformance} performanceKey={conversationPerformanceKey} liveSpeech={liveSpeech} messages={visibleMessages} language={language} sceneryMode={sceneryOpen} reducedMotion={Boolean(reduce)} interiorPlacements={chatLocation.isHome?worldLayout?.interior.rooms.find(room=>room.kind==='living_room')?.placements:undefined}/>} editLabel={t('nav.customize')} agentLabel={t('nav.agent')} language={language} onHistoryOpen={()=>{setSceneryOpen(false);setHistoryOpen(true)}} onHistoryClose={()=>setHistoryOpen(false)} onSceneryOpen={()=>{setHistoryOpen(false);setSceneryOpen(true)}} onSceneryClose={()=>setSceneryOpen(false)} onToggleOlder={()=>setShowOlder(value=>!value)} onEdit={()=>{setCreating(false);setStudio(true)}} onAgent={()=>void openAgent()}/>
+   <ConversationScene npcName={profile.name} playerName={zh?'我':'You'} avatar={profile.avatar} mood={mood} place={currentPlace} locationDescription={locationCopy(currentLocationAsset,language).description} locationId={chatLocation.id} locationKind={chatLocation.kind} locationBackground={currentLocationAsset.image} locationBackgroundPosition={currentLocationAsset.imagePosition} locationAccent={currentLocationAsset.accent} messages={visibleMessages} liveSpeech={liveSpeech} historyOpen={historyOpen} sceneryOpen={sceneryOpen} olderCount={olderCount} showOlder={showOlder} ready={ready} story={(activeEvent||eventUpdate?.completed)?<EventCard language={language} event={activeEvent} update={eventUpdate}/>:null} visualStage={<ConversationStage3D npcAvatar={profile.avatar} npcName={profile.name} place={currentPlace} locationKind={chatLocation.kind} npcAnimation={animationCue} performance={conversationPerformance} performanceKey={conversationPerformanceKey} liveSpeech={liveSpeech} messages={visibleMessages} language={language} sceneryMode={sceneryOpen} reducedMotion={Boolean(reduce)} interiorPlacements={chatLocation.isHome?worldLayout?.interior.rooms.find(room=>room.kind==='living_room')?.placements:undefined}/>} editLabel={t('nav.customize')} agentLabel={t('nav.agent')} language={language} onHistoryOpen={()=>{setSceneryOpen(false);setHistoryOpen(true)}} onHistoryClose={()=>setHistoryOpen(false)} onSceneryOpen={()=>{setHistoryOpen(false);setSceneryOpen(true)}} onSceneryClose={()=>setSceneryOpen(false)} onToggleOlder={()=>setShowOlder(value=>!value)} onEdit={()=>{setCreating(false);setStudioTab('story');setStudio(true)}} onAgent={()=>void openAgent()}/>
    <div className={`dialogue-controls ${historyOpen?'is-history-open':''}`} aria-hidden={historyOpen} inert={historyOpen}>
     <AnimatePresence>{feedback&&<motion.aside className="feedback" initial={reduce?false:{opacity:0,y:8,height:0}} animate={{opacity:1,y:0,height:'auto'}} exit={{opacity:0,height:0}}><div><strong>✦ {zh?'英语提示':'English note'}</strong><button onClick={()=>setFeedback(null)} aria-label={zh?'关闭英语反馈':'Close English feedback'}>×</button></div><p>{feedback.tip}</p>{feedback.corrected_text&&<small>{zh?'建议表达':'Try'}: “{feedback.corrected_text}”</small>}</motion.aside>}</AnimatePresence>
     <AnimatePresence>{error&&<motion.div className="error" role="alert" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}><span>{error}</span><button onClick={()=>pending?retryPending():void load()}>{t('common.retry')}</button></motion.div>}</AnimatePresence>
-    <VoiceControls language={language} npcText={liveSpeech?.speaker==='npc'&&!liveSpeech.streaming?liveSpeech.text:undefined} autoRead={experience.autoReadNpc} disabled={!ready||busy||historyOpen||sceneryOpen} onTranscript={spoken=>setText(current=>`${current}${current.trim()?' ':''}${spoken}`)}/>
+    <VoiceControls language={language} residentVoice={profile.voice} npcText={liveSpeech?.speaker==='npc'&&!liveSpeech.streaming?liveSpeech.text:undefined} autoRead={experience.autoReadNpc} disabled={!ready||busy||historyOpen||sceneryOpen} onTranscript={spoken=>setText(current=>`${current}${current.trim()?' ':''}${spoken}`)}/>
     <form className="dialogue-form" onSubmit={submit}><label className="sr-only" htmlFor="message">{t('chat.inputLabel')}</label><textarea id="message" maxLength={500} rows={1} value={text} onChange={e=>setText(e.target.value)} onKeyDown={keyDown} placeholder={sceneryOpen?(zh?'点击背景返回对话…':'Click the scenery to return…'):(zh?`用英语和 ${profile.name} 聊聊…`:`Say something to ${profile.name}…`)} disabled={!ready||busy||!!pending||historyOpen||sceneryOpen}/><motion.button type="submit" disabled={!ready||busy||!!pending||!text.trim()||historyOpen||sceneryOpen} whileHover={reduce?undefined:{y:-2}} whileTap={reduce?undefined:{scale:.94}}>{busy?<span className="spinner"/>:(zh?'发送':'Send')}</motion.button><small>{zh?'Enter 发送 · Shift+Enter 换行':'Enter to send · Shift+Enter for a new line'}</small></form>
    </div>
   </section>
  </section></motion.main>
  if(booting)return <BrandedStartupShell message={zh?'正在准备你的城市…':'Preparing your city…'}/>
+ if(arrival.state?.enabled&&arrival.state.stage==='create')return <VisualQualityContext value={experience.quality}><ArrivalCreator key={`arrival-${user.id}`} state={arrival.state} language={language} saving={arrival.busy} error={arrival.error} onSaveDraft={arrival.saveDraft} onCreate={arrival.create}/></VisualQualityContext>
+ if(arrival.state?.enabled&&arrival.state.stage!=='complete'&&arrival.state.draft)return <VisualQualityContext value={experience.quality}><ArrivalCare state={arrival.state} profile={arrival.state.draft.profile} language={language} busy={arrival.busy} error={arrival.error} onCommand={arrival.command} onComplete={()=>{setNeighborhoodOpen(false);setView('city');void load()}}/></VisualQualityContext>
  if(onboarding&&!onboarding.completed)return <OnboardingFlow language={language} minimum={onboarding.min_residents} maximum={Math.min(onboarding.max_residents,onboarding.remaining_slots||onboarding.max_residents)} introAcknowledged={Boolean(onboarding.intro_acknowledged_at&&onboarding.intro_version===1)} saving={onboardingSaving} error={onboardingError} retainedResidents={onboarding.resident_count} onAcknowledgeIntro={acknowledgeOnboardingIntro} onComplete={setup=>void completeOnboarding(setup)}/>
- return <VisualQualityContext value={experience.quality}><AnimatePresence mode="wait" initial={false}>{view==='city'?cityView:chatView}</AnimatePresence>{view==='city'&&currentMoment&&!selectedLifeStory&&practice.data?.progress.status!=='active'&&<div className={`life-moment-layer ${chromeCollapsed?'is-collapsed':''} ${followedCharacterId?'has-follow-card':''}`}><MomentToast moment={currentMoment} language={language} onOpen={()=>focusLifeStory(currentMoment)} onDismiss={()=>setDismissedMomentIds(ids=>[...ids.filter(id=>id!==currentMoment.id),currentMoment.id].slice(-30))}/></div>}{view==='city'&&city&&!selectedLifeStory&&!selectedSocialEvent&&!householdId&&!storiesOpen&&!socialOpen&&!settingsOpen&&!studio&&!learningOpen&&<CityPracticeGuide data={practice.data} residents={city.npcs} language={language} busy={practice.busy} failed={practice.failed} onHome={()=>{const home=city.households?.[0];if(home)void openHousehold(home.id)}} onFollow={followResident} onOpen={focusLifeStory} onPause={()=>void practice.command({event:'pause'})} onResume={()=>void practice.command({event:'start'})} onRefresh={()=>void practice.refresh()}/>} {overlays}</VisualQualityContext>
+ return <VisualQualityContext value={experience.quality}><AnimatePresence mode="wait" initial={false}>{view==='city'?cityView:chatView}</AnimatePresence>{view==='city'&&currentMoment&&!neighborhoodOpen&&!opening&&!welcomeReplay&&!selectedLifeStory&&practice.data?.progress.status!=='active'&&<div className={`life-moment-layer ${chromeCollapsed?'is-collapsed':''} ${followedCharacterId?'has-follow-card':''}`}><MomentToast moment={currentMoment} language={language} onOpen={()=>focusLifeStory(currentMoment)} onDismiss={()=>setDismissedMomentIds(ids=>[...ids.filter(id=>id!==currentMoment.id),currentMoment.id].slice(-30))}/></div>}{view==='city'&&city&&!neighborhoodOpen&&!opening&&!welcomeReplay&&!selectedLifeStory&&!selectedSocialEvent&&!householdId&&!storiesOpen&&!socialOpen&&!settingsOpen&&!studio&&!learningOpen&&<CityPracticeGuide data={practice.data} residents={city.npcs} language={language} busy={practice.busy} failed={practice.failed} onHome={()=>{const home=city.households?.[0];if(home)void openHousehold(home.id)}} onFollow={followResident} onOpen={focusLifeStory} onPause={()=>void practice.command({event:'pause'})} onResume={()=>void practice.command({event:'start'})} onRefresh={()=>void practice.refresh()}/>} {overlays}</VisualQualityContext>
 }

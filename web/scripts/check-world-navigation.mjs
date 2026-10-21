@@ -10,7 +10,7 @@ import {BUILDING_LOTS,ROAD_TILE_STEP} from '../src/three/world/worldData.ts'
 const navigationPath=fileURLToPath(new URL('../src/three/world/worldNavigation.ts',import.meta.url))
 const worldDataUrl=new URL('../src/three/world/worldData.ts',import.meta.url).href
 const navigationSource=await readFile(navigationPath,'utf8')
-const rewrittenSource=navigationSource.replace("from './worldData'",`from '${worldDataUrl}'`)
+const rewrittenSource=navigationSource.replace("from './worldData'",`from '${worldDataUrl}'`).replace("from './townCenterLayout.ts'",`from '${new URL('../src/three/world/townCenterLayout.ts',import.meta.url).href}'`)
 if(rewrittenSource===navigationSource)throw new Error('World navigation guard failed: could not resolve the navigation data import')
 const compiledSource=typescript.transpileModule(rewrittenSource,{
  compilerOptions:{module:typescript.ModuleKind.ESNext,target:typescript.ScriptTarget.ES2022},

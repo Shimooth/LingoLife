@@ -3,8 +3,12 @@ import {readFile} from 'node:fs/promises'
 import * as THREE from 'three'
 import {CAFE_CITY_SCALE,CAFE_DRINK_RIG,resolveStreetscapeLayout,streetscapeFootprintsOverlap,streetscapeObstacleFromAuthored,validateStreetscapeFootprint} from '../src/three/world/streetscapeLayout.ts'
 import {trafficRoadsFromLayout} from '../src/three/world/ambientTraffic.ts'
+import {isTownCenterLayout,TOWN_CENTER,TOWN_CENTER_RESERVE} from '../src/three/world/townCenterLayout.ts'
 
-const document=JSON.parse(await readFile(new URL('./fixtures/city-published-layout.json',import.meta.url),'utf8')),city=document.layout.city
+// Keep the previous published geometry intact: a new town theme must not
+// weaken guards for saved cities that have not opted into the new layout.
+const document=JSON.parse(await readFile(new URL('./fixtures/city-legacy-layout.json',import.meta.url),'utf8')),city=document.layout.city
+assert.equal(isTownCenterLayout(document.layout),false)
 const original=JSON.stringify(document)
 // Validate the entire glTF scene, not its first mesh. The imported park trees
 // have a much larger canopy than the small KayKit bushes despite similar names.
@@ -75,3 +79,34 @@ for(const [index,seat] of CAFE_DRINK_RIG.seats.entries()){
 assert.ok(2.83*CAFE_CITY_SCALE<terrace.half[1])
 assert.ok(1.15*CAFE_CITY_SCALE<terrace.half[0])
 console.log(JSON.stringify({check:'streetscape',passed:true,roads:constraints.roads.length,buildings:constraints.buildings.length,paving:layout.paving.length,gardens:layout.planters.length,cafe:layout.cafeTerrace.position}))
+
+// The town theme reserves the whole central square for its authored walks,
+// seats and fountain. Generic garden/terrace counts must not fill that space.
+const townDocument=JSON.parse(await readFile(new URL('./fixtures/city-published-layout.json',import.meta.url),'utf8'))
+assert.equal(isTownCenterLayout(townDocument.layout),true,'the current fixture exercises the real town theme')
+const townCity=townDocument.layout.city,townBefore=JSON.stringify(townDocument)
+const townConstraints={
+ townCenter:true,
+ roads:trafficRoadsFromLayout(townCity.roads),
+ buildings:townCity.buildings.filter(item=>TOWN_CENTER.building_roles[item.id]!=='plaza').map(item=>({id:item.id,position:[item.position.x,item.position.z],rotation:item.rotation.y,scale:Math.max(item.scale.x,item.scale.y,item.scale.z)})),
+ landmarks:townCity.buildings.filter(item=>item.location_id).map(item=>({locationId:item.location_id,kind:item.location_id.includes('cafe')?'cafe':'other',position:[item.position.x,item.position.z],rotation:item.rotation.y,scale:item.scale.x})),
+ obstacles:[...townCity.props,...townCity.decorations].map(streetscapeObstacleFromAuthored),
+}
+const town=resolveStreetscapeLayout(townConstraints)
+assert.ok(town.paving.filter(item=>item.id.startsWith('parcel-apron-')).length>=40,'background city retains its parcel paving')
+assert.ok(town.paving.some(item=>item.id.startsWith('walk-link-')),'safe background parcel connections remain')
+assert.deepEqual(town.cafeTerraces.map(item=>item.locationId),['garden_cafe'],'the background garden cafe keeps its furniture; generic cafe props do not invade the planned square')
+const townAccepted=town.cafeTerraces.map(item=>item.footprint)
+for(const terrace of town.cafeTerraces)assert.equal(validateStreetscapeFootprint(terrace.footprint,townConstraints),null)
+for(const planter of town.planters){
+ assert.equal(validateStreetscapeFootprint(planter,{...townConstraints,obstacles:[...townConstraints.obstacles,...townAccepted]}),null)
+ assert.equal(streetscapeFootprintsOverlap(planter,TOWN_CENTER_RESERVE,.16),false,'generated gardens leave the square and its approach lanes clear')
+ townAccepted.push(planter)
+}
+for(const paving of town.paving){
+ for(const road of townConstraints.roads)assert.equal(streetscapeFootprintsOverlap(paving,{position:road.position,half:[1.26,1.26],rotation:road.rotation}),false,`${paving.id}: town paving must not cover a road`)
+ if(paving.id.startsWith('walk-link-'))assert.equal(streetscapeFootprintsOverlap(paving,TOWN_CENTER_RESERVE,.05),false,'generic connectors cannot overwrite the square design')
+}
+assert.deepEqual(resolveStreetscapeLayout(townConstraints),town,'town streetscape is deterministic')
+assert.equal(JSON.stringify(townDocument),townBefore,'rendering the town cannot mutate its published geometry')
+console.log(JSON.stringify({check:'town-streetscape',passed:true,paving:town.paving.length,gardens:town.planters.length,cafes:town.cafeTerraces.map(item=>item.locationId)}))

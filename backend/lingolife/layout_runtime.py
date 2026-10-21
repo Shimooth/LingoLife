@@ -201,11 +201,15 @@ def compile_city_runtime(
         raise ValueError(f"city runtime is missing mapped locations: {', '.join(sorted(missing))}")
     if CITY_HOME_LOCATION_ID not in locations:
         raise ValueError("city runtime is missing the shared-home building")
+    from .town_layout import compile_town_pedestrians
+
+    pedestrian_runtime = compile_town_pedestrians(city, locations)
     return {
         "schema_version": CITY_RUNTIME_SCHEMA_VERSION,
         "road_step": step,
         "road_nodes": road_nodes,
         "locations": dict(sorted(locations.items())),
+        **({"town_pedestrians": pedestrian_runtime} if pedestrian_runtime else {}),
     }
 
 
@@ -243,6 +247,16 @@ def city_route(
             "road_node_ids": [],
             "points": [list(origin["position"])],
         }
+    town = runtime.get("town_pedestrians") or {}
+    destinations = town.get("destinations") or {}
+    if origin_location_id in destinations and target_location_id in destinations:
+        from .town_layout import pedestrian_path
+
+        walk = pedestrian_path(town["nodes"], destinations[origin_location_id], destinations[target_location_id])
+        if walk is not None:
+            points, distance = walk
+            return {"origin_location_id": origin_location_id, "target_location_id": target_location_id,
+                    "distance": round(distance, 4), "road_node_ids": [], "points": points}
     nodes = dict(runtime.get("road_nodes") or {})
     start, finish = str(origin.get("road_node_id") or ""), str(target.get("road_node_id") or "")
     if start not in nodes or finish not in nodes:
@@ -277,9 +291,9 @@ def city_route(
     while path[-1] != start:
         path.append(previous[path[-1]])
     path.reverse()
-    points = [list(origin["position"])]
+    points = list(origin.get("pedestrian_connector") or [list(origin["position"])])
     points.extend([list(nodes[node_id]["position"]) for node_id in path])
-    points.append(list(target["position"]))
+    points.extend(reversed(target["pedestrian_connector"]) if target.get("pedestrian_connector") else [list(target["position"])])
     deduplicated: list[list[float]] = []
     for point in points:
         normalized = [round(float(point[0]), 4), round(float(point[1]), 4)]

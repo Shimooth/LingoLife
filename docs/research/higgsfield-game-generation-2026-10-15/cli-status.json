@@ -1,0 +1,8 @@
+{
+  "command": "higgsfield account status --json",
+  "exit_code": 4,
+  "authenticated": null,
+  "status": "no_workspace_selected",
+  "failure_category": "workspace_not_selected",
+  "error_summary": "No workspace selected."
+}

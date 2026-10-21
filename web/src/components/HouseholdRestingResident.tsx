@@ -53,11 +53,11 @@ function ShowerSteam({chibi,reducedMotion}:{chibi:boolean;reducedMotion:boolean}
  </group>
 }
 
-export function HouseholdRestingResident({resident,anchor,selected,language,reducedMotion}:{resident:HouseholdResidentVisual;anchor:SharedHomeResolvedAnchor;selected:boolean;language:LifeLanguage;reducedMotion:boolean}){
+export function HouseholdRestingResident({resident,anchor,selected,language,reducedMotion,embedded=false}:{resident:HouseholdResidentVisual;anchor:SharedHomeResolvedAnchor;selected:boolean;language:LifeLanguage;reducedMotion:boolean;embedded?:boolean}){
  const sleeping=resident.currentAction?.source==='life'&&resident.currentAction.type==='sleep'
  const chibi=getCharacterFamily(resident.avatar)==='chibi'
- const position:[number,number,number]=sleeping?[anchor.position[0]*.99,anchor.position[1],anchor.position[2]*.99+.05]:anchor.position
- return <group name={`household-resident:${resident.id}`} position={position} rotation-y={anchor.rotation}>
+ const position:[number,number,number]=embedded?[0,0,0]:sleeping?[anchor.position[0]*.99,anchor.position[1],anchor.position[2]*.99+.05]:anchor.position
+ return <group name={embedded?'household-private-rest':`household-resident:${resident.id}`} position={position} rotation-y={embedded?0:anchor.rotation}>
   {selected&&<mesh name="household-focus-ring" rotation-x={-Math.PI/2} position={[0,.045,0]}><ringGeometry args={[sleeping?.67:.72,sleeping?.73:.78,48]}/><meshBasicMaterial color="#e9aa4d" depthWrite={false}/></mesh>}
   {sleeping?<group name="sleeping-in-own-bed">
    <UnderDuvet><group name="mattress-aligned-pose" position={[0,chibi?.47:.49,.6]} rotation-x={-Math.PI/2}>

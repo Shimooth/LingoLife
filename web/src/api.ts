@@ -1,6 +1,8 @@
 import type {AdminResetOnboardingRequest,AdminResetOnboardingResponse,AdminSummary,AdminUser,AgentState,AgentTrace,AuthResponse,ChatResponse,City,Household,HouseholdsResponse,InvitesResponse,LearningProgress,LifeStoriesResponse,LifeStory,LifeStoryLevel,LifeStoryStatus,MeResponse,NpcEntry,NpcProfile,OnboardingCompleteRequest,OnboardingCompleteResponse,OnboardingState,Quota,Room,RosterMigration,RosterMigrationStatus,SocialAction,SocialInteraction,UnusedInvitesResponse,UsersResponse} from './types'
 import type {WorldLayoutAdminResponse,WorldLayoutDocument,WorldLayoutDraft,WorldLayoutResponse,WorldLayoutValidation,WorldLayoutVersion} from './worldLayout'
 import type {LifeSceneDialogue} from './types'
+import type {ArrivalAction,ArrivalDraft,ArrivalState} from './arrival/types'
+import type {NeighborhoodCommand,NeighborhoodState} from './neighborhood/types'
 const tokenKey='lingolife.session-token'
 const randomId=(prefix:string)=>`${prefix}-${crypto.randomUUID?.()??`${Date.now()}-${Math.random().toString(36).slice(2)}`}`
 export class ApiError extends Error{status:number;code?:string;constructor(status:number,message:string,code?:string){super(message);this.status=status;this.code=code}}
@@ -38,6 +40,16 @@ export const session={
  clear:()=>{try{localStorage.removeItem(tokenKey)}catch{/* storage can be unavailable */}},
 }
 const json=(value:unknown):RequestInit=>({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(value)})
+export const arrivalApi={
+ get:()=>request<ArrivalState>('/arrival',{},false,20000),
+ save:(draft:ArrivalDraft,expected_revision:number)=>request<ArrivalState>('/arrival/draft',{...json({draft,expected_revision}),method:'PUT'},false,20000),
+ create:(draft:ArrivalDraft,expected_revision:number,idempotency_key:string)=>request<ArrivalState>('/arrival/create',json({draft,expected_revision,idempotency_key}),false,45000),
+ command:(action:ArrivalAction,food_id:string|undefined,idempotency_key:string)=>request<ArrivalState>('/arrival/command',json({action,food_id,idempotency_key}),false,20000),
+}
+export const neighborhoodApi={
+ get:()=>request<NeighborhoodState>('/neighborhood',{},false,20000),
+ command:(command:NeighborhoodCommand,idempotency_key:string)=>request<NeighborhoodState>('/neighborhood/command',json({...command,idempotency_key}),false,30000),
+}
 export const lifeStoryDialogue=(id:string,signal?:AbortSignal,retry=false)=>request<LifeSceneDialogue>(`/life-stories/${encodeURIComponent(id)}/dialogue?retry=${retry}`,{method:'POST',signal})
 export type WorldRequestOptions={signal?:AbortSignal}
 export type LifeStoryQuery={level?:LifeStoryLevel;status?:LifeStoryStatus;npc_id?:string;household_id?:string;game_date?:string}

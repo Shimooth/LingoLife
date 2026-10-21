@@ -21,14 +21,14 @@ export type HouseholdResidentVisual={
 
 /** IndoorEnvironment3D's preview transform is applied numerically, not as a
  * parent group: the physical hand targets and cup grips are world coordinates. */
-export function householdDrinkPlacements(placements?:readonly WorldLayoutInteriorPlacement[]):WorldLayoutInteriorPlacement[]{
+export function householdDrinkPlacements(placements?:readonly WorldLayoutInteriorPlacement[],offset:readonly number[]=[0,0,0]):WorldLayoutInteriorPlacement[]{
  const source=placements??sharedHomeDefaultPlacements('living_room').map(item=>({
   id:item.id,room_id:'living-room',asset:`/assets/life/interiors/${item.asset}`,
   position:{x:item.position[0],y:item.position[1],z:item.position[2]},rotation:{x:0,y:item.rotation,z:0},
   scale:{x:item.scale[0],y:item.scale[1],z:item.scale[2]},
  }))
  return source.map(item=>({...item,
-  position:{x:item.position.x*.99,y:item.position.y*.99-.08,z:item.position.z*.99+.05},
+  position:{x:item.position.x*.99+offset[0],y:item.position.y*.99-.08+offset[1],z:item.position.z*.99+.05+offset[2]},
   scale:{x:item.scale.x*.99,y:item.scale.y*.99,z:item.scale.z*.99},
  }))
 }

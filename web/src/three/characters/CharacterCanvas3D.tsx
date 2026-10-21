@@ -4,6 +4,7 @@ import { useLayoutEffect } from 'react'
 import type { AvatarConfig } from '../../types'
 import { Character3D } from './Character3D'
 import type { CharacterMotion } from './types'
+import type {SocialPerformance} from './socialPerformance'
 import './characters.css'
 import {AdaptiveResolution,SceneLighting,SceneLook} from '../rendering/SceneLook'
 import {useVisualBudget} from '../rendering/useVisualBudget'
@@ -17,6 +18,8 @@ export type CharacterCanvas3DProps = {
   background?: string
   staticPreview?: boolean
   animationKey?: number
+  socialPerformance?: SocialPerformance
+  faceSpeaking?: boolean
 }
 
 function FitPreviewCamera({ view }: { view: 'full' | 'portrait' | 'head' }) {
@@ -33,7 +36,7 @@ function FitPreviewCamera({ view }: { view: 'full' | 'portrait' | 'head' }) {
   return null
 }
 
-export function CharacterCanvas3D({ avatar, animation = 'idle', view = 'full', name = 'Character', className = '', background = 'transparent', staticPreview = false, animationKey }: CharacterCanvas3DProps) {
+export function CharacterCanvas3D({ avatar, animation = 'idle', view = 'full', name = 'Character', className = '', background = 'transparent', staticPreview = false, animationKey, socialPerformance, faceSpeaking }: CharacterCanvas3DProps) {
  const visualBudget=useVisualBudget()
   const head = view === 'head'
   const portrait = view === 'portrait'
@@ -44,7 +47,7 @@ export function CharacterCanvas3D({ avatar, animation = 'idle', view = 'full', n
       <PerspectiveCamera makeDefault position={cameraPosition} fov={fieldOfView} near={0.1} far={100} />
       <FitPreviewCamera view={view} />
       <SceneLook/><SceneLighting portrait/><AdaptiveResolution onTier={visualBudget.onTier} paused={staticPreview}/>
-      <Character3D avatar={avatar} animation={staticPreview ? 'idle' : animation} animationPaused={staticPreview} animationKey={animationKey} detail={head ? 'head' : portrait ? 'portrait' : 'full'} name={name} seed="character-preview" motionScale={staticPreview ? 0 : 1} />
+      <Character3D avatar={avatar} animation={staticPreview ? 'idle' : animation} animationPaused={staticPreview} animationKey={animationKey} detail={head ? 'head' : portrait ? 'portrait' : 'full'} name={name} seed="character-preview" motionScale={staticPreview ? 0 : 1} socialPerformance={staticPreview ? undefined : socialPerformance} faceSpeaking={!staticPreview && faceSpeaking} />
       {!head && <ContactShadows position={[0, -.22, 0]} opacity={.24} scale={4.5} blur={2.5} far={3} />}
     </Canvas>
   </section>

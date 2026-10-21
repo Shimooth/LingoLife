@@ -35,10 +35,12 @@ def _login_admin(client: TestClient) -> None:
 
 def _valid_variant(layout: dict, offset: float) -> dict:
     result = deepcopy(layout)
-    shared_home = next(
-        item for item in result["city"]["buildings"] if item["id"] == "shared-home"
+    # The old home-adjacent vacant parcels are still editable; the new home
+    # fronts a reserved pedestrian path and cannot be moved onto that path.
+    theater = next(
+        item for item in result["city"]["buildings"] if item["id"] == "landmark-aurora_theater"
     )
-    shared_home["position"]["x"] += offset
+    theater["position"]["x"] += offset
     return result
 
 
@@ -174,7 +176,7 @@ def test_versions_are_immutable_content_addressed_idempotent_and_rollbackable(tm
     default = client.get("/api/v1/world-layout").json()["layout"]
 
     first_draft = _save_draft(client, _valid_variant(default, 2.6), 0)
-    first = _publish(client, first_draft["revision"], "共享住宅向东移动一格")
+    first = _publish(client, first_draft["revision"], "剧院向东移动一格")
     first_id = first["active_version"]["id"]
     first_hash = first["active_version"]["hash"]
     assert first_id == f"layout-{first_hash}"
@@ -188,10 +190,10 @@ def test_versions_are_immutable_content_addressed_idempotent_and_rollbackable(tm
     versions = same["versions"]
     assert len(versions) == 2
     authored = next(version for version in versions if version["id"] == first_id)
-    assert authored["note"] == "共享住宅向东移动一格"
+    assert authored["note"] == "剧院向东移动一格"
 
     second_draft = _save_draft(client, _valid_variant(default, 5.2), same["draft"]["revision"])
-    second = _publish(client, second_draft["revision"], "共享住宅向东移动两格")
+    second = _publish(client, second_draft["revision"], "剧院向东移动两格")
     second_id = second["active_version"]["id"]
     assert second_id != first_id
     assert len(second["versions"]) == 3

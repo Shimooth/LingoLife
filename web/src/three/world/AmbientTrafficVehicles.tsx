@@ -4,11 +4,12 @@ import {useEffect,useMemo,useRef} from 'react'
 import * as THREE from 'three'
 import {advanceTrafficFleet,createTrafficFleet,trafficRoutes,type TrafficVehicle} from './ambientTraffic'
 import {KAYKIT_ASSET_BASE,type RoadTilePlacement} from './worldData'
+import {TOWN_ROAD_SURFACE_Y,TOWN_VEHICLE_SCALE,vehiclePivotForSurface} from './townScale'
 
 const MODELS=['car_taxi','car_sedan','car_hatchback'] as const
 // Road asphalt is local y=.07 (not the .1-high curb); wheels extend below
 // the car pivot. Align actual tire geometry instead of floating above the road.
-const VEHICLE_Y=.245+.07*1.3+.061042905*1.08+.002
+const VEHICLE_Y=vehiclePivotForSurface(TOWN_ROAD_SURFACE_Y)
 
 function TrafficCar({vehicle,shadows}:{vehicle:TrafficVehicle;shadows:boolean}){
  const group=useRef<THREE.Group>(null)
@@ -44,7 +45,7 @@ function TrafficCar({vehicle,shadows}:{vehicle:TrafficVehicle;shadows:boolean}){
    material.opacity=opacity
   }
  })
- return <group ref={group} name={vehicle.id} visible={false} userData={{routeId:vehicle.route.id,closed:vehicle.route.closed}}><primitive object={asset.object} scale={1.08}/></group>
+ return <group ref={group} name={vehicle.id} visible={false} userData={{routeId:vehicle.route.id,closed:vehicle.route.closed}}><primitive object={asset.object} scale={TOWN_VEHICLE_SCALE}/></group>
 }
 
 export function AmbientTraffic({roads,reducedMotion,quality}:{roads:readonly RoadTilePlacement[];reducedMotion:boolean;quality:'high'|'low'}){

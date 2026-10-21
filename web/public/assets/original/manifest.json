@@ -1,0 +1,11 @@
+{
+  "family": "lingolife-original-v1",
+  "kind": "authored procedural visual prototype",
+  "geometrySource": "web/src/original/character and web/src/original/environment",
+  "portraitSource": "Actual WebGL renders of the four original resident presets, not concept images",
+  "generator": "web/scripts/export-original-ateliers.mjs",
+  "nativeAsset": "native/lingolife-original/Assets/Resources/OriginalTown.json",
+  "importedThirdPartyModels": [],
+  "portraits": ["portraits/mori.png", "portraits/yu.png", "portraits/lin.png", "portraits/nana.png"],
+  "notes": "Three.js, React and the rendering tools retain their own software licenses. This manifest describes the project-authored visual geometry only."
+}

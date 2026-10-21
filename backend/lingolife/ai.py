@@ -89,11 +89,13 @@ def _persona_prompt(context: dict[str, Any]) -> str:
     raw_life = context.get("current_life")
     reference = {
         "persona": persona,
+        "player_preferred_address": str(context.get("player_address") or "")[:24],
         # Explicit author-provided facts outrank inferred axes and old dialogue.
         # Allowlist only public characterization; never copy the whole profile.
         "character_facts": {key: profile[key] for key in (
             "name", "age", "personality", "interests", "likes", "dislikes",
             "occupation", "habits", "quirks", "boundaries",
+            "residentNicknames",
         ) if key in profile},
         # Defence in depth: callers cannot accidentally place authoritative
         # desires, commitments or exact need values in a third-party prompt.

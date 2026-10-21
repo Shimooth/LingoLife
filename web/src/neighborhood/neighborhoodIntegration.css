@@ -1,0 +1,24 @@
+.neighborhood-open-button{background:#e5efdf!important;color:#345d50!important;position:relative}
+.neighborhood-open-button i{display:inline-block;width:7px;height:7px;background:#d98571;border-radius:50%;margin-left:6px}
+.neighborhood-map-label{border:1px solid #b7cbb6;border-radius:20px;padding:6px 10px;background:#fff7e7ed;color:#426257;font-size:11px;font-weight:750;white-space:nowrap;box-shadow:0 3px 8px #284f2b18;cursor:pointer}
+.neighborhood-map-label:focus-visible{outline:3px solid #e5a18b;outline-offset:3px}
+.neighborhood-loading{position:fixed;inset:0;z-index:110;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:#fbf7ed;color:#426257;padding:28px;text-align:center}
+.neighborhood-loading>button{border:1px solid #b6cdb9;border-radius:24px;padding:12px 20px;background:#e7f0df;color:inherit}
+.neighborhood-map-label{display:flex;align-items:center;justify-content:center;gap:7px;min-height:42px;padding:7px 12px;border-radius:17px;background:#fff8eaf5;color:#345a4d;text-align:left;line-height:1.35;box-shadow:0 5px 15px #294c3225}
+.neighborhood-map-label>span:first-child{display:grid;place-items:center;width:25px;height:25px;border-radius:50%;background:#e2eedc;font-size:21px;line-height:1}
+.neighborhood-map-label strong{display:block;font-size:12px;font-weight:800}
+.neighborhood-map-label small{display:block;margin-top:1px;color:#527363;font-size:11px;font-weight:650}
+.neighborhood-map-label.is-new{border-color:#d8b478;box-shadow:0 0 0 3px #f5d99755,0 5px 15px #294c3225}
+.neighborhood-map-label:hover{background:#eff6e8;border-color:#7f9f85}
+@media(max-width:600px){.neighborhood-map-label{min-height:44px;padding:7px 10px}.neighborhood-map-label small{font-size:12px}}
+@media(max-width:600px){
+ .world3d-shell[data-camera-framing="neighborhood"] .neighborhood-map-label{min-height:32px;padding:5px 8px;gap:4px;border-radius:12px;transform:translateY(-8px)}
+ .world3d-shell[data-camera-framing="neighborhood"] .neighborhood-map-label>span:first-child{width:18px;height:18px;font-size:16px}
+ .world3d-shell[data-camera-framing="neighborhood"] .neighborhood-map-label strong{font-size:10px}
+ .world3d-shell[data-camera-framing="neighborhood"] .neighborhood-map-label small{display:none}
+}
+.neighborhood-project-label{border-style:dashed;background:#fff3d8f5}
+.city-actions .city-life-wallet{background:#f8edce;color:#705625;font-weight:750;white-space:nowrap}
+.city-actions .city-life-wallet small{color:inherit;font-size:10px}
+.city-community-feedback{position:fixed;left:50%;bottom:98px;transform:translateX(-50%);z-index:55;display:flex;align-items:center;gap:16px;max-width:min(560px,calc(100vw - 28px));padding:13px 16px;border:1px solid #c8d6bf;border-radius:16px;background:#fff9ebf5;color:#426257;box-shadow:0 8px 25px #294c3225;font-size:13px}
+.city-community-feedback button{flex:none;border:0;border-radius:50%;background:#e8efdf;color:inherit;width:28px;height:28px;cursor:pointer}

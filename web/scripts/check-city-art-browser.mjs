@@ -3,7 +3,12 @@ import {readFile,writeFile} from 'node:fs/promises'
 import {openQaPage,waitFor,delay} from './browser-cdp.mjs'
 
 const base=process.env.QA_BASE_URL??'http://127.0.0.1:5173'
-const fixture=JSON.parse(await readFile(new URL('./fixtures/city-published-layout.json',import.meta.url),'utf8'))
+// This guard keeps the complete pre-town city contract. The town-center
+// browser suite owns the new mixed native/glTF buildings and reserved square.
+const legacy=JSON.parse(await readFile(new URL('./fixtures/city-legacy-layout.json',import.meta.url),'utf8'))
+const current=JSON.parse(await readFile(new URL('./fixtures/city-published-layout.json',import.meta.url),'utf8'))
+const fixture={layout:{...legacy.layout,interior:current.layout.interior},places:current.places}
+assert.equal(fixture.layout.city.theme,undefined,'the compatibility suite must exercise an unthemed saved city')
 const cases=[
  {id:'desktop',width:1440,height:960,quality:'high'},
  {id:'mobile',width:390,height:844,quality:'low'},
@@ -15,7 +20,10 @@ for(const test of cases){
  try{
   await page.call('Emulation.setDeviceMetricsOverride',{width:test.width,height:test.height,deviceScaleFactor:1,mobile:test.width<500})
   await page.call('Page.navigate',{url:`${base}/scripts/fixtures/traffic-city.html?source=production&quality=${test.quality}&time=${test.time??'afternoon'}&reduced=${test.reduced?1:0}`})
-  await waitFor(page,'window.cityVisualLoaded&&window.trafficQa?.frames>=150',30000)
+  await page.call('Page.bringToFront')
+  await waitFor(page,'window.cityVisualLoaded&&window.cityVisualQa',30000)
+  await page.evaluate(`window.cityVisualQa.setLayout(${JSON.stringify(fixture.layout)},${JSON.stringify(fixture.places)})`)
+  await waitFor(page,'window.trafficQa?.frames>=150',30000)
   const overview=await page.evaluate('window.trafficQa')
   assert.deepEqual(overview.capacityViolations,[],'published layout growth must resize all instance buffers')
   const buildings=overview.batches.filter(batch=>/^city-(buildings|landmarks)-/.test(batch.name)).reduce((sum,batch)=>sum+batch.count,0)
@@ -36,4 +44,4 @@ for(const test of cases){
   console.log(JSON.stringify({case:test.id,buildings,facadeBatches:overview.batches.filter(b=>b.name.startsWith('city-facade')).length,streetscape:overview.streetscape,terraces:overview.terraces.length}))
  }finally{await page.close()}
 }
-console.log('City art browser checks passed: real published geometry, visible buildings, warm facades, cafe corners, mobile and indoor-presence protection.')
+console.log('Legacy city art browser checks passed: pre-town published geometry, all buildings, warm facades, both cafe corners, mobile and indoor-presence protection.')

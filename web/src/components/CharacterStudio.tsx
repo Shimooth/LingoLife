@@ -1,3 +1,4 @@
+import {ResidentVoicePicker} from './ResidentVoicePicker';
 import { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { FamilyRole, NpcProfile, SharedHistoryKind, SharedHistoryTone } from "../types";
@@ -34,6 +35,7 @@ export function CharacterStudio({
   language = "zh",
   relationshipCandidates = [],
   editingNpcId,
+  initialTab = "story",
 }: {
   profile: NpcProfile;
   onChange: (p: NpcProfile) => void;
@@ -44,9 +46,10 @@ export function CharacterStudio({
   language?: "zh" | "en";
   relationshipCandidates?: { id: string; name: string }[];
   editingNpcId?: string;
+  initialTab?: "story" | "relationships" | "look" | "voice";
 }) {
   const reduce = useReducedMotion(),
-    [tab, setTab] = useState<"story" | "relationships" | "look">("story"),
+    [tab, setTab] = useState<"story" | "relationships" | "look" | "voice">(initialTab),
     zh = language === "zh";
   const characterFamily = getCharacterFamily(profile.avatar);
   const adult=isAdultProfile(profile),romanceEnabled=romanceIsEnabled(profile);
@@ -84,11 +87,11 @@ export function CharacterStudio({
               {zh ? "创造一个值得了解的人" : "Create someone worth knowing"}
             </h2>
           </div>
-          <button onClick={onClose}>×</button>
+          <button type="button" disabled={saving} aria-label={zh ? "关闭角色工作室" : "Close character studio"} onClick={onClose}>×</button>
         </header>
         <div className="studio-layout">
           <div className="studio-preview">
-            <CharacterCanvas3D avatar={profile.avatar} animation="happy" view="full" name={profile.name} />
+            <CharacterCanvas3D avatar={profile.avatar} animation={tab==='voice'?'idle':'happy'} view="full" name={profile.name} />
             <strong>{profile.name || (zh ? "角色" : "Character")}</strong>
             <span>
               {profile.relationship} · {profile.occupation}
@@ -96,7 +99,7 @@ export function CharacterStudio({
           </div>
           <div className="studio-editor">
             <nav>
-              {(["story", "relationships", "look"] as const).map((x) => (
+              {(["story", "relationships", "look", "voice"] as const).map((x) => (
                 <button
                   className={tab === x ? "active" : ""}
                   onClick={() => setTab(x)}
@@ -106,7 +109,7 @@ export function CharacterStudio({
                     ? zh ? "身份设定" : "Identity"
                     : x === "relationships"
                       ? zh ? "关系与居住" : "Relationships"
-                      : zh ? "外观" : "Appearance"}
+                      : x === "voice" ? zh ? "声音" : "Voice" : zh ? "外观" : "Appearance"}
                 </button>
               ))}
             </nav>
@@ -264,6 +267,8 @@ export function CharacterStudio({
                       </div>
                     </section>
                   </>
+                ) : tab === "voice" ? (
+                  <ResidentVoicePicker value={profile.voice??{voice_uri:'',language:'en-US',rate:1,pitch:1}} onChange={voice=>set('voice',voice)} language={language} previewText="Hi! It's lovely to meet you. I think I'm going to like it here."/>
                 ) : (
                   <>
                     <fieldset>

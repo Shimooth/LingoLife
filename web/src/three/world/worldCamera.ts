@@ -58,6 +58,15 @@ export const followCameraZoom=(viewportWidth:number)=>{
  return 118
 }
 
+/** The daily view frames a walkable neighborhood; overview remains explicit.
+ * Model dimensions never change when the viewport or camera mode changes. */
+export const neighborhoodCameraZoom=(width:number,height:number,top=false)=>{
+ const safeWidth=Math.max(1,Number.isFinite(width)?width:1440)
+ const safeHeight=Math.max(1,Number.isFinite(height)?height:900)
+ const portrait=safeHeight>safeWidth*1.2
+ return Math.min(92,Math.max(20,Math.min(safeWidth/(portrait?16:18),safeHeight/(top?12.5:11.5))))
+}
+
 /** Frame-rate-independent exponential damping. */
 export const cameraDampingAlpha=(deltaSeconds:number,responsiveness:number)=>{
  const safeDelta=Number.isFinite(deltaSeconds)?Math.max(0,deltaSeconds):0

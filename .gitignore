@@ -23,6 +23,11 @@ web/*.tsbuildinfo
 web/vite.config.js
 web/vite.config.d.ts
 
+# Standalone local visual studies and generated QA exports are not releases.
+/web/experiments/
+/web/output/
+*.blend1
+
 # Runtime data
 data/
 *.db

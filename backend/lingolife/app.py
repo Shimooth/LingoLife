@@ -66,6 +66,9 @@ from .models import (AdminLoginRequest, AdminRosterSelectionRequest, AdminUserPa
                      materialize_onboarding_profiles)
 from .profile_contract import CURRENT_INTRO_VERSION
 from .practice import practice_view, reconcile as reconcile_practice, transition as transition_practice
+from .arrival import (ArrivalService, ArrivalError, ArrivalDraftRequest,
+                      ArrivalCreateRequest, ArrivalCommand)
+from .neighborhood import NeighborhoodService, NeighborhoodCommand
 from .social import SocialWorldEngine
 
 KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$")
@@ -100,6 +103,8 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
     event_engine = EventEngine(db)
     social_engine = SocialWorldEngine(db)
     life_world = LifeWorldService(db, settings.game_timezone) if settings.life_simulation_v2 else None
+    arrival = ArrivalService(db, life_world, DEFAULT_NPC_PROFILE)
+    neighborhood = NeighborhoodService(db, life_world, arrival)
     built_in_world_layout = default_world_layout()
     world_asset_catalog = load_world_asset_catalog()
     home_manifest = shared_home_manifest()
@@ -529,6 +534,47 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
         user = current_user(authorization)
         return {"user": {"id": user["id"], "username": user["username"], "has_password": bool(user.get("password_hash"))}, "quota": db.quota(user["id"]),
                 "onboarding": onboarding_state(user["player_id"])}
+
+    def arrival_operation(operation):
+        try:
+            return operation()
+        except ArrivalError as error:
+            raise HTTPException(409, {"code": error.code, "message": str(error)})
+        except ValueError as error:
+            if str(error) in {"ONBOARDING_ALREADY_COMPLETED", "ONBOARDING_SETUP_IN_PROGRESS",
+                              "ROSTER_REVIEW_REQUIRED", "NPC_NAME_TAKEN"}:
+                raise HTTPException(409, {"code": str(error), "message": "当前存档无法重复办理入住，请重新载入。"})
+            raise
+
+    @app.get(settings.api_prefix + "/arrival")
+    def arrival_state(authorization: Optional[str] = Header(None)):
+        user = current_user(authorization)
+        return arrival.state(user["player_id"])
+
+    @app.get(settings.api_prefix + "/neighborhood")
+    def neighborhood_state(authorization: Optional[str] = Header(None)):
+        user = current_user(authorization)
+        return arrival_operation(lambda: neighborhood.state(user["player_id"]))
+
+    @app.post(settings.api_prefix + "/neighborhood/command")
+    def neighborhood_command(body: NeighborhoodCommand, authorization: Optional[str] = Header(None)):
+        user = current_user(authorization)
+        return arrival_operation(lambda: neighborhood.command(user["player_id"], body))
+
+    @app.put(settings.api_prefix + "/arrival/draft")
+    def arrival_draft(body: ArrivalDraftRequest, authorization: Optional[str] = Header(None)):
+        user = current_user(authorization)
+        return arrival_operation(lambda: arrival.save_draft(user["player_id"], body))
+
+    @app.post(settings.api_prefix + "/arrival/create", status_code=201)
+    def arrival_create(body: ArrivalCreateRequest, authorization: Optional[str] = Header(None)):
+        user = current_user(authorization)
+        return arrival_operation(lambda: arrival.create(user["player_id"], body))
+
+    @app.post(settings.api_prefix + "/arrival/command")
+    def arrival_command(body: ArrivalCommand, authorization: Optional[str] = Header(None)):
+        user = current_user(authorization)
+        return arrival_operation(lambda: arrival.command(user["player_id"], body))
 
     @app.get(settings.api_prefix + "/onboarding")
     def onboarding(authorization: Optional[str] = Header(None)):
@@ -1242,6 +1288,7 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
             memories, str(agent.get("relationship", {}).get("stage") or "stranger"),
         )
         context = {"npc_profile": profile, "current_event": prompt_event,
+                   "player_address": arrival.manager_name(player_id),
                    "current_life": project_dialogue_life_context(life_context),
                    "learning_targets": learning_engine.targets(learning_state, limit=3),
                    "memories": prompt_memories, "conversation_summaries": summaries, **dialogue_agent,

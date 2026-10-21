@@ -272,11 +272,11 @@ function PersonalBedroomTrace({space}:{space:SharedHomePrivateSpace}){
  </group>
 }
 
-function PrivateBedroomDoor({space}:{space:SharedHomePrivateSpace}){
+function PrivateBedroomDoor({space,connectedShell=false}:{space:SharedHomePrivateSpace;connectedShell?:boolean}){
  const [, ,minZ,maxZ]=space.bounds
  const facingSouth=space.door.wall==='south',wallZ=facingSouth?maxZ:minZ
  const hingeX=space.door.center_x-space.door.width/2
- const swing=facingSouth?-1.02:1.02
+ const swing=connectedShell?(facingSouth?Math.PI/2:-Math.PI/2):(facingSouth?-1.02:1.02)
  return <group name={`${space.id} door`}>
   <mesh position={[hingeX,.7,wallZ]} castShadow><boxGeometry args={[.1,1.42,.13]}/><meshStandardMaterial color="#fff0e3" roughness={.82}/></mesh>
   <mesh position={[hingeX+space.door.width,.7,wallZ]} castShadow><boxGeometry args={[.1,1.42,.13]}/><meshStandardMaterial color="#fff0e3" roughness={.82}/></mesh>
@@ -288,7 +288,7 @@ function PrivateBedroomDoor({space}:{space:SharedHomePrivateSpace}){
  </group>
 }
 
-function PrivateBedroomSuite({occupiedSlots}:{occupiedSlots:readonly number[]}){
+function PrivateBedroomSuite({occupiedSlots,connectedShell=false}:{occupiedSlots:readonly number[];connectedShell?:boolean}){
  const occupied=new Set(occupiedSlots)
  return <group name="eight separated private bedrooms">
   <mesh position={[0,-.027,-.04]} rotation-x={-Math.PI/2} receiveShadow><planeGeometry args={[10.16,.94]}/><meshStandardMaterial color="#d8b28b" roughness={.94}/></mesh>
@@ -318,7 +318,7 @@ function PrivateBedroomSuite({occupiedSlots}:{occupiedSlots:readonly number[]}){
     </group>}
     {leftLength>.02&&<mesh position={[(minX+doorLeft)/2,frontHeight/2,wallZ]} castShadow receiveShadow><boxGeometry args={[leftLength,frontHeight,.1]}/><meshStandardMaterial color="#ead2cb" roughness={.92}/></mesh>}
     {rightLength>.02&&<mesh position={[(doorRight+maxX)/2,frontHeight/2,wallZ]} castShadow receiveShadow><boxGeometry args={[rightLength,frontHeight,.1]}/><meshStandardMaterial color="#ead2cb" roughness={.92}/></mesh>}
-    <PrivateBedroomDoor space={space}/>
+    <PrivateBedroomDoor space={space} connectedShell={connectedShell}/>
     <mesh position={[centerX,.03,centerZ+(facingSouth?.42:-.42)]} rotation-x={-Math.PI/2} receiveShadow><planeGeometry args={[1.2,.58]}/><meshStandardMaterial color={BED_POD_COLORS[(space.slot+2)%BED_POD_COLORS.length]} roughness={.98}/></mesh>
     <group position={[centerX,.72,outerZ+(facingSouth?.1:-.1)]} rotation-y={facingSouth?0:Math.PI}>
      <mesh castShadow><boxGeometry args={[.56,.64,.07]}/><meshStandardMaterial color="#fff0df" roughness={.84}/></mesh>
@@ -332,7 +332,7 @@ function PrivateBedroomSuite({occupiedSlots}:{occupiedSlots:readonly number[]}){
  </group>
 }
 
-function SharedHomeRoomDetails({theme,occupiedPrivateSlots}:{theme:InteriorTheme;occupiedPrivateSlots:readonly number[]}){
+function SharedHomeRoomDetails({theme,occupiedPrivateSlots,connectedShell=false}:{theme:InteriorTheme;occupiedPrivateSlots:readonly number[];connectedShell?:boolean}){
  const colors=PALETTE[theme]
  if(theme==='home_lounge')return <group>
   <group name="builtin-television" position={[-5.02,.82,-.45]} rotation-y={Math.PI/2}>
@@ -341,7 +341,7 @@ function SharedHomeRoomDetails({theme,occupiedPrivateSlots}:{theme:InteriorTheme
    <mesh position-z={.091}><planeGeometry args={[1.62,.91]}/><meshStandardMaterial color="#79aeb1" emissive="#5a969d" emissiveIntensity={.34} roughness={.2}/></mesh>
    <mesh position={[0,-.72,.02]} castShadow><boxGeometry args={[2.15,.12,.68]}/><meshStandardMaterial color="#825d4c" roughness={.84}/></mesh>
   </group>
-  <group position={[-1.42,2.12,-3.085]}>
+  <group position={connectedShell?[-5.18,2.12,-.45]:[-1.42,2.12,-3.085]} rotation-y={connectedShell?Math.PI/2:0}>
    {[-1,0,1].map((offset,index)=><group key={offset} position-x={offset*.69} rotation-z={(index-1)*.035}>
     <mesh castShadow><boxGeometry args={[.56,.72,.09]}/><meshStandardMaterial color={colors.trim} roughness={.8}/></mesh>
     <mesh position-z={.052}><planeGeometry args={[.4,.56]}/><meshStandardMaterial color={BED_POD_COLORS[index+1]} roughness={.87}/></mesh>
@@ -378,8 +378,8 @@ function SharedHomeRoomDetails({theme,occupiedPrivateSlots}:{theme:InteriorTheme
   </group>)}
  </group>
  if(theme==='home_bathroom')return <group>
-  <mesh position={[0,1.0,-3.065]} receiveShadow><boxGeometry args={[10.1,1.46,.08]}/><meshStandardMaterial color="#9dcac3" roughness={.82}/></mesh>
-  {[-3.8,-2.6,-1.4,-.2,1,2.2,3.4].map(x=><mesh key={x} position={[x,1,-3.015]}><boxGeometry args={[.026,1.38,.02]}/><meshBasicMaterial color="#e8f5ed"/></mesh>)}
+  <mesh position={[0,1.0,connectedShell?-3.86:-3.065]} receiveShadow><boxGeometry args={[10.1,1.46,.08]}/><meshStandardMaterial color="#9dcac3" roughness={.82}/></mesh>
+  {[-3.8,-2.6,-1.4,-.2,1,2.2,3.4].map(x=><mesh key={x} position={[x,1,connectedShell?-3.81:-3.015]}><boxGeometry args={[.026,1.38,.02]}/><meshBasicMaterial color="#e8f5ed"/></mesh>)}
   <mesh position={[-3.18,1.16,-1.92]} rotation-y={Math.PI/2} castShadow><boxGeometry args={[1.55,2.28,.075]}/><meshPhysicalMaterial color="#b7dcda" transparent opacity={.48} roughness={.36}/></mesh>
   <mesh position={[1.08,.48,-1.72]} rotation-y={Math.PI/2} castShadow><boxGeometry args={[2.28,.92,.1]}/><meshStandardMaterial color={colors.trim} roughness={.9}/></mesh>
   <mesh position={[1.08,1.34,-1.72]} rotation-y={Math.PI/2} castShadow><boxGeometry args={[2.28,.74,.055]}/><meshPhysicalMaterial color="#cce9e4" transparent opacity={.42} roughness={.32}/></mesh>
@@ -394,7 +394,7 @@ function SharedHomeRoomDetails({theme,occupiedPrivateSlots}:{theme:InteriorTheme
    <mesh castShadow><cylinderGeometry args={[.3,.25,.72,16]}/><meshStandardMaterial color="#d7aa74" roughness={.92}/></mesh>
    <mesh position-y={.39}><torusGeometry args={[.2,.026,8,18]}/><meshStandardMaterial color={colors.deep} roughness={.6}/></mesh>
   </group>
-  <group position={[.28,1.55,-2.97]}>
+  <group position={[.28,1.55,connectedShell?-3.765:-2.97]}>
    <mesh><boxGeometry args={[1.35,.08,.08]}/><meshStandardMaterial color={colors.deep} metalness={.12} roughness={.48}/></mesh>
    <mesh position={[-.34,-.34,.035]}><boxGeometry args={[.48,.65,.07]}/><meshStandardMaterial color="#dfa47f" roughness={.95}/></mesh>
    <mesh position={[.28,-.27,.04]}><boxGeometry args={[.48,.52,.07]}/><meshStandardMaterial color="#f1d5b4" roughness={.95}/></mesh>
@@ -409,7 +409,7 @@ function SharedHomeRoomDetails({theme,occupiedPrivateSlots}:{theme:InteriorTheme
    {[0,.13].map((y,index)=><mesh key={y} position={[-.55,.42+y,0]}><boxGeometry args={[.46,.1,.34]}/><meshStandardMaterial color={index?'#d9a889':'#f4dfc2'} roughness={.97}/></mesh>)}
   </group>
  </group>
- if(theme==='home_bedroom')return <PrivateBedroomSuite occupiedSlots={occupiedPrivateSlots}/>
+ if(theme==='home_bedroom')return <PrivateBedroomSuite occupiedSlots={occupiedPrivateSlots} connectedShell={connectedShell}/>
  return null
 }
 
@@ -471,7 +471,7 @@ function KitchenActivity({assets,life,cooking,reducedMotion}:{assets:readonly Pl
  </group>
 }
 
-export function IndoorEnvironment3D({theme,mode='encounter',placements,occupiedPrivateSlots=[],householdLife,cooking=false,reducedMotion=false}:{theme:InteriorTheme;mode?:'encounter'|'preview';placements?:readonly WorldLayoutInteriorPlacement[];occupiedPrivateSlots?:readonly number[];householdLife?:HouseholdLifeFacts;cooking?:boolean;reducedMotion?:boolean}){
+export function IndoorEnvironment3D({theme,mode='encounter',placements,occupiedPrivateSlots=[],householdLife,cooking=false,reducedMotion=false,connectedShell=false}:{theme:InteriorTheme;mode?:'encounter'|'preview';placements?:readonly WorldLayoutInteriorPlacement[];occupiedPrivateSlots?:readonly number[];householdLife?:HouseholdLifeFacts;cooking?:boolean;reducedMotion?:boolean;connectedShell?:boolean}){
  const preview=mode==='preview'
  const sceneAssets=placements?.map(item=>({
   id:item.id,asset:item.asset,
@@ -480,7 +480,7 @@ export function IndoorEnvironment3D({theme,mode='encounter',placements,occupiedP
   scale:[item.scale.x,item.scale.y,item.scale.z] as [number,number,number],
  }))??defaultSceneAssets(theme)
  return <group name={`LingoLife ${theme} environment`} position={[0,preview ? -.08 : 0,preview ? .05 : 0]} scale={preview ? .99 : 1}>
-  <RoomShell theme={theme} preview={preview} occupiedPrivateSlots={occupiedPrivateSlots}/>
+  {connectedShell?<SharedHomeRoomDetails theme={theme} occupiedPrivateSlots={occupiedPrivateSlots} connectedShell/>:<RoomShell theme={theme} preview={preview} occupiedPrivateSlots={occupiedPrivateSlots}/>}
   {sceneAssets.filter(item=>!(cooking&&item.id==='kitchen-kettle')&&!(householdLife&&!householdLife.shared_meals.length&&item.id==='kitchen-meal')).map(placement=><InteriorAssetBoundary key={placement.id} placement={placement}><Suspense fallback={<MissingInteriorAsset placement={placement}/>}><InteriorAsset placement={placement}/></Suspense></InteriorAssetBoundary>)}
   {theme==='home_kitchen'&&<KitchenActivity assets={sceneAssets} life={householdLife} cooking={cooking} reducedMotion={reducedMotion}/>}
   {theme==='home_lounge'&&<LivingRoomAccents placements={placements}/>}

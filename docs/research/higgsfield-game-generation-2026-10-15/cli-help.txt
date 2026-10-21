@@ -1,0 +1,115 @@
+$ higgsfield version
+higgsfield 1.1.26 (69f3a33c3325d8fdde3a1ecb0b8e7cc5ebc7e8a3) built 2026-09-18T23:35:26Z
+
+
+$ higgsfield --help
+Run Higgsfield image, video, and Marketing Studio workflows from the terminal.
+
+Usage:
+  higgsfield [flags]
+  higgsfield [command]
+
+Aliases:
+  higgsfield, higgs, hf
+
+Examples:
+  higgsfield auth login
+  higgsfield model list --video
+  higgsfield workflow list
+  higgsfield generate create <model> --prompt "cinematic product photo" --image <upload_id>
+
+Available Commands:
+  account            Credits and transactions
+  auth               Login, logout, token
+  generate           Create, cost, list, wait jobs
+  help               Help about any command
+  marketing-studio   Marketing Studio assets
+  marketplace-cards  Marketplace product cards via backend prompt enhancement
+  model              List models and params
+  preset             Browse and resolve generation presets
+  product-photoshoot Brand-quality image generation via mode-specific prompt enhancement
+  soul-id            Train and manage Soul refs
+  upload             Upload media and document inputs
+  version            Print build info
+  voices             List voices for text-to-speech and voice-change
+  website            Build and ship full-stack websites
+  workflow           List workflows and inspect params
+  workspace          Select billing workspace
+
+Flags:
+  -h, --help       help for higgsfield
+      --json       print raw JSON responses
+      --no-color   disable color output
+  -v, --version    print build info
+
+Use "higgsfield [command] --help" for more information about a command.
+
+
+$ higgsfield website create --help
+Create a website and its git repo.
+
+--type is REQUIRED and is the USER'S choice — agents must ask the user which kind they want
+when the request doesn't make it obvious:
+  website  a standalone site with NO Higgsfield integration (no Sign in with Higgsfield,
+           no requests to Higgsfield); --template is OPTIONAL
+  app      a product tightly integrated with Higgsfield — its users sign in with Higgsfield
+           and generate images/videos through the Higgsfield SDK; --template is REQUIRED
+  game     a browser game — realtime multiplayer rooms on the game template;
+           --category is REQUIRED and must be a game genre (arcade, puzzle, shooter, …)
+
+Website templates:
+  scroll-scrub  the animated website — the visitor's scroll plays a generated film. Its
+                scrub engine ships pre-built, so you generate the film and fill in
+                app/src/scroll-scrub-scenes.ts instead of writing a controller. Pass this
+                for an animated site; omit --template for a non-animated one.
+
+App templates (pick the closest product shape):
+  app-detail  a single tool landing page with generator hero and how-it-works
+  preset      pick-a-style generation, wizards, or upload/configure/iterate flows
+  studio      a full creative workspace with projects, prompt dock, and generations feed
+  custom      a bare scaffold; use ONLY when the user explicitly requests it
+
+The two sets are NOT interchangeable — a cross-kind name is rejected. The selected
+non-custom app layout is shipped at app/src/layouts/<template>.tsx and must be adapted in
+place, not rebuilt or replaced.
+
+Usage:
+  higgsfield website create [flags]
+
+Examples:
+  higgsfield website create --type website --template scroll-scrub
+  higgsfield website create --type website
+  higgsfield website create --type app --template app-detail
+  higgsfield website create --type game --category arcade
+
+Flags:
+      --category hf website categories   content category slug the site is filed under (required); run hf website categories for the valid slugs, then pass the closest (e.g. cinematic, ads-marketing, other)
+  -h, --help                             help for create
+      --subdomain string                 subdomain to use as the site's slug (lowercase, DNS-safe; reserved or taken labels are rejected). Recommended: always set one derived from the site's name; omit only for a random subdomain.
+      --template string                  starter template; the set depends on --type. website (optional): scroll-scrub = the animated website, engine pre-built; omit for non-animated. app (required): app-detail | preset | studio | custom (bare scaffold; only when explicitly requested)
+      --type string                      what to build (required; the user's choice — ask them): website (standalone, no Higgsfield integration) | app (Higgsfield-integrated: Sign in with Higgsfield + SDK generation)
+
+Global Flags:
+      --json       print raw JSON responses
+      --no-color   disable color output
+
+
+$ higgsfield generate cost --help
+Estimate credits without creating a job.
+For models, params and media flags match generate create. Local file paths are auto-uploaded.
+Run `higgsfield model get <job_type>` or `higgsfield workflow get <workflow_name>` to inspect accepted params.
+
+Usage:
+  higgsfield generate cost <job_type>|workflow <workflow_name> [--param value]... [flags]
+
+Examples:
+  higgsfield generate cost nano_banana_2 --prompt "cinematic product photo"
+  higgsfield generate cost <video_model> --prompt "slow push-in shot" --image ./first.png
+  higgsfield generate cost workflow reframe --duration 7.1 --resolution 1080p
+
+Flags:
+  -h, --help   help for cost
+
+Global Flags:
+      --json       print raw JSON responses
+      --no-color   disable color output

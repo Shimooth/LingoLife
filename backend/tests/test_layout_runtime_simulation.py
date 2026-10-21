@@ -178,7 +178,10 @@ def test_city_compiler_uses_authored_anchors_and_connected_road_distance():
     assert baseline_route is not None and moved_route is not None
     assert baseline_route["distance"] > moved_route["distance"]
     assert baseline_route["road_node_ids"] != moved_route["road_node_ids"]
-    assert moved_route["points"][0] == moved["locations"]["shared-home"]["position"]
+    # The themed shared home starts at its authored front door; its semantic
+    # location anchor remains the building centre for map projection.
+    home = moved["locations"]["shared-home"]
+    assert moved_route["points"][0] == home.get("pedestrian_position", home["position"])
     assert moved_route["points"][-1] == moved["locations"]["innovation_hub"]["position"]
 
     # The compiled route follows reciprocal road ports, rather than drawing a

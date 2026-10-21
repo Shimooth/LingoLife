@@ -409,6 +409,11 @@ class LifeWorldService:
             self._refresh_layout_contract()
             for _attempt in range(3):
                 stored = self.db.get_life_world_state(player_id)
+                # The first meal is an explicit, resumable tutorial. Hold its
+                # world clock so autonomous eating cannot consume the need
+                # before the player learns to feed; finish releases the hold.
+                if stored and stored.get("arrival_hold"):
+                    return stored
                 expected_revision = int(stored.get("revision", 0)) if stored else 0
                 if stored is None:
                     home_mapping = self._home_mapping(player_id, profile_entries)

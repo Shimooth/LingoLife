@@ -29,7 +29,8 @@ logger = logging.getLogger(__name__)
 ANIMATIONS = {"talk", "listen", "happy", "sad", "look_around", "idle"}
 ENDINGS = {"boundary_respected", "decision_reached", "return_to_activity", "unresolved_pause"}
 PERSONA_FIELDS = ("name", "age", "personality", "interests", "likes", "dislikes", "quirks",
-                  "habits", "boundaries", "occupation", "householdRole", "romanceEnabled")
+                  "habits", "boundaries", "occupation", "householdRole", "romanceEnabled",
+                  "residentNicknames")
 FACT_FIELDS = {"initiator_id", "target_id", "target_busy", "prepared_by", "consumed_by",
                "resource_kind", "resource_available", "available", "owner_id", "borrower_id",
                "responsible_id", "waiting_ids", "occupied_by", "action_type", "location_id"}

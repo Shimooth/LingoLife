@@ -1,6 +1,6 @@
 import {useEffect,useMemo,useRef} from 'react'
 import {useFrame,useLoader} from '@react-three/fiber'
-import {AnimationMixer,FileLoader,LoopOnce,LoopRepeat,Vector3,Quaternion,type Group} from 'three'
+import {AnimationMixer,FileLoader,LoopOnce,LoopRepeat,Vector3,Quaternion,type AnimationAction,type Group} from 'three'
 import type {CharacterFamily} from './characterAssets'
 import {retargetLifeMotion,type LifeMotion,type LifeMotionLibrary} from './lifeRetarget'
 import {solveHandContact} from './handContact'
@@ -17,10 +17,12 @@ export function LifeRigAnimation({model,family,motion,paused=false,variation=0,a
  const clip=useMemo(()=>retargetLifeMotion(library,model,family,motion),[library,model,family,motion])
  const mixer=useMemo(()=>new AnimationMixer(model),[model])
  const continuity=useMemo(()=>rigPoseContinuity(model),[model])
- const action=useMemo(()=>mixer.clipAction(clip),[mixer,clip])
+ const activeAction=useRef<AnimationAction|null>(null)
  const previousTurn=useRef<{key:string;progress:number}|undefined>(undefined)
  const once=['Sit_Chair_Down','Sit_Chair_StandUp','Waving','Chop'].includes(motion)
  useFrame((_,delta)=>{
+  const action=activeAction.current
+  if(!action)return
   if(paused&&!performancePose)return
   // The driver can publish the next clip/time one RAF before React commits
   // that clip. Keep the last rendered pose instead of sampling the old clip
@@ -92,13 +94,22 @@ export function LifeRigAnimation({model,family,motion,paused=false,variation=0,a
   continuity.begin(.22)
   mixer.stopAllAction()
   continuity.restoreAnimation()
+  // clipAction binds mutable mixer resources. Create it at setup, never in
+  // render: StrictMode replays setup after cleanup has uncached these bindings.
+  const action=mixer.clipAction(clip)
+  activeAction.current=action
   action.reset().setLoop(once?LoopOnce:LoopRepeat,once?1:Infinity)
   action.clampWhenFinished=once
   action.setEffectiveTimeScale(1).setEffectiveWeight(1).play()
   mixer.update(0)
   continuity.saveAnimation()
   continuity.finish(0)
- },[action,continuity,mixer,once])
- useEffect(()=>()=>{mixer.stopAllAction();mixer.uncacheRoot(model);continuity.restoreVisible()},[continuity,mixer,model])
+  return ()=>{
+   if(activeAction.current===action)activeAction.current=null
+   mixer.stopAllAction()
+   mixer.uncacheRoot(model)
+   continuity.restoreVisible()
+  }
+ },[clip,continuity,mixer,model,once])
  return null
 }

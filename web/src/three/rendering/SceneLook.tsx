@@ -18,13 +18,13 @@ export function SceneLook({ exposure = STUDIO_LOOK.exposure }: { exposure?: numb
 }
 
 /** Shared soft miniature studio rig. No remote HDR, bloom, veil or scene background. */
-export function SceneLighting({ portrait = false }: { portrait?: boolean }) {
+export function SceneLighting({ portrait = false, areaSize = 7 }: { portrait?: boolean; areaSize?: number }) {
   return <>
     <ambientLight intensity={STUDIO_LOOK.ambient} color="#fff5e9" />
     <hemisphereLight args={[STUDIO_LOOK.fillColor, STUDIO_LOOK.groundColor, STUDIO_LOOK.hemisphere]} />
-    <directionalLight position={[-3.5, 8, 5]} intensity={STUDIO_LOOK.key} color={STUDIO_LOOK.keyColor} castShadow
-      shadow-mapSize={[1024, 1024]} shadow-camera-left={-7} shadow-camera-right={7} shadow-camera-top={7} shadow-camera-bottom={-7}
-      shadow-camera-near={.5} shadow-camera-far={26} shadow-bias={-.00015} shadow-normalBias={.025} shadow-radius={4} shadow-intensity={.8} />
+    <directionalLight position={areaSize>7?[-10,16,11]:[-3.5, 8, 5]} intensity={STUDIO_LOOK.key} color={STUDIO_LOOK.keyColor} castShadow
+      shadow-mapSize={[1024, 1024]} shadow-camera-left={-areaSize} shadow-camera-right={areaSize} shadow-camera-top={areaSize} shadow-camera-bottom={-areaSize}
+      shadow-camera-near={.5} shadow-camera-far={areaSize>7?48:26} shadow-bias={-.00015} shadow-normalBias={.025} shadow-radius={4} shadow-intensity={.8} />
     <directionalLight position={[5, 3, 3]} intensity={STUDIO_LOOK.fill} color={STUDIO_LOOK.fillColor} />
     {portrait&&<directionalLight position={[0,2,7]} intensity={.65} color="#fff4e4"/>}
     <directionalLight position={[1, 5, -4]} intensity={portrait ? .9 : .45} color="#ffdfb2" />

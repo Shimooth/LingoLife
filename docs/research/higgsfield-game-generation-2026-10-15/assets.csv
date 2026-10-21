@@ -1,0 +1,10 @@
+id,kind,purpose,proposed_source,status
+reference_room,image,Ground-truth room composition and camera,Nintendo official room screenshot,Reference frame not yet locked
+resident_baseline,rigged_3d,Existing local comparison baseline,web/experiments/mii-skill-study/assets/reference-blender.glb,Available locally
+resident_ai_test,rigged_3d,One Higgsfield native-generation quality test,image_to_3d after model-contract and price lookup,Not submitted
+resident_second,rigged_3d,Second participant in interaction,Existing local parameter variation or later quoted generation,Proposed only
+room_shell,3d,Floor walls window doorway,Measured reconstruction from locked reference,Not built
+room_furniture,3d,Only visible furniture from the reference,Measured modular models or quoted generation,Not built
+interaction_item,3d,One item used in the playable interaction,Local simple geometry,Not built
+interaction_ui,ui,Talk give-item response and status controls,Measured HTML/CSS from reference,Not built
+interaction_audio,audio,One optional sound cue,Separate source and quote if required,Optional and not submitted

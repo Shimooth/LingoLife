@@ -1,0 +1,73 @@
+{
+  "source_archives": {
+    "Tiny_Treats_Bakery_Interior_Free_1.1.zip": "1754373c399dd9b7eb074cc12367ea8f31ffc2cf7d1a9f8027b9661a0aafb562"
+  },
+  "files": [
+    {
+      "file": "counter_table.gltf",
+      "sha256": "907465a546e391152d1f99c2a670965caf9c512a4a06ad735216e3bfb5f94704",
+      "source": "Tiny Treats Bakery Interior 1.1 FREE",
+      "url": "https://tinytreats.itch.io/bakery-interior",
+      "license": "CC0-1.0",
+      "bytes": 3511,
+      "modification": "none"
+    },
+    {
+      "file": "counter_table.bin",
+      "sha256": "90bc81a2f7ee63c9bcb73e5829c50f70861a61be4b05dbb38151f6f4ce07b4f9",
+      "source": "Tiny Treats Bakery Interior 1.1 FREE",
+      "url": "https://tinytreats.itch.io/bakery-interior",
+      "license": "CC0-1.0",
+      "bytes": 14840,
+      "modification": "none"
+    },
+    {
+      "file": "cash_register.gltf",
+      "sha256": "43aed74637cf10432d996a18f03ed580f6cbc346b5f91d9592473370ed8ea1cc",
+      "source": "Tiny Treats Bakery Interior 1.1 FREE",
+      "url": "https://tinytreats.itch.io/bakery-interior",
+      "license": "CC0-1.0",
+      "bytes": 6340,
+      "modification": "none"
+    },
+    {
+      "file": "cash_register.bin",
+      "sha256": "137696f23abff07b2feb2342663174594a3cec7a6dadf691b7c365fcb6edca5e",
+      "source": "Tiny Treats Bakery Interior 1.1 FREE",
+      "url": "https://tinytreats.itch.io/bakery-interior",
+      "license": "CC0-1.0",
+      "bytes": 75392,
+      "modification": "none"
+    },
+    {
+      "file": "tiny_treats_texture_1.png",
+      "sha256": "31e5c7c81bfba644a59797b1907519592c7728d4af98a705449975dd929482e5",
+      "source": "Tiny Treats Bakery Interior 1.1 FREE",
+      "url": "https://tinytreats.itch.io/bakery-interior",
+      "license": "CC0-1.0",
+      "bytes": 20974,
+      "modification": "none"
+    },
+    {
+      "file": "emote_heart.png",
+      "sha256": "d46f28139a3c5168324566d4b55df8ebe75b9d098df20cb06a756c1e252826b3",
+      "source": "Kenney Emotes Pack, Vector Style 6",
+      "url": "https://kenney.nl/assets/emotes-pack",
+      "license": "CC0-1.0",
+      "bytes": 504,
+      "modification": "none"
+    },
+    {
+      "file": "License-Tiny-Treats-Bakery.txt",
+      "sha256": "fc06703bd5a0b1507ecfecb7d4b1f5f737e7baaad105c2b16fcc696a403a8875",
+      "bytes": 876,
+      "modification": "line endings normalized to LF and trailing whitespace removed; license wording unchanged"
+    },
+    {
+      "file": "License-Kenney-Emotes.txt",
+      "sha256": "f1d860bb5c86eaa87f80d19cfa46a21776bdb5dffec56c73f8215ed050162668",
+      "bytes": 480,
+      "modification": "line endings normalized to LF and trailing whitespace removed; license wording unchanged"
+    }
+  ]
+}

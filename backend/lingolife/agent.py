@@ -397,6 +397,14 @@ def compile_persona(profile: Mapping[str, Any], growth: Mapping[str, float] | No
     for words, axis, delta in rules:
         if any(word in text for word in words):
             axes[axis] += delta
+    # Explicit creation sliders override trait inference; subsequent lived
+    # growth still applies to these same axes and therefore to real behavior.
+    authored_axes = profile.get("personalityAxes")
+    if isinstance(authored_axes, Mapping):
+        for axis in axes:
+            value = authored_axes.get(axis)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                axes[axis] = _clamp(value)
     for axis, delta in (growth or {}).items():
         if axis in axes:
             axes[axis] += float(delta)

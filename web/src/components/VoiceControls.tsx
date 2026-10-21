@@ -1,16 +1,18 @@
 import {useEffect,useRef} from 'react'
 import {useVoiceExperience} from '../audio/useVoiceExperience'
+import type {ResidentVoice} from '../arrival/types'
 
 type Props={
  language:'zh'|'en'
  npcText?:string
  disabled?:boolean
  autoRead?:boolean
+ residentVoice?:ResidentVoice|null
  onTranscript:(text:string)=>void
 }
 
-export function VoiceControls({language,npcText,disabled,autoRead=false,onTranscript}:Props){
- const voice=useVoiceExperience({onTranscript}),lastRead=useRef('')
+export function VoiceControls({language,npcText,disabled,autoRead=false,onTranscript,residentVoice}:Props){
+ const voice=useVoiceExperience({onTranscript,residentVoice}),lastRead=useRef('')
  useEffect(()=>{
   if(autoRead&&npcText&&npcText!==lastRead.current){lastRead.current=npcText;voice.speak(npcText)}
  },[autoRead,npcText,voice])

@@ -47,6 +47,10 @@ PROTECTED_PLAYER_TABLES: Mapping[str, str] = {
     "unresolved_threads": "player_id",
     "npc_relationship_bonds": "player_id",
     "relationship_evidence": "player_id",
+    "player_arrival": "player_id",
+    "arrival_receipts": "player_id",
+    "player_neighborhood": "player_id",
+    "neighborhood_receipts": "player_id",
 }
 
 # These rows are still audited, but the shared-household migration is expected

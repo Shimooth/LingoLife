@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Life rig lifecycle regression</title><style>body{margin:0;background:#edf1e7}#root{height:100vh}canvas{display:block}</style></head>
+<body><div id="root"></div><script type="module">
+import React from 'react';
+import {createRoot} from 'react-dom/client';
+import {Canvas, useThree} from '@react-three/fiber';
+import {Character3D} from '/src/three/characters/Character3D.tsx';
+import {defaultAvatar} from '/src/avatar.ts';
+
+// No accounts, API writes or synthetic skeletons. Exercise both shipped rigs
+// under React's real setup -> cleanup -> setup development lifecycle.
+const h=React.createElement;
+window.lifeRigLifecycle={setups:0,cleanups:0};
+function LifecycleProbe(){
+ React.useEffect(()=>{
+  window.lifeRigLifecycle.setups++;
+  return()=>{window.lifeRigLifecycle.cleanups++};
+ },[]);
+ return null;
+}
+function SceneProbe(){
+ const scene=useThree(state=>state.scene);
+ React.useEffect(()=>{window.lifeRigScene=scene},[scene]);
+ return null;
+}
+function Fixture(){
+ const [family,setFamily]=React.useState('chibi');
+ const [motion,setMotion]=React.useState('Use_Item');
+ const [visible,setVisible]=React.useState(true);
+ React.useEffect(()=>{window.lifeRigControls={setFamily,setMotion,setVisible}},[]);
+ const avatar={...defaultAvatar,model:family==='city'?'city-01':'chibi'};
+ return h(Canvas,{camera:{position:[0,1.5,6],fov:34}},
+  h('ambientLight',{intensity:2}),h('directionalLight',{position:[3,6,4],intensity:3}),
+  h(React.StrictMode,null,h(SceneProbe),visible&&h(Character3D,{avatar,lifeMotion:motion,name:'Lifecycle resident'})));
+}
+createRoot(document.getElementById('root')).render(h(React.StrictMode,null,h(LifecycleProbe),h(Fixture)));
+</script></body></html>

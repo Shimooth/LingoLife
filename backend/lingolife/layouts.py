@@ -534,4 +534,6 @@ def default_world_layout() -> dict[str, Any]:
         },
         "interior": {"rooms": _default_rooms()},
     }
-    return WorldLayout.model_validate(value).model_dump(mode="json")
+    from .town_layout import plan_resident_town
+
+    return WorldLayout.model_validate(plan_resident_town(value)).model_dump(mode="json")

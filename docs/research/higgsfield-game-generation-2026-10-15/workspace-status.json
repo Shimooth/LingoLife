@@ -1,0 +1,6 @@
+{
+  "command": "higgsfield workspace list --json",
+  "exit_code": 2,
+  "authenticated": false,
+  "status": "authentication_required"
+}

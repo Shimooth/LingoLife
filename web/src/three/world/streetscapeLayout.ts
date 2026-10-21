@@ -1,5 +1,6 @@
 import {CITY_PLATFORM_OUTLINE,ROAD_TILE_SCALE,type RoadTilePlacement,type WorldPoint} from './worldData.ts'
 import type {WorldLayoutPlacement} from '../../worldLayout.ts'
+import {TOWN_CENTER_RESERVE} from './townCenterLayout.ts'
 import type {SharedDrinkLayout} from '../interiors/sharedDrinkLayout.ts'
 
 type Point2=readonly [number,number]
@@ -7,6 +8,7 @@ export type StreetscapeFootprint={position:Point2;half:Point2;rotation:number}
 export type StreetscapeBuilding={id?:string;position:Point2;rotation:number;scale:number}
 export type StreetscapeLandmark=StreetscapeBuilding&{locationId:string;kind:string}
 export type StreetscapeConstraints={
+ townCenter?:boolean
  roads:readonly (RoadTilePlacement&{scale?:number})[]
  buildings:readonly StreetscapeBuilding[]
  landmarks:readonly StreetscapeLandmark[]
@@ -66,11 +68,12 @@ const fixedCourtyards:readonly StreetscapeFootprint[]=[
 export type StreetscapeRejection='road'|'building'|'courtyard'|'obstacle'|'pedestrian'|'outside'
 /** Reserve full visual road modules, including the sidewalks. Never compensate
  * a bad authored layout by moving user objects or obstructing navigation. */
-export function validateStreetscapeFootprint(item:StreetscapeFootprint,constraints:StreetscapeConstraints):StreetscapeRejection|null{
+export function validateStreetscapeFootprint(item:StreetscapeFootprint,constraints:StreetscapeConstraints,allowTownSquare=false):StreetscapeRejection|null{
  if(corners(item).some(point=>!insidePlatform(point)||CITY_PLATFORM_OUTLINE.some((start,index)=>distanceToSegment(point,start,CITY_PLATFORM_OUTLINE[(index+1)%CITY_PLATFORM_OUTLINE.length])<.2)))return 'outside'
- if(constraints.roads.some(road=>streetscapeFootprintsOverlap(item,{position:road.position,half:[road.scale??ROAD_TILE_SCALE,road.scale??ROAD_TILE_SCALE],rotation:road.rotation},.22)))return 'road'
+ if(constraints.roads.some(road=>streetscapeFootprintsOverlap(item,{position:road.position,half:[road.scale??ROAD_TILE_SCALE,road.scale??ROAD_TILE_SCALE],rotation:road.rotation},allowTownSquare?.04:.22)))return 'road'
  if(constraints.buildings.some(building=>streetscapeFootprintsOverlap(item,{position:building.position,half:[Math.max(1.3,1.021*building.scale),Math.max(1.3,1.021*building.scale)],rotation:building.rotation},.22)))return 'building'
- if(fixedCourtyards.some(courtyard=>streetscapeFootprintsOverlap(item,courtyard,.16)))return 'courtyard'
+ if(constraints.townCenter&&!allowTownSquare&&streetscapeFootprintsOverlap(item,TOWN_CENTER_RESERVE,.16))return 'courtyard'
+ if(fixedCourtyards.some((courtyard,index)=>!(constraints.townCenter&&index===1)&&streetscapeFootprintsOverlap(item,courtyard,.16)))return 'courtyard'
  if(constraints.obstacles?.some(obstacle=>streetscapeFootprintsOverlap(item,obstacle,.16)))return 'obstacle'
  // Radius is deliberately conservative around diagonals: a new tree cannot
  // intrude into the character's shoulders even when the path cuts a corner.
@@ -128,6 +131,7 @@ export function resolveStreetscapeLayout(constraints:StreetscapeConstraints):Str
   const connector:StreetscapePaving={id:`walk-link-${first}-${second}`,position,half,rotation:0,tone:'stone'}
   if(corners(connector).some(point=>!insidePlatform(point)))continue
   if(constraints.roads.some(road=>streetscapeFootprintsOverlap(connector,{position:road.position,half:[road.scale??1.3,road.scale??1.3],rotation:road.rotation},.01)))continue
+  if(constraints.townCenter&&streetscapeFootprintsOverlap(connector,TOWN_CENTER_RESERVE,.05))continue
   if(fixedCourtyards.some(item=>streetscapeFootprintsOverlap(connector,item,.05)))continue
   if(constraints.obstacles?.some(item=>streetscapeFootprintsOverlap(connector,item,.05)))continue
   if(parcels.some((item,index)=>index!==first&&index!==second&&streetscapeFootprintsOverlap(connector,item,.01)))continue

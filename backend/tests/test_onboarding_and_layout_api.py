@@ -466,8 +466,9 @@ def test_published_layout_default_is_complete_legal_and_public(tmp_path):
     assert payload["updated_at"] is None
     layout = payload["layout"]
     assert layout["version"] == 1
-    assert {key: len(value) for key, value in layout["city"].items()} == {
-        "roads": 100, "buildings": 54, "props": 40, "decorations": 35,
+    assert layout["city"]["theme"] == "resident-town-v1"
+    assert {key: len(layout["city"][key]) for key in ("roads", "buildings", "props", "decorations")} == {
+        "roads": 100, "buildings": 54, "props": 38, "decorations": 32,
     }
     assert {room["id"] for room in layout["interior"]["rooms"]} == {
         "living-room", "kitchen", "bathroom", "bedroom",
@@ -479,7 +480,7 @@ def test_published_layout_default_is_complete_legal_and_public(tmp_path):
     building_positions = {(item["position"]["x"], item["position"]["z"])
                           for item in layout["city"]["buildings"]}
     assert not road_positions & building_positions
-    all_ids = [item["id"] for values in layout["city"].values() for item in values]
+    all_ids = [item["id"] for key in ("roads", "buildings", "props", "decorations") for item in layout["city"][key]]
     assert len(all_ids) == len(set(all_ids))
     assert {item["position"]["y"] for item in layout["city"]["roads"]} == {.245}
     assert {item["position"]["y"] for item in layout["city"]["buildings"]} == {.369}
@@ -504,9 +505,9 @@ def test_admin_can_publish_persist_and_reset_a_strictly_validated_layout(tmp_pat
                        json={"password": "test-admin"}).status_code == 200
     default = client.get("/api/v1/admin/world-layout").json()["layout"]
     edited = deepcopy(default)
-    shared_home = next(item for item in edited["city"]["buildings"]
-                       if item["id"] == "shared-home")
-    shared_home["position"]["x"] += 2.6
+    theater = next(item for item in edited["city"]["buildings"]
+                   if item["id"] == "landmark-aurora_theater")
+    theater["position"]["x"] += 2.6
 
     saved = client.put("/api/v1/admin/world-layout", headers=origin, json={"layout": edited})
     assert saved.status_code == 200, saved.text

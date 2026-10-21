@@ -1,0 +1,309 @@
+{
+  "schema_version": 1,
+  "theme": "resident-town-v1",
+  "plaza": {
+    "location_id": "sunny_plaza",
+    "entrance": [
+      0,
+      2.6
+    ],
+    "center": [
+      0,
+      6.5
+    ],
+    "bounds": {
+      "min": [
+        -6.5,
+        1.5
+      ],
+      "max": [
+        6.5,
+        9.1
+      ]
+    },
+    "paving": {
+      "position": [
+        0,
+        6.0
+      ],
+      "half": [
+        3.6,
+        3.05
+      ]
+    },
+    "clearance": 0.22
+  },
+  "facilities": {
+    "fountain": {
+      "position": [
+        0,
+        6.5
+      ],
+      "rotation": 0,
+      "half": [
+        0.99,
+        0.99
+      ]
+    },
+    "wardrobe": {
+      "position": [
+        5.2,
+        2.6
+      ],
+      "rotation": -1.5708,
+      "half": [
+        1.2,
+        1.2
+      ]
+    }
+  },
+  "building_roles": {
+    "shared-home": "home",
+    "landmark-moonlight_cafe": "cafe",
+    "landmark-city_hall": "community",
+    "landmark-city_museum": "community",
+    "landmark-old_town_market": "community",
+    "landmark-sunny_plaza": "plaza"
+  },
+  "relocations": {
+    "shared-home": {
+      "position": [
+        -5.2,
+        2.6
+      ],
+      "rotation": 1.5708
+    },
+    "landmark-moonlight_cafe": {
+      "position": [
+        -5.2,
+        7.8
+      ],
+      "rotation": 1.5708
+    },
+    "landmark-sunny_plaza": {
+      "position": [
+        0,
+        2.6
+      ],
+      "rotation": 3.1416
+    },
+    "landmark-aurora_theater": {
+      "position": [
+        -20.8,
+        10.4
+      ],
+      "rotation": -1.5708
+    },
+    "landmark-greenway_gym": {
+      "position": [
+        -10.4,
+        5.2
+      ],
+      "rotation": 0
+    }
+  },
+  "walkways": [
+    {
+      "id": "plaza-entrance",
+      "points": [
+        [
+          0,
+          1.04
+        ],
+        [
+          0,
+          2.6
+        ],
+        [
+          0,
+          4.9
+        ]
+      ],
+      "width": 1.05
+    },
+    {
+      "id": "front-door-link",
+      "points": [
+        [
+          -3.65,
+          2.6
+        ],
+        [
+          -2.6,
+          2.6
+        ],
+        [
+          0,
+          2.6
+        ],
+        [
+          2.6,
+          2.6
+        ],
+        [
+          3.65,
+          2.6
+        ]
+      ],
+      "width": 0.95
+    },
+    {
+      "id": "plaza-west",
+      "points": [
+        [
+          -2.6,
+          2.6
+        ],
+        [
+          -2.6,
+          4.9
+        ],
+        [
+          -2.6,
+          6.5
+        ],
+        [
+          -2.6,
+          7.8
+        ],
+        [
+          -2.6,
+          8.1
+        ]
+      ],
+      "width": 0.95
+    },
+    {
+      "id": "plaza-east",
+      "points": [
+        [
+          2.6,
+          2.6
+        ],
+        [
+          2.6,
+          4.9
+        ],
+        [
+          2.6,
+          6.5
+        ],
+        [
+          2.6,
+          8.1
+        ]
+      ],
+      "width": 0.95
+    },
+    {
+      "id": "plaza-north",
+      "points": [
+        [
+          -2.6,
+          4.9
+        ],
+        [
+          0,
+          4.9
+        ],
+        [
+          2.6,
+          4.9
+        ]
+      ],
+      "width": 0.95
+    },
+    {
+      "id": "plaza-south",
+      "points": [
+        [
+          -2.6,
+          8.1
+        ],
+        [
+          0,
+          8.1
+        ],
+        [
+          2.6,
+          8.1
+        ]
+      ],
+      "width": 0.95
+    },
+    {
+      "id": "cafe-to-plaza",
+      "points": [
+        [
+          -3.65,
+          7.8
+        ],
+        [
+          -2.6,
+          7.8
+        ]
+      ],
+      "width": 0.95
+    }
+  ],
+  "building_envelope": {
+    "half": [
+      1.2,
+      1.2
+    ],
+    "ground_y": 0.369,
+    "scale": 1
+  },
+  "camera": {
+    "target": [
+      0,
+      0.5,
+      4.6
+    ],
+    "position": [
+      14.5,
+      17.5,
+      22.5
+    ]
+  },
+  "pedestrian": {
+    "road_portal": {
+      "position": [
+        0,
+        1.04
+      ],
+      "road_position": [
+        0,
+        0
+      ],
+      "corners": [
+        "sw",
+        "se"
+      ]
+    },
+    "destinations": {
+      "shared-home": {
+        "position": [
+          -3.65,
+          2.6
+        ],
+        "rotation": 1.5708
+      },
+      "landmark-moonlight_cafe": {
+        "position": [
+          -3.65,
+          7.8
+        ],
+        "rotation": 1.5708
+      },
+      "landmark-sunny_plaza": {
+        "position": [
+          0,
+          4.9
+        ],
+        "rotation": 0
+      }
+    },
+    "resident_radius": 0.18
+  }
+}

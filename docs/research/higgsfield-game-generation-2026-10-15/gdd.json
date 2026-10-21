@@ -1,0 +1,71 @@
+{
+  "date": "2026-10-15",
+  "timezone": "Asia/Shanghai",
+  "status": "feasibility-only; implementation not started",
+  "requested_target": "one-to-one recreation of the complete Tomodachi Life: Living the Dream",
+  "assessment": "not supportable as a complete one-to-one commitment from available evidence",
+  "proposed_first_stage": {
+    "status": "proposal; scope change not approved",
+    "scope": "one apartment room, two residents, one complete everyday interaction",
+    "camera": "one reference-matched primary camera plus optional inspection orbit",
+    "interaction_sequence": [
+      "enter room",
+      "select resident",
+      "choose talk or give item",
+      "resident responds visibly",
+      "relationship/need state updates",
+      "reload preserves trial state"
+    ],
+    "reference_baseline": "must lock an official room screenshot before geometry or image generation",
+    "allowed_claim": "reference-based playable reconstruction sample",
+    "excluded_from_first_stage": [
+      "full island and all facilities",
+      "complete character editor",
+      "full original event catalogue",
+      "complete voice and facial-animation systems"
+    ]
+  },
+  "style_formula": "Stylized three-dimensional social life simulation with oversized rounded heads, compact bodies, clean graphic facial features, simple rounded furniture, and softly shaded cartoon materials. Use warm cream interiors, pale wood, pastel accents, bright yellow and orange interface accents, and clear role-based colors. Keep a fixed front three-quarter room camera, readable silhouettes, gentle contact shadows, restrained highlights, and crisp interface spacing. Match the selected official reference frame for composition, character scale, furniture placement, and screen hierarchy.",
+  "style_formula_word_count": 74,
+  "style_approval": "pending; not presented as approved",
+  "platform": {
+    "requested_skill": "higgsfield-game-generation",
+    "current_skill": "higgsfield-websites",
+    "current_skill_version": "0.13.0",
+    "migration_date": "2026-08-07",
+    "migration_commit": "383c14a06317e2fccda05544a7ee816b08dbdd7f",
+    "product_type": "game",
+    "category": "simulation",
+    "account_status": "authentication_required",
+    "credits_balance": null,
+    "model_price_quote": null,
+    "native_model_candidates": [
+      "image_to_3d",
+      "3d_rigging"
+    ],
+    "candidate_parameters": "must be read from live higgsfield model get before use",
+    "workspace_status": "not_selected",
+    "cli_version_verified": "1.1.26"
+  },
+  "generation_budget": {
+    "status": "not authorized or quoted",
+    "initial_character_jobs_max": 1,
+    "initial_character_intent": "quality smoke test before any batch",
+    "estimated_credits": null,
+    "additional_generation": "only after inspecting the first output and establishing the actual quote"
+  },
+  "reuse_candidates": [
+    "web/experiments/mii-skill-study/assets/reference-character.blend",
+    "web/experiments/mii-skill-study/assets/reference-blender.glb"
+  ],
+  "acceptance": [
+    "room layout and camera compared against the locked official frame",
+    "character proportion, face and hair checked from front and three-quarter",
+    "one complete interaction changes simulation state and visible behavior",
+    "save and reload preserve trial state",
+    "all referenced GLB files and animation clips reload successfully",
+    "runtime errors and rendering performance recorded",
+    "differences documented without an invented fidelity percentage"
+  ],
+  "execution_started": false
+}
