@@ -10,6 +10,16 @@ Git 提交约定：今后的提交标题与正文统一使用中文，必要的�
 
 ## 1. 当前交接状态
 
+### 2026-10-22 发布完成：社区玩法、连续共享住宅与创作室入口
+
+- 最终应用 **`33843a54f58fd25dd8393fbbeb0c122009eaab51`** 已推送 `origin/main` 并部署 VPS，包含 508ea43 的累计功能与 `/atelier` 生产静态入口修复；下面“等待解锁／尚未部署／复查进行中”均为历史当时状态，以本节为准。本节是后续纯文档记录，无需为它重新部署应用。暂停的 C 画面分支与本机独立研究没有发布。
+- 后端最终全量 **928 passed**，入口/条件缓存/隔离专项 **5 passed**。正式脚本从干净提交重新执行 `npm ci`、完整 lint、typecheck 和生产 build，均通过；保留已有 Three/App 大包提示。修复包 `/home/lingolife-deploy/lingolife-33843a5.tar`，136,437,760 bytes，SHA-256 **`513b9b9d714061e77d9bc6d33bbe20fe5f32f7f0acaf725d69e0e4df0bf0e6df`**。本机同名包位于 `/private/tmp/`；采用旧包副本作增量基底，实际仅传约 3.7 MB，服务器仍校验完整包。
+- 线上 `.source-revision` 一致、Compose **healthy**、0 重启、近期日志无异常；生活模拟开启，开发万能密码关闭，管理 Cookie Secure 保留。玩家/管理 HTTPS health 均 200，未认证身份/用户接口均 401。根 HTML 及 12 份主入口 JS/CSS 与本地构建逐字节/SHA 一致。玩家 `/atelier` 与 `/atelier/` 均返回正确 HTML，管理域名相同路径 404，未知 API/资源继续 404。
+- 隔离浏览器已实际验收 1280/390px 主站和管理登录、创作室三种实际 WebGL 视图与剧情播放/暂停；62 个正式资源响应无错误，无脚本/控制台异常及开发导出钩子，写请求 0。未登录真实账号、重置或消费玩家进度。十张截图与报告在 `/private/tmp/lingolife-release-online-qa/`；无账号共享住宅与生产预览完整回归见 10 月 21 日记录。线上浏览器验收属于入口与独立样板，不冒充完整真实账号剧情流程。
+- 最新在线备份 **`/opt/lingolife/backups/lingolife-20261022T023510Z.db`**（20,013,056 bytes），在无网络只读挂载、immutable 快照模式下 `PRAGMA quick_check=ok`。当前回滚树 **`/home/lingolife-deploy/lingolife-releases/rollback-20261022T023508Z`** 为中间 508ea43，旧镜像 **`7abb8d39f2b253c837df883bc54192c38ee6b3c6723c696104cbbfad6895a09b`**。回到本轮之前 d625244 可用首轮回滚树 `rollback-20261022T022840Z` 及既有对应发布包；应用回滚不要直接覆盖玩家数据库。既有脚本保留最新三个代码回滚树，数据库备份和发布包保留。
+- 保留现有合法已发布布局 `layout-d6a20fd96f77aa201118ec78540cc54515077212b25bb03e95421521737a0798`，没有强制套用新 default、重置账号或修改生产秘密。增量四表已存在且正常启动。若以后明确要求迁移社区规划，再执行只读 plan/拓扑验证/版本 CAS 流程。
+- 本机 SSH 已仅为 `lingolife-vps` 持久化 `UseKeychain yes`、`AddKeysToAgent yes`，保留原地址、用户与加密密钥，原配置备份为 `~/.ssh/config.lingolife-backup-20261022T022447Z`。已以 `IdentityAgent=none` 绕过缓存验证钥匙串自动解锁成功；正常登录且钥匙串可用时无需重复手动 ssh-add，锁定/授权变化仍需本机交互。口令没有进入聊天、命令参数、项目或发布包。专用 QA Chrome 19243 在收尾时关闭；没有另起常驻 agent 或降低钥匙串保护。
+
 ### 2026-10-22 续发：SSH 自动加载与原创样板线上入口
 
 - 用户要求解释钥匙串 `User interaction is not allowed` 并持久化免重复执行 ssh-add。已只为本机 `~/.ssh/config` 中 `lingolife-vps` 增加 `UseKeychain yes`、`AddKeysToAgent yes` 和兼容的 `IgnoreUnknown UseKeychain`，保留既有主机、用户、IdentityFile 与 IdentitiesOnly，并备份原文件。口令没有进入聊天、命令参数或项目。正常 agent 连接与 `IdentityAgent=none` 绕过缓存连接均成功，证明当前钥匙串可以自动提供解锁口令；系统锁定或授权变化仍可能需要本机交互。第 4 节补充准确配置与诊断，去掉每次另起 agent 的示例。
