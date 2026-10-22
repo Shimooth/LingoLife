@@ -91,9 +91,53 @@ def test_compresses_large_static_assets_without_touching_api(tmp_path):
     assert "content-encoding" not in health.headers
 
 
+def test_atelier_entries_serve_the_player_index_with_existing_static_cache(tmp_path):
+    web_root = tmp_path / "web" / "dist"
+    web_root.mkdir(parents=True)
+    index = '<main>LingoLife</main>' + '<!-- player entry -->' * 100
+    (web_root / "index.html").write_text(index, encoding="utf-8")
+    c = client(tmp_path, web_root=web_root)
+    headers = {"Host": "lingolife.shimooth.me", "Accept-Encoding": "gzip"}
+    root = c.get("/", headers=headers)
+    assert root.status_code == 200
+    assert c.get("/", headers={**headers, "If-None-Match": root.headers["etag"]}).status_code == 304
+
+    for path in ("/atelier", "/atelier/"):
+        response = c.get(path, headers=headers)
+        assert response.status_code == 200
+        assert response.text == root.text == index
+        assert response.headers["content-type"].startswith("text/html")
+        assert response.headers["content-encoding"] == root.headers["content-encoding"] == "gzip"
+        for name in ("etag", "last-modified", "cache-control"):
+            assert response.headers.get(name) == root.headers.get(name)
+        unchanged = c.get(path, headers={**headers, "If-None-Match": root.headers["etag"]})
+        assert unchanged.status_code == 304
+
+
+def test_atelier_entries_keep_admin_host_and_api_boundaries(tmp_path):
+    web_root = tmp_path / "web" / "dist"
+    web_root.mkdir(parents=True)
+    (web_root / "index.html").write_text("<main>LingoLife</main>", encoding="utf-8")
+    c = client(tmp_path, web_root=web_root)
+
+    for host in ("lingolife.shimooth.me", "lingolife.admin.shimooth.me"):
+        headers = {"Host": host}
+        assert c.get("/", headers=headers).status_code == 200
+        for path in ("/api/v1/unknown", "/unknown", "/atelier/unknown", "/assets/unknown.js"):
+            assert c.get(path, headers=headers).status_code == 404
+        for path in ("/api/v1/auth/me", "/api/v1/admin/users"):
+            assert c.get(path, headers=headers).status_code == 401
+    for path in ("/atelier", "/atelier/"):
+        response = c.get(path, headers={"Host": "lingolife.admin.shimooth.me"})
+        assert response.status_code == 404
+        assert "<main>" not in response.text
+
+
 def test_missing_web_root_leaves_api_available(tmp_path):
     c = client(tmp_path)
     assert c.get("/").status_code == 404
+    assert c.get("/atelier").status_code == 404
+    assert c.get("/atelier/").status_code == 404
     assert c.get("/api/v1/health").status_code == 200
 
 

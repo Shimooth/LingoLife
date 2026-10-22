@@ -16,6 +16,7 @@ from typing import Optional
 from contextlib import asynccontextmanager
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
@@ -1794,9 +1795,21 @@ def create_app(settings: Settings | None = None, provider: DialogueProvider | No
     # escape this directory and serves index.html for the root request.
     web_root = Path(settings.web_root).resolve()
     if web_root.is_dir():
+        admin_hostname = urlsplit(settings.admin_allowed_origin).hostname
+
+        class PlayerStaticFiles(StaticFiles):
+            async def get_response(self, path, scope):
+                # Explicit SPA entries only: preserve real static/API 404s and
+                # StaticFiles' conditional caching for the same index file.
+                if scope.get("path") in {"/atelier", "/atelier/"}:
+                    if Request(scope).url.hostname == admin_hostname:
+                        raise HTTPException(404, "Not Found")
+                    path = "index.html"
+                return await super().get_response(path, scope)
+
         # Compress only static files, leaving the NDJSON chat stream untouched.
         static_app = GZipMiddleware(
-            StaticFiles(directory=web_root, html=True),
+            PlayerStaticFiles(directory=web_root, html=True),
             minimum_size=1024,
             compresslevel=6,
         )

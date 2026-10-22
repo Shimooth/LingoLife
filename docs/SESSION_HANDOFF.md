@@ -1,6 +1,6 @@
 # LingoLife 双设备与 Codex 交接手册
 
-最后更新：2026-10-21（Asia/Shanghai）
+最后更新：2026-10-22（Asia/Shanghai）
 
 这是公司 Mac、家用 Windows 和所有 Codex 会话的唯一交接入口。每次换设备前更新“当前交接状态”，提交并推送本文件；另一台设备只相信远端 Git、当前工作树和实时检查，不根据旧聊天猜测状态。
 
@@ -9,6 +9,12 @@
 Git 提交约定：今后的提交标题与正文统一使用中文，必要的文件名、标识符和产品名保留英文；不重写历史提交。仓库根目录 `AGENTS.md` 同步记录此规则，Mac 与 Windows 均遵循。
 
 ## 1. 当前交接状态
+
+### 2026-10-22 续发：SSH 自动加载与原创样板线上入口
+
+- 用户要求解释钥匙串 `User interaction is not allowed` 并持久化免重复执行 ssh-add。已只为本机 `~/.ssh/config` 中 `lingolife-vps` 增加 `UseKeychain yes`、`AddKeysToAgent yes` 和兼容的 `IgnoreUnknown UseKeychain`，保留既有主机、用户、IdentityFile 与 IdentitiesOnly，并备份原文件。口令没有进入聊天、命令参数或项目。正常 agent 连接与 `IdentityAgent=none` 绕过缓存连接均成功，证明当前钥匙串可以自动提供解锁口令；系统锁定或授权变化仍可能需要本机交互。第 4 节补充准确配置与诊断，去掉每次另起 agent 的示例。
+- 已继续此前授权部署：508ea43 包上传后 SHA-256 一致，既有脚本在线备份并切换成功；容器 healthy、0 重启，备份 `lingolife-20261022T022842Z.db` 只读 immutable 检查 `quick_check=ok`，四张新增表存在、生活模拟开启、本地万能密码关闭，13 份 HTTPS 产物与本地构建一致。保留原已发布布局，没有重置玩家数据。
+- 真实线上浏览器发现 `/atelier` 缺少后端入口：Vite 的 SPA fallback 曾掩盖此问题，Starlette 静态目录不会自动返回根 index。此次最小修复仅为玩家 `/atelier`、`/atelier/` 提供同一 index，保留 ETag/304/GZip；管理域名继续 404，未知 API/资源维持 404，认证保护不变。专项 **5 passed**，后端全量复查进行中。修复后将沿同一校验、备份与回滚流程续发，最终版本与验收另记。
 
 ### 2026-10-21 提交与发布包完成：等待本机部署密钥解锁
 
@@ -417,6 +423,7 @@ Host lingolife-vps
 
 ```sshconfig
 Host lingolife-vps
+  IgnoreUnknown UseKeychain
   AddKeysToAgent yes
   UseKeychain yes
 ```
@@ -424,13 +431,16 @@ Host lingolife-vps
 然后在普通 Terminal（不是受限子进程）执行一次：
 
 ```bash
-eval "$(ssh-agent -s)"
-ssh-add --apple-use-keychain ~/.ssh/lingolife_deploy
+/usr/bin/ssh-add --apple-use-keychain ~/.ssh/lingolife_deploy
 ssh -o BatchMode=yes lingolife-vps 'id'
 ssh -T git@github.com
 ```
 
-私钥口令由用户创建，项目和 Codex 都不知道。Keychain 保存的是解锁能力，不会把私钥放进仓库。
+私钥口令由用户创建，只在本机终端或系统授权窗口输入，不进入聊天、命令参数或项目。Keychain 安全保存私钥解锁口令，私钥文件仍保留加密。正常 macOS 图形登录会话使用系统已有 agent，不要在每次打开终端时重复启动新的 agent。
+
+`UseKeychain` 负责钥匙串口令读取/保存，`AddKeysToAgent` 负责将已解锁密钥加入现有 agent；两者作用不同。正常登录且钥匙串可访问时，后续直接 `ssh lingolife-vps` 即可。钥匙串被单独锁定、授权变化或任务没有可用用户会话时，仍可能需要本机交互，配置不能绕过系统授权。参考 [Apple TN2449](https://developer.apple.com/library/archive/technotes/tn2449/_index.html)。
+
+若要验证并非只依赖当前 agent 缓存，可执行一次 `ssh -o BatchMode=yes -o IdentityAgent=none lingolife-vps 'id -un'`。该命令只对本次连接绕过 agent，不移除已加载身份。Apple `ssh -G` 不一定显示 `UseKeychain`，不要仅凭它缺少该输出就判断该选项未开启。
 
 ### 4.2 Windows 生成独立密钥
 
